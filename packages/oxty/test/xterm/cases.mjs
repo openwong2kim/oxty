@@ -33,7 +33,8 @@ const enc = new TextEncoder();
 const TAIL = enc.encode('\x1b[?2026lZ한\r\nnext');
 const CSI_TAIL = enc.encode('44mTAIL\x1b[0m');
 const UTF8_TAIL = Uint8Array.of(0x98, 0x80, 0x21);
-const tailFor = (text) => (text.endsWith('\x1b[31;') ? CSI_TAIL : TAIL);
+// 끊긴 CSI는 파라미터를 잇는다. 시퀀스 안의 C0(LF)가 끝에 있어도 같다.
+const tailFor = (text) => (/\x1b\[31;\n?$/.test(text) ? CSI_TAIL : TAIL);
 
 // wmux bench/rust-snapshot-parity.ts `cases`: [text, cols], rows 6, scrollback 100
 const ANSI = [
@@ -87,7 +88,8 @@ const TEXT = [
 ];
 
 // 알려진 차이를 하나씩 재현하는 최소 입력(20x6). known-differences.json 항목과 짝이고, 엔진이 고쳐지면 stale로 실패한다.
-// 차이가 없음을 고정하는 회귀 입력도 둔다(osc8-underline, tab-pending-wrap, decscusr, deccolm).
+// 차이가 없음을 고정하는 회귀 입력도 둔다(osc8-underline, tab-pending-wrap, decscusr, deccolm,
+// 직렬화기 수정의 B 회귀 tab-cell, origin-mode, c0-inside-csi).
 const KNOWN = {
   'sgr-21': '\x1b[21mX',
   'sgr-53': '\x1b[53mO',
@@ -109,6 +111,9 @@ const KNOWN = {
   'tab-pending-wrap': 'abcdefghijklmnopqrst\tZ',
   decscusr: '\x1b[5 q',
   deccolm: '\x1b[?3hX',
+  'tab-cell': 'a\tb\tc',
+  'origin-mode': '\x1b[?6h\x1b[3;5HX',
+  'c0-inside-csi': 'ab\x1b[31;\n',
 };
 
 /**

@@ -1,5 +1,6 @@
 // oxty ⇄ xterm.js 화면 동등성. `npm ci && npm test`(packages/oxty)에서 돈다.
 //   증명 A: 같은 이벤트 → oxty 레코드 == xterm 레코드 (wmux 렌더러가 엔진 교체 뒤 읽을 바로 그 데이터)
+//   증명 B: 같은 이벤트 → oxty ansiSnapshot() → 새 xterm에 쓴 화면 == xterm 원본 (wmux가 패인을 복원할 때 보는 화면)
 // 단계마다 비교한다: initial → continued(case.tail) → returned(xterm이 대체 화면이면 ?1049lX).
 // 같음이 아닌 결과는 known-differences.json에 이유와 함께 있어야 하고, 그 항목은 실제로 나타나야 한다.
 // 비교기가 실패할 수 있음을 케이스보다 먼저 보인다: 모든 비교 필드에 그 필드를 바꾸는 입력(레버)이 있어야 한다.
@@ -63,6 +64,15 @@ test('on every lever input xterm and oxty agree except OXTY_CONSTANT', async () 
   }
 });
 
+test('B lever: one byte added to or dropped from the payload is a difference', async () => {
+  const c = CASES.find((k) => k.id === 'ansi/8');
+  assert.deepEqual(await proveB(c), { kind: 'compared', diffs: [] });
+  const added = await proveB(c, (p) => Uint8Array.of(...p, 0x58));
+  assert.ok(added.diffs.some((d) => d.field === 'lines.cells.chars'), 'added byte');
+  const dropped = await proveB(c, (p) => p.filter((_, i) => i !== p.indexOf(0x77)));
+  assert.ok(dropped.diffs.some((d) => d.field === 'lines.cells.chars'), 'dropped byte');
+});
+
 // ── 판정 ─────────────────────────────────────────────────────────────────────────
 
 /**
@@ -94,6 +104,35 @@ async function proveA(c) {
     }
     return compare(c, written, records);
   } finally {
+    o.dispose();
+    x.dispose();
+  }
+}
+
+/**
+ * 복원 xterm은 원본의 최종 크기로 만든다. edit는 B 레버가 payload를 바꿀 때만 쓴다.
+ * @returns {Promise<Outcome>}
+ */
+async function proveB(c, edit = (payload) => payload) {
+  const x = xterm(c.cols, c.rows, c.scrollback);
+  const o = new Terminal({ cols: c.cols, rows: c.rows, scrollback: c.scrollback });
+  let restored;
+  try {
+    const written = await play(c.input, x, o);
+    const s = o.ansiSnapshot();
+    if (!s.ok) return written === c.bytes ? { kind: 'refused', reason: s.reason } : compare(c, written, []);
+    restored = xterm(x.cols, x.rows, c.scrollback);
+    await play([edit(s.payload)], restored);
+    const records = [['initial', xtermScreen(x), xtermScreen(restored)]];
+    await play([c.tail], x, restored);
+    records.push(['continued', xtermScreen(x), xtermScreen(restored)]);
+    if (x.buffer.active.type === 'alternate') {
+      await play(['\x1b[?1049lX'], x, restored);
+      records.push(['returned', xtermScreen(x), xtermScreen(restored)]);
+    }
+    return compare(c, written, records);
+  } finally {
+    restored?.dispose();
     o.dispose();
     x.dispose();
   }
@@ -181,6 +220,15 @@ test('known-differences: every entry has a reason, blocksSwap, real cases and re
   assert.equal(new Set(KNOWN.map((e) => e.id)).size, KNOWN.length);
 });
 
+test('wmux ANSI 60 = 59 same + seed/14 refused: no other B entry touches them', () => {
+  const ansi60 = CASES.filter((c) => /^(ansi|corpus|seed)\/|^partial-utf8$/.test(c.id)).map((c) => c.id);
+  assert.equal(ansi60.length, 60);
+  // 케이스마다 B 테스트가 항목 없이 통과하면 같음이다. 그래서 여기서는 B 항목이 seed/14 거부 하나뿐임을 고정한다.
+  const touching = KNOWN.filter((e) => e.proofs.includes('B') && e.cases.some((id) => ansi60.includes(id)))
+    .map((e) => [e.id, e.refusal, e.cases.filter((id) => ansi60.includes(id))]);
+  assert.deepEqual(touching, [['resize-seed-14', 'unsupported-wide-edge', ['seed/14']]]);
+});
+
 test('swap gate: OXTY_SWAP_GATE=1 fails while a known difference blocks the engine swap', () => {
   if (process.env.OXTY_SWAP_GATE !== '1') return;
   const blockers = KNOWN.filter((e) => e.blocksSwap).map((e) => `${e.id} (${e.cases.join(', ')}): ${e.reason}`);
@@ -193,6 +241,12 @@ for (const c of CASES) {
     const why = ORACLE ?? c.missing;
     const outcome = why ? { kind: 'inconclusive', why } : await proveA(c);
     const verdict = judge(c.id, 'A', outcome, KNOWN);
+    assert.ok(verdict.pass, verdict.message);
+  });
+  test(`B ${c.id}`, async () => {
+    const why = ORACLE ?? c.missing;
+    const outcome = why ? { kind: 'inconclusive', why } : await proveB(c);
+    const verdict = judge(c.id, 'B', outcome, KNOWN);
     assert.ok(verdict.pass, verdict.message);
   });
 }
