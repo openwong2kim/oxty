@@ -94,6 +94,17 @@ match term.take_damage() {
   `Instant::now()`, which traps on `wasm32-unknown-unknown` — so the host
   flushes stalled updates. The npm wrapper does this for you after 150 ms and
   calls `onSyncFlush`; Rust and N-API hosts call `flush_sync()` themselves.
+- **Snapshots.** `ansiSnapshot()` returns `{ ok: true, payload }`: bytes that
+  rebuild the screen, scrollback, cursor, pen and modes in another terminal,
+  including a held synchronized update and any unfinished escape or UTF-8
+  tail, so live output can continue right after it. It returns
+  `{ ok: false, reason }` (`unsupported-wide-edge`, `margins`,
+  `partial-tail-overflow`) when ANSI cannot express the state; replay the raw
+  bytes instead.
+- **xterm.js parity.** `cd packages/oxty && npm ci && npm test` feeds wmux's
+  91 fixtures to oxty and `@xterm/headless` and fails on any difference not
+  listed, with a reason, in `test/xterm/known-differences.json`.
+  `OXTY_SWAP_GATE=1` also fails while an entry is marked `blocksSwap`.
 
 ## Building
 
