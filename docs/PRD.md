@@ -125,7 +125,7 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 
 **D1. 코어는 Alacritty 포크** (`alacritty_terminal` 0.26, Apache-2.0)
 - 이유: Rust 네이티브이고 이미 패치·검증됐다. Unicode 11 폭·리사이즈·blink는 wmux에서, wasm32 빌드는 oxty 0.0.1에서 패치했다.
-- 대안 검토: libghostty-vt는 기능이 풍부하고 herdr·t3code가 실제로 쓰지만, Zig 도구가 함께 필요하고 C API라 Rust·N-API 연결이 번거롭다. wmux가 Alacritty 기반으로 맞춰 놓은 픽스처 84건을 다시 검증해야 하는 비용도 크다. 처음부터 작성하는 건 가치 대비 비용이 크다.
+- 대안 검토: libghostty-vt는 기능이 풍부하고 herdr·t3code가 실제로 쓰지만, Zig 도구가 함께 필요하고 C API라 Rust·N-API 연결이 번거롭다. wmux가 Alacritty 기반으로 맞춰 놓은 픽스처 91건(고유 입력 85)을 다시 검증해야 하는 비용도 크다. 처음부터 작성하는 건 가치 대비 비용이 크다.
 - libghostty-vt는 **비교 대상이자 동작 기준점**으로 쓴다.
 - 포크는 한 벌만 둔다. 별도 크레이트로 내지 않고 `oxty` 크레이트 안의 `vt` 모듈로 내장한다. crates.io는 의존성도 전부 레지스트리에 있어야 하므로, 내장하면 공개 이름이 `oxty` 하나로 끝난다. 내부 경로(`crate::`) 89곳은 스크립트로 바꾸고, Alacritty를 올릴 때 같은 스크립트를 다시 돌린다.
 - wmux-term은 M1에서 vendor 포크 대신 `oxty`를 의존성으로 쓰도록 바꾼다(D8).
@@ -184,15 +184,17 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 | --- | --- |
 | 이름 선점: npm `oxty`, crates.io `oxty` | 각 레지스트리에 등록됨 |
 | ✅ Alacritty 포크를 `oxty` 크레이트 안 `vt` 모듈로 내장 (D1) | 경로 변환 스크립트로 재현 가능, `cargo test`·wasm 빌드·`cargo publish --dry-run -p oxty` 통과 — `d321607`, PTY·이벤트 루프 모듈 제거 |
-| **wmux-term이 vendor 포크 대신 `oxty`에 의존** (D8) | wmux의 기존 Rust 테스트·픽스처 84건 통과, wmux 쪽 vendor 사본 제거 |
+| **wmux-term이 vendor 포크 대신 `oxty`에 의존** (D8) | wmux의 기존 Rust 테스트·픽스처 91건(고유 입력 85) 통과, wmux 쪽 vendor 사본 제거 |
 | ✅ 커서 문단 reflow 보존 패치를 옵션으로 — wmux 정책이 아니라 xterm.js 기본값(`reflowCursorLine: false`)이었다 | `vt::term::Config::reflow_cursor_line`(기본 `true` = Alacritty 동작), `oxty::Engine`은 xterm.js 동작 유지. Alacritty 원본 테스트 130건 통과 — `d321607` |
-| ANSI serialize (wmux-term `native_serialize` 이식) | 직렬화→복원 후 화면 지문이 원본과 일치 |
-| 차분 테스트 장치: 같은 입력을 oxty와 `@xterm/headless`에 넣고 비교 | wmux 픽스처 84건 이식, 전부 일치 또는 차이를 문서화 |
-| 🟡 M2용 API 공백: 뷰포트(스크롤 위치·`scrollLines`), 커서 모양·깜빡임(DECSCUSR), 셀 확장 테이블(밑줄 색 SGR 58, OSC 8 링크), 행 단위 결합 문자 텍스트(지금은 칸마다 `cellText`), npm 패키지의 `node:fs` 분기가 브라우저 번들을 막지 않게 (D2, D3 스파이크) | 각 항목이 차분 테스트에서 xterm.js와 일치. 셀 형식 고정 — **구현 완료**: `displayOffset`·`scrollDisplay`·`scrollToBottom`, `cursor().shape/blink`, `rowExtras()`(결합 문자·밑줄 색·링크, attrs 비트 15·16), 번들 수정, wasm ABI 2. 셀 4워드 형식은 그대로 두고 확장은 행 단위 테이블로 고정. **남음**: xterm.js 차분 비교는 차분 장치 항목에서 |
+| ✅ ANSI serialize (wmux-term `native_serialize` 이식) | 직렬화→복원 후 화면 지문이 원본과 일치 — `Engine::ansi_snapshot`·JS/N-API `ansiSnapshot()`(`439cae5`·`0be743c`·`a077379`). wmux ANSI 60건이 59 같음 + `seed/14` 거부(wide edge)로 재현, 케이스마다 assert |
+| ✅ 차분 테스트 장치: 같은 입력을 oxty와 `@xterm/headless`에 넣고 비교 | wmux 픽스처 91건(텍스트 31 + ANSI 60, 고유 입력 85) 이식, 전부 일치 또는 차이를 문서화 — `packages/oxty/test/xterm.test.mjs`, `npm ci && npm test`(`2aaf6b4`·`cf6d63f`·`209e531`). 입력 85건: 증명 A(셀 직접) 82 같음·3 차이, 증명 B(xterm 복원) 82 같음·1 차이·2 거부(`seed/14`, `text/scroll-margins`). 차이·거부는 전부 [known-differences.json](../packages/oxty/test/xterm/known-differences.json)에 이유와 `blocksSwap`으로 |
+| 🟡 M2용 API 공백: 뷰포트(스크롤 위치·`scrollLines`), 커서 모양·깜빡임(DECSCUSR), 셀 확장 테이블(밑줄 색 SGR 58, OSC 8 링크), 행 단위 결합 문자 텍스트(지금은 칸마다 `cellText`), npm 패키지의 `node:fs` 분기가 브라우저 번들을 막지 않게 (D2, D3 스파이크) | 각 항목이 차분 테스트에서 xterm.js와 일치. 셀 형식 고정 — **구현 완료**: `displayOffset`·`scrollDisplay`·`scrollToBottom`, `cursor().shape/blink`, `rowExtras()`(결합 문자·밑줄 색·링크, attrs 비트 15·16), 번들 수정, wasm ABI 2. 셀 4워드 형식은 그대로 두고 확장은 행 단위 테이블로 고정. **차분 비교 완료**: 밑줄 색·OSC 8·결합 문자는 차분 장치 A·B에서 xterm.js와 비교, 커서 모양·깜빡임은 xterm 공개 API 밖이라 엔진 테스트(`cursor_shape_follows_decscusr`)로 고정. **남음**: 뷰포트 스크롤 위치(`displayOffset`)는 화면 레코드 밖이라 xterm.js와 비교하지 않았다 |
 | ✅ 스크롤 damage: 스크롤된 줄 수를 함께 냄 (D2) — `vt::term::Config::scroll_damage`(기본 꺼짐 = Alacritty 동작), `oxty::Engine`이 켬 | 연속 출력 시 `Full` 대신 스크롤 줄 수 + 새 줄만 보고 |
 | 호스트 정책 훅: OSC 52 클립보드, OSC 4/10/11 색 질의 | 훅 미설정 시 무시, 설정 시 응답 바이트가 xterm.js와 일치 |
 | ✅ **D3 검증 스파이크**: xterm.js WebGL 아틀라스·렌더 모델을 떼어 oxty `rowPacked`로 한글·SGR·이모지 화면을 그림 | **D3 확정** — `spike/d3-webgl/`, `d3e84b7`·`afecf53`. 한글·16/256/RGB·속성·이모지·결합 문자·damage 갱신 정상, 콘솔 에러 0 |
 | 성능 기준선 측정 (vtebench류 코퍼스, wasm·네이티브·xterm.js 비교) | 처리량·메모리 표를 README에 공개. 파서 단독과 `write`→프레임 end-to-end, 스크롤 연속 출력 케이스를 따로 측정 |
+
+**G3 교체 게이트 현황** — `blocksSwap: true` 8건(목록 원본은 [known-differences.json](../packages/oxty/test/xterm/known-differences.json), `OXTY_SWAP_GATE=1 npm test`가 이 항목들로 실패한다): `reflow-shrink-scrolls-history`, `wide-leader-keeps-fg`, `sgr-21`, `ed2-pushes-history`, `tab-stored-as-tab`, `alt-47-1047-unsupported`, `save-cursor-1048-unsupported`, `decstr-unsupported`. 모두 엔진 동작 차이이고 직렬화기만의 차이는 없다. 0건이 되면 G3 "차분 불일치 0"을 충족한다.
 
 ### M2 · 0.2 웹 프런트 (wmux 렌더러 교체)
 
@@ -356,7 +358,7 @@ M2는 xterm.js에서 차용한 키 입력 코드로 동작한다. M3에서 인�
 | [vttest](https://invisible-island.net/vttest/vttest.html) | 대화형 테스트 | VT100/220 호환 수동 점검 |
 | [esctest](https://github.com/migueldeicaza/esctest) | 자동 테스트 · Python · GPL-2.0 | 셀 값·커서 위치 자동 검증. **외부 도구로만 실행, 저장소에 넣지 않음** |
 | [vtebench](https://github.com/jwilm/vtebench) | 처리량 벤치마크 | M1 성능 기준선 |
-| wmux 내부 자산 | 픽스처 84건 + shadow 비교 장치 + IME·CJK 회귀 테스트 | **가장 중요한 회귀 자산.** 픽스처는 M1에서 oxty 차분 테스트로 이식, IME 회귀는 wmux e2e에서 계속 실행 |
+| wmux 내부 자산 | 픽스처 91건(고유 입력 85) + shadow 비교 장치 + IME·CJK 회귀 테스트 | **가장 중요한 회귀 자산.** 픽스처는 M1에서 oxty 차분 테스트로 이식, IME 회귀는 wmux e2e에서 계속 실행 |
 
 ---
 
