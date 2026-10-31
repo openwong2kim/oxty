@@ -143,7 +143,7 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
   - 차용한 부품은 업스트림을 따라갈 의무가 없고, 경계를 oxty의 "바뀐 줄" API에 맞춰 설계할 수 있다(D7과 자연스럽게 맞물림).
   - 같은 문제를 푼 ghostty-web·riotermjs·wterm 모두 포크하지 않았다.
 - 비용: 차용 모듈을 xterm.js 내부 서비스에서 떼어내는 작업(한 번), 선택 UI·접근성 직접 구현, wmux의 xterm.js 내부 우회 코드 19곳(4개 파일) 재작성.
-- 검증: M1 스파이크. 떼어내기가 하루 안에 끝나면 확정하고, 내부 서비스가 줄줄이 딸려 나오면 **xterm.js 포크(`common` 층 교체)로 전환**한다.
+- 검증: M1 스파이크 → **확정 (2026-10-31, `spike/d3-webgl/README.md`)**. xterm.js 6.0.0(`f447274`)에서 22개 파일·4,646줄을 복사했고 19개는 원문 그대로다. 딸려 온 내부 서비스는 5개, 서비스마다 쓰는 멤버는 1~2개(스텁 전체 112줄)다. 버퍼 쪽(BufferService·BufferLine·CellData)은 하나도 따라오지 않았고, 경계가 RenderModel(셀당 u32 4개)에서 끊긴다. WebglRenderer는 자체 오케스트레이터(179줄)와 셀 변환기(108줄)로 대체했다.
 
 **D4. 로직은 Rust, 플랫폼 층은 얇게**
 - Rust: 키보드·마우스·붙여넣기 인코딩, 선택 범위 계산, 검색, 링크 감지, serialize
@@ -188,10 +188,10 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 | ✅ 커서 문단 reflow 보존 패치를 옵션으로 — wmux 정책이 아니라 xterm.js 기본값(`reflowCursorLine: false`)이었다 | `vt::term::Config::reflow_cursor_line`(기본 `true` = Alacritty 동작), `oxty::Engine`은 xterm.js 동작 유지. Alacritty 원본 테스트 130건 통과 — `d321607` |
 | ANSI serialize (wmux-term `native_serialize` 이식) | 직렬화→복원 후 화면 지문이 원본과 일치 |
 | 차분 테스트 장치: 같은 입력을 oxty와 `@xterm/headless`에 넣고 비교 | wmux 픽스처 84건 이식, 전부 일치 또는 차이를 문서화 |
-| M2용 API 공백: 뷰포트(스크롤 위치·`scrollLines`), 커서 모양(DECSCUSR), 셀 확장 테이블(밑줄 색 SGR 58, OSC 8 링크) (D2) | 각 항목이 차분 테스트에서 xterm.js와 일치. 셀 형식 고정 |
+| M2용 API 공백: 뷰포트(스크롤 위치·`scrollLines`), 커서 모양·깜빡임(DECSCUSR), 셀 확장 테이블(밑줄 색 SGR 58, OSC 8 링크), 행 단위 결합 문자 텍스트(지금은 칸마다 `cellText`), npm 패키지의 `node:fs` 분기가 브라우저 번들을 막지 않게 (D2, D3 스파이크) | 각 항목이 차분 테스트에서 xterm.js와 일치. 셀 형식 고정 |
 | 스크롤 damage: 스크롤된 줄 수를 함께 냄 (D2) | 연속 출력 시 `Full` 대신 스크롤 줄 수 + 새 줄만 보고 |
 | 호스트 정책 훅: OSC 52 클립보드, OSC 4/10/11 색 질의 | 훅 미설정 시 무시, 설정 시 응답 바이트가 xterm.js와 일치 |
-| **D3 검증 스파이크** (1~2일): xterm.js WebGL 아틀라스·렌더 모델을 떼어 oxty `rowPacked`로 한글·SGR·이모지 화면을 그림 | 하루 안에 분리되면 D3 확정. 내부 서비스가 딸려 나오면 포크로 전환하고 PRD 갱신 |
+| ✅ **D3 검증 스파이크**: xterm.js WebGL 아틀라스·렌더 모델을 떼어 oxty `rowPacked`로 한글·SGR·이모지 화면을 그림 | **D3 확정** — `spike/d3-webgl/`, `d3e84b7`·`afecf53`. 한글·16/256/RGB·속성·이모지·결합 문자·damage 갱신 정상, 콘솔 에러 0 |
 | 성능 기준선 측정 (vtebench류 코퍼스, wasm·네이티브·xterm.js 비교) | 처리량·메모리 표를 README에 공개. 파서 단독과 `write`→프레임 end-to-end, 스크롤 연속 출력 케이스를 따로 측정 |
 
 ### M2 · 0.2 웹 프런트 (wmux 렌더러 교체)
@@ -272,7 +272,8 @@ M2는 xterm.js에서 차용한 키 입력 코드로 동작한다. M3에서 인�
 
 | 리스크 | 영향 | 대응 |
 | --- | --- | --- |
-| 자체 프런트 범위 과다 (선택 UI·접근성 직접 구현) | M2 지연 | M1 스파이크로 차용 비용을 먼저 확인, 실패 시 포크로 전환(D3) |
+| 자체 프런트 범위 과다 (선택 UI·접근성 직접 구현) | M2 지연 | 렌더링 차용은 스파이크로 확인됨(D3). 선택·IME·키 입력·링크·접근성, 컨텍스트 손실 복구·DPR 변화·리거처는 아직 미검증 |
+| 한글 대체 글꼴 폭 불균일 | 스파이크 화면에서 "안 녕 하 세 요"는 벌어지고 "입니다"는 붙음 | M2에서 글꼴 대체·글리프 폭 처리를 xterm.js와 비교 |
 | xterm.js 차용 모듈이 업스트림 수정을 못 받음 | IME·렌더링 버그 잔존 | 차용 모듈 목록과 출처 커밋을 기록하고, 업스트림 릴리스 노트를 분기마다 확인 |
 | Alacritty 포크가 wmux와 oxty로 갈라짐 | "엔진 하나"가 "포크 둘"로 바뀔 뿐 | M1에서 wmux-term을 `oxty`로 통합(D8) |
 | Alacritty 업스트림과의 거리 | 버그 수정을 못 받음 | 패치를 `WMUX-PATCH.md`처럼 목록화, 버전 올릴 때 차분 테스트로 검증. M1 이후 wasm 빌드용 feature(`tty`·`event_loop` 끄기)를 업스트림에 제안 |
