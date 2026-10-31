@@ -192,6 +192,16 @@ export class Terminal {
     return n < 0 ? null : wordsOut(n * 4);
   }
 
+  /**
+   * Like `rowCells`, but a view into WebAssembly memory instead of a copy:
+   * valid only until the next call into any terminal. For renderers that read
+   * every visible row each frame. @returns {Uint32Array | null}
+   */
+  rowCellsView(line) {
+    const n = wasm.oxty_row_cells(this.#handle(), line);
+    return n < 0 ? null : new Uint32Array(wasm.memory.buffer, wasm.oxty_out32_ptr(), n * 4);
+  }
+
   rowWrapped(line) {
     return wasm.oxty_row_wrapped(this.#handle(), line) === 1;
   }

@@ -42,7 +42,7 @@ async function sample(backend, workload, panes, mib, chunk, align = 0) {
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
-    await page.goto(`${base}?backend=${backend}&workload=${workload}&panes=${panes}&mib=${mib}&chunk=${chunk}&align=${align}`);
+    await page.goto(`${base}?backend=${backend}&workload=${workload}&panes=${panes}&mib=${mib}&chunk=${chunk}&align=${align}&nodraw=${process.env.NODRAW ?? 0}`);
     await page.waitForFunction(() => window.__bench, null, { timeout: 300000 });
     const r = await page.evaluate(() => window.__bench);
     if (r.error) throw new Error(r.error);
@@ -69,7 +69,7 @@ async function sample(backend, workload, panes, mib, chunk, align = 0) {
 }
 
 // [workload, panes, MiB per pane, chunk KiB per pane per frame, repeats]
-const plan = process.argv.includes('--align') ? [['tui', 8, 2, 32, 3, 1], ['tui', 8, 2, 256, 3, 1]] : process.argv.includes('--diag') ? [['tui', 8, 2, 32, 1], ['log', 8, 2, 32, 1]] : quick ? [['log', 2, 1, 32, 1]] : [['log', 8, 2, 32, 3], ['tui', 8, 2, 32, 3], ['log', 8, 2, 256, 3], ['tui', 8, 2, 256, 3], ['log', 1, 8, 256, 3]];
+const plan = process.env.PLAN ? JSON.parse(process.env.PLAN) : process.argv.includes('--align') ? [['tui', 8, 2, 32, 3, 1], ['tui', 8, 2, 256, 3, 1]] : process.argv.includes('--diag') ? [['tui', 8, 2, 32, 1], ['log', 8, 2, 32, 1]] : quick ? [['log', 2, 1, 32, 1]] : [['log', 8, 2, 32, 3], ['tui', 8, 2, 32, 3], ['log', 8, 2, 256, 3], ['tui', 8, 2, 256, 3], ['log', 1, 8, 256, 3]];
 const samples = [];
 try {
   for (const [workload, panes, mib, chunk, repeats, align] of plan) for (let rep = 0; rep < repeats; rep++)

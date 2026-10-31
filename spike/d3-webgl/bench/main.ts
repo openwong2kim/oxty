@@ -10,6 +10,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 const q = new URLSearchParams(location.search);
 const backend = q.get('backend')!, workload = q.get('workload')!;
 const ALIGN = q.get('align') === '1';
+const NODRAW = q.get('nodraw') === '1';
 const PANES = Number(q.get('panes') ?? 8), MIB = Number(q.get('mib') ?? 2), CHUNK = Number(q.get('chunk') ?? 32) * 1024;
 const COLS = 120, ROWS = 40, SCROLLBACK = 10000;
 const enc = new TextEncoder();
@@ -61,7 +62,7 @@ function oxtyPane(el: HTMLElement): Pane {
   const q = new WriteQueue(o as any, () => { dirty = true; });
   return {
     write: d => q.write(d),
-    draw: () => { if (dirty) { r.render(); dirty = false; } },
+    draw: () => { if (dirty && !NODRAW) { r.render(); dirty = false; } },
     text: () => Array.from({ length: ROWS }, (_, y) => (o.rowText(y) ?? '').trimEnd()).join('\n'),
   };
 }

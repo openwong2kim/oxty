@@ -74,6 +74,12 @@ export class Terminal {
   rowText(line: number): string | null;
   /** `[codepoint, fg, bg, attrs]` per cell. */
   rowCells(line: number): Uint32Array | null;
+  /**
+   * Like `rowCells`, but a view into WebAssembly memory instead of a copy:
+   * valid only until the next call into any terminal. For renderers that read
+   * every visible row each frame.
+   */
+  rowCellsView(line: number): Uint32Array | null;
   rowWrapped(line: number): boolean;
   /** Cell text including combining marks. */
   cellText(line: number, col: number): string | null;

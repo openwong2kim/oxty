@@ -68,6 +68,16 @@ test('damage lists changed rows', () => {
   assert.equal(t.cols, 100);
 });
 
+test('rowCellsView matches rowCells without copying', () => {
+  const t = make();
+  t.write('\x1b[31m한x\r\nsecond');
+  for (const y of [0, 1, t.rows - 1]) assert.deepEqual(Array.from(t.rowCellsView(y)), Array.from(t.rowCells(y)));
+  assert.equal(t.rowCellsView(t.rows), null);
+  const view = t.rowCellsView(0);
+  t.rowCells(1); // 다음 호출이 같은 메모리를 덮는다
+  assert.equal(view[0], 's'.codePointAt(0));
+});
+
 test('cols and rows follow the engine size after resize', () => {
   const t = make();
   for (const [cols, rows] of [[100, 30], [1, 1], [0, 0]]) {

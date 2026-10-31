@@ -8,14 +8,28 @@ import { createRenderDimensions } from 'browser/renderer/shared/RendererUtils';
 import { IRenderDimensions } from 'browser/renderer/shared/Types';
 import { Attributes, NULL_CELL_CODE } from 'common/buffer/Constants';
 import { CellColorResolver } from '../vendor-xterm/addons/addon-webgl/src/CellColorResolver';
-import { generateConfig } from '../vendor-xterm/addons/addon-webgl/src/CharAtlasUtils';
+import { configEquals, generateConfig } from '../vendor-xterm/addons/addon-webgl/src/CharAtlasUtils';
 import { GlyphRenderer } from '../vendor-xterm/addons/addon-webgl/src/GlyphRenderer';
 import { RectangleRenderer } from '../vendor-xterm/addons/addon-webgl/src/RectangleRenderer';
 import { COMBINED_CHAR_BIT_MASK, RENDER_MODEL_BG_OFFSET, RENDER_MODEL_EXT_OFFSET, RENDER_MODEL_FG_OFFSET, RENDER_MODEL_INDICIES_PER_CELL, RenderModel } from '../vendor-xterm/addons/addon-webgl/src/RenderModel';
 import { TextureAtlas } from '../vendor-xterm/addons/addon-webgl/src/TextureAtlas';
-import { IWebGL2RenderingContext } from '../vendor-xterm/addons/addon-webgl/src/Types';
+import { ICharAtlasConfig, IWebGL2RenderingContext } from '../vendor-xterm/addons/addon-webgl/src/Types';
 import { OxtyCellData } from './convert';
 import { CoreBrowserServiceStub, createColorSet, DecorationServiceStub, OptionsServiceStub, terminalOptions, ThemeServiceStub, UnicodeServiceStub } from './services';
+
+// xterm.js CharAtlasCache처럼 설정(글꼴·색·DPR)이 같은 렌더러는 글리프 아틀라스를 하나 쓴다.
+// 넓은 글자 기록(UnicodeServiceStub)도 아틀라스에 딸려 함께 쓴다.
+const atlasCache: { config: ICharAtlasConfig; atlas: TextureAtlas; unicode: UnicodeServiceStub }[] = [];
+
+function sharedAtlas(config: ICharAtlasConfig): { atlas: TextureAtlas; unicode: UnicodeServiceStub } {
+  let entry = atlasCache.find(e => configEquals(e.config, config));
+  if (!entry) {
+    const unicode = new UnicodeServiceStub();
+    entry = { config, atlas: new TextureAtlas(document, config, unicode), unicode };
+    atlasCache.push(entry);
+  }
+  return entry;
+}
 
 const ATTR_WIDE = 1 << 12;
 const ATTR_COMBINING = 1 << 14;
@@ -31,18 +45,19 @@ export class OxtyWebglRenderer {
 
   private readonly _options = new OptionsServiceStub();
   private readonly _theme = new ThemeServiceStub(createColorSet());
-  private readonly _unicode = new UnicodeServiceStub();
+  private readonly _unicode: UnicodeServiceStub;
   private readonly _coreBrowser: CoreBrowserServiceStub;
   private readonly _colorResolver: CellColorResolver;
   private readonly _rectangles: RectangleRenderer;
   private readonly _glyphs: GlyphRenderer;
   private readonly _atlas: TextureAtlas;
 
-  constructor(private readonly _term: OxtyTerminal, container: HTMLElement) {
+  /** `preserveDrawingBuffer`는 캔버스를 읽어야 할 때만 켠다(버퍼를 하나 더 잡는다). */
+  constructor(private readonly _term: OxtyTerminal, container: HTMLElement, preserveDrawingBuffer = false) {
     const dpr = window.devicePixelRatio || 1;
     this._coreBrowser = new CoreBrowserServiceStub(dpr);
     this.canvas = document.createElement('canvas');
-    const gl = this.canvas.getContext('webgl2', { antialias: false, depth: false, preserveDrawingBuffer: true });
+    const gl = this.canvas.getContext('webgl2', { antialias: false, depth: false, preserveDrawingBuffer });
     if (!gl) throw new Error('WebGL2 not supported');
     this._gl = gl as unknown as IWebGL2RenderingContext;
     container.appendChild(this.canvas);
@@ -73,7 +88,7 @@ export class OxtyWebglRenderer {
 
     const d = this._dimensions.device;
     const config = generateConfig(d.cell.width, d.cell.height, d.char.width, d.char.height, terminalOptions, this._theme.colors, dpr, this._gl.getParameter(this._gl.MAX_TEXTURE_SIZE));
-    this._atlas = new TextureAtlas(document, config, this._unicode);
+    ({ atlas: this._atlas, unicode: this._unicode } = sharedAtlas(config));
     this._glyphs.setAtlas(this._atlas);
   }
 
@@ -137,13 +152,15 @@ export class OxtyWebglRenderer {
     this._model.cursor = undefined;
 
     for (const y of lines) {
-      const cells = term.rowCells(y);
+      // 복사하지 않는 뷰라 다음 엔진 호출 전까지만 쓴다(프레임마다 줄 배열을 만들지 않게).
+      let cells = term.rowCellsView(y);
       if (!cells) continue;
-      // 결합 문자·밑줄 색이 있는 줄만 rowExtras()를 한 번 부른다
+      // 결합 문자·밑줄 색이 있는 줄만 rowExtras()를 한 번 부른다. 그 호출이 뷰를 덮으므로 다시 받는다.
       let extras: Map<number, CellExtra> | undefined;
       for (let x = 0; x < cols; x++) {
         if (cells[x * 4 + 3] & (ATTR_COMBINING | ATTR_UNDERLINE_COLOR)) {
           extras = new Map((term.rowExtras(y) ?? []).map(e => [e.col, e]));
+          cells = term.rowCellsView(y)!;
           break;
         }
       }
