@@ -100,7 +100,11 @@ match term.take_damage() {
   tail, so live output can continue right after it. It returns
   `{ ok: false, reason }` (`unsupported-wide-edge`, `margins`,
   `partial-tail-overflow`) when ANSI cannot express the state; replay the raw
-  bytes instead.
+  bytes instead. Not carried over yet: charset designation and shift, the
+  DECSC saved cursor, custom tab stops, cursor shape and OSC 8 links. Taking
+  a snapshot also applies a held synchronized update to the engine's own
+  screen, so call it on a terminal you replay for the snapshot rather than on
+  the one a renderer is drawing.
 - **xterm.js parity.** `cd packages/oxty && npm ci && npm test` feeds wmux's
   91 fixtures to oxty and `@xterm/headless` and fails on any difference not
   listed, with a reason, in `test/xterm/known-differences.json`.
