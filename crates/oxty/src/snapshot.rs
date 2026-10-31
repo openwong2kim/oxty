@@ -102,6 +102,10 @@ impl RawTail {
                 self.escape.clear();
                 self.overflowed = false;
             }
+            // 시퀀스 안의 C0(`\x1b[31\n`의 LF)는 여기서 이미 실행됐다. 다시 실행되지 않게 빼도 파라미터 상태는 같다.
+            if b < 0x20 && b != 0x1b {
+                continue;
+            }
             if !self.overflowed {
                 if self.escape.len() >= MAX_PENDING_TAIL {
                     self.overflowed = true;
@@ -202,7 +206,8 @@ pub(crate) fn ansi<T: EventListener>(
     Ok(bytes)
 }
 
-// 여기부터 wmux native_serialize.rs와 같은 코드(리스너 제네릭, 거부 enum만 다르다).
+// 여기부터 wmux native_serialize.rs에서 옮긴 코드. 바뀐 점: 리스너 제네릭, 거부 enum,
+// 탭 칸을 공백으로, DECOM을 커서보다 먼저.
 
 fn color(out: &mut String, value: Color, foreground: bool) {
     let base = if foreground { 38 } else { 48 };
@@ -274,7 +279,8 @@ fn style(cell: &Cell) -> String {
 }
 
 fn glyph(out: &mut String, cell: &Cell) {
-    out.push(cell.c);
+    // 탭이 지나간 첫 칸에 남은 '\t'를 그대로 쓰면 xterm이 다시 탭으로 실행한다.
+    out.push(if cell.c == '\t' { ' ' } else { cell.c });
     if let Some(chars) = cell.zerowidth() {
         out.extend(chars);
     }
@@ -325,7 +331,6 @@ fn screen(out: &mut String, grid: &Grid<Cell>) {
             previous_style.clear();
         }
     }
-    cursor(out, grid);
 }
 
 fn serialize<T: EventListener>(term: &Term<T>) -> Result<String, SnapshotRefusal> {
@@ -345,12 +350,17 @@ fn serialize<T: EventListener>(term: &Term<T>) -> Result<String, SnapshotRefusal
     let modes = term.mode();
     if modes.contains(TermMode::ALT_SCREEN) {
         screen(&mut out, term.inactive_grid());
+        cursor(&mut out, term.inactive_grid());
         out.push_str("\x1b[?1049h\x1b[0m\x1b[H");
     }
     screen(&mut out, term.grid());
+    // DECOM을 켜면 커서가 홈으로 가므로 CUP보다 먼저 낸다(마진은 거부되므로 CUP 기준은 화면 전체).
+    if modes.contains(TermMode::ORIGIN) {
+        out.push_str("\x1b[?6h");
+    }
+    cursor(&mut out, term.grid());
     for (mode, code) in [
         (TermMode::APP_CURSOR, 1),
-        (TermMode::ORIGIN, 6),
         (TermMode::FOCUS_IN_OUT, 1004),
         (TermMode::SGR_MOUSE, 1006),
         (TermMode::BRACKETED_PASTE, 2004),

@@ -156,3 +156,33 @@ fn round_trip_in_oxty() {
         assert_round_trip(&mut t, 50);
     }
 }
+
+#[test]
+fn tab_cell_is_written_as_space() {
+    let mut t = Engine::new(20, 4, 0);
+    t.feed(b"a\tb");
+    let payload = snapshot(&mut t);
+    assert!(!payload.contains(&b'\t'));
+    // 엔진은 탭 칸에 '\t'를 저장하므로(알려진 차이) 셀 대신 글자 위치와 커서를 본다.
+    let mut copy = Engine::new(20, 4, 0);
+    copy.feed(&payload);
+    assert_eq!(copy.row_text(0).unwrap(), "a       b");
+    assert_eq!(copy.cursor(), t.cursor());
+}
+
+#[test]
+fn origin_mode_comes_before_cursor() {
+    let mut t = Engine::new(20, 6, 0);
+    t.feed(b"\x1b[?6h\x1b[3;5HX");
+    assert_round_trip(&mut t, 0);
+}
+
+#[test]
+fn control_inside_unfinished_sequence_is_not_replayed() {
+    let mut t = Engine::new(20, 4, 0);
+    t.feed(b"ab\x1b[31\n");
+    let mut copy = assert_round_trip(&mut t, 0);
+    t.feed(b"mX");
+    copy.feed(b"mX");
+    assert_same_screen(&t, &copy);
+}
