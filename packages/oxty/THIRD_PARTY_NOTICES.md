@@ -34,6 +34,15 @@ Licensed under Apache-2.0 OR MIT; used here under the Apache License 2.0
 
 ---
 
+## dlmalloc 0.2.14
+
+Copyright Alex Crichton; a port of Doug Lea's public-domain dlmalloc.
+Source: https://github.com/alexcrichton/dlmalloc-rs
+Licensed under Apache-2.0 OR MIT; used here under the Apache License 2.0
+(`LICENSE-APACHE`).
+
+---
+
 ## xterm.js Unicode 11 width table
 
 The character width table compiled into `oxty.wasm` is generated from the

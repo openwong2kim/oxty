@@ -106,6 +106,9 @@ export function decodeColor(packed) {
 
 export class Terminal {
   #h;
+  // 렌더러가 칸마다 읽으므로 wasm을 부르지 않게 크기를 들고 있다(resize 때만 바뀐다)
+  #cols = 0;
+  #rows = 0;
   #inPtr = 0;
   #inCap = 0;
   #syncTimer = null;
@@ -118,6 +121,7 @@ export class Terminal {
   constructor({ cols = 80, rows = 24, scrollback = 1000, syncTimeoutMs = 150, onSyncFlush } = {}) {
     const w = requireWasm();
     this.#h = w.oxty_new(cols, rows, scrollback);
+    this.#readSize();
     this.#syncTimeoutMs = syncTimeoutMs;
     this.#onSyncFlush = onSyncFlush;
     registry?.register(this, this.#h, this);
@@ -161,12 +165,18 @@ export class Terminal {
     }
   }
 
-  resize(cols, rows) {
-    wasm.oxty_resize(this.#handle(), cols, rows);
+  #readSize() {
+    this.#cols = wasm.oxty_cols(this.#h);
+    this.#rows = wasm.oxty_rows(this.#h);
   }
 
-  get cols() { return wasm.oxty_cols(this.#handle()); }
-  get rows() { return wasm.oxty_rows(this.#handle()); }
+  resize(cols, rows) {
+    wasm.oxty_resize(this.#handle(), cols, rows);
+    this.#readSize();
+  }
+
+  get cols() { this.#handle(); return this.#cols; }
+  get rows() { this.#handle(); return this.#rows; }
   /** Scrollback lines; address them as rows -1 (newest) … -historyLength (oldest). */
   get historyLength() { return wasm.oxty_history_len(this.#handle()); }
 

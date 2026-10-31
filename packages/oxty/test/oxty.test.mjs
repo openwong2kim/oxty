@@ -68,6 +68,18 @@ test('damage lists changed rows', () => {
   assert.equal(t.cols, 100);
 });
 
+test('cols and rows follow the engine size after resize', () => {
+  const t = make();
+  for (const [cols, rows] of [[100, 30], [1, 1], [0, 0]]) {
+    t.resize(cols, rows);
+    assert.equal(t.rowCells(0).length / 4, t.cols);
+    assert.notEqual(t.rowCells(t.rows - 1), null);
+    assert.equal(t.rowCells(t.rows), null);
+  }
+  t.dispose();
+  assert.throws(() => t.cols, /disposed/);
+});
+
 test('replies, title, bell', () => {
   const t = make();
   t.write('\x1b[3;7H\x1b[6n\x1b]2;build\x07\x07');

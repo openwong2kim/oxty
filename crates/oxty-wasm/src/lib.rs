@@ -9,6 +9,75 @@ use std::cell::RefCell;
 
 use oxty::{CursorShape, Damage, Engine};
 
+/// The same dlmalloc std uses on wasm, but growing linear memory in larger
+/// steps: at 64 KiB per `memory.grow`, filling a scrollback calls it thousands
+/// of times and that dominated `malloc`. Untouched pages cost no RSS.
+#[cfg(target_arch = "wasm32")]
+mod alloc {
+    use std::alloc::{GlobalAlloc, Layout};
+    use std::arch::wasm32::memory_grow;
+    use std::cell::UnsafeCell;
+
+    use dlmalloc::{Allocator, Dlmalloc};
+
+    const PAGE: usize = 64 << 10;
+    const GROW_STEP: usize = 4 << 20;
+
+    struct Stepped;
+
+    // dlmalloc의 wasm System과 같고, 늘리는 크기만 GROW_STEP 이상으로 올린다
+    unsafe impl Allocator for Stepped {
+        fn alloc(&self, size: usize) -> (*mut u8, usize, u32) {
+            let pages = size.max(GROW_STEP).div_ceil(PAGE);
+            match memory_grow(0, pages) {
+                usize::MAX => (std::ptr::null_mut(), 0, 0),
+                prev => ((prev * PAGE) as *mut u8, pages * PAGE, 0),
+            }
+        }
+        fn remap(&self, _: *mut u8, _: usize, _: usize, _: bool) -> *mut u8 {
+            std::ptr::null_mut()
+        }
+        fn free_part(&self, _: *mut u8, _: usize, _: usize) -> bool {
+            false
+        }
+        fn free(&self, _: *mut u8, _: usize) -> bool {
+            false
+        }
+        fn can_release_part(&self, _: u32) -> bool {
+            false
+        }
+        fn allocates_zeros(&self) -> bool {
+            true
+        }
+        fn page_size(&self) -> usize {
+            PAGE
+        }
+    }
+
+    struct Global(UnsafeCell<Dlmalloc<Stepped>>);
+
+    // wasm32-unknown-unknown(atomics 없음)은 스레드가 하나뿐이다
+    unsafe impl Sync for Global {}
+
+    unsafe impl GlobalAlloc for Global {
+        unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+            (*self.0.get()).malloc(l.size(), l.align())
+        }
+        unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+            (*self.0.get()).calloc(l.size(), l.align())
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, l: Layout) {
+            (*self.0.get()).free(ptr, l.size(), l.align())
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, l: Layout, new: usize) -> *mut u8 {
+            (*self.0.get()).realloc(ptr, l.size(), l.align(), new)
+        }
+    }
+
+    #[global_allocator]
+    static GLOBAL: Global = Global(UnsafeCell::new(Dlmalloc::new_with_allocator(Stepped)));
+}
+
 thread_local! {
     static TERMS: RefCell<Vec<Option<Box<Engine>>>> = const { RefCell::new(Vec::new()) };
     static OUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };

@@ -9,7 +9,7 @@ Feed it PTY bytes. It keeps the screen and tells your renderer which rows change
 [![ci](https://github.com/openwong2kim/oxty/actions/workflows/ci.yml/badge.svg)](https://github.com/openwong2kim/oxty/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE-APACHE)
 ![rust](https://img.shields.io/badge/rust-1.85%2B-orange)
-![wasm](https://img.shields.io/badge/wasm-195%20KB%20%C2%B7%2070%20KB%20gzip-654ff0)
+![wasm](https://img.shields.io/badge/wasm-207%20KB%20%C2%B7%2073%20KB%20gzip-654ff0)
 ![status](https://img.shields.io/badge/status-0.0.1%20experimental-lightgrey)
 
 </div>
