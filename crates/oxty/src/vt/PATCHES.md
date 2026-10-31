@@ -20,7 +20,11 @@ single crate.
   `Grid::set_keep_cursor_paragraph`. When kept, `grid/resize.rs` leaves the
   cursor paragraph without reflow, reflows other paragraphs as upstream, and on
   shrink clamps the cursor and clears pending wrap. Clipped fullwidth cells are
-  retained to match xterm. `oxty::Engine` sets `reflow_cursor_line: false`.
+  retained to match xterm. Rows added by a shrink follow xterm.js
+  `_reflowSmaller`: while history is empty and the cursor is above the bottom
+  row, each added row drops the bottom row and moves the cursor down; the rest
+  go to history with the cursor row unchanged, even when the reflowed paragraph
+  is below the cursor. `oxty::Engine` sets `reflow_cursor_line: false`.
 - Scroll damage is an option: `term::Config::scroll_damage` (default `false`,
   upstream full damage on every scroll). When on, a whole-screen scroll at the
   bottom of history moves line damage with the content, damages the new

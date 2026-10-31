@@ -280,6 +280,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
     fn shrink_columns(&mut self, reflow: bool, columns: usize) {
         // oxty: 커서 문단 유지가 꺼져 있으면 None → Alacritty 원래 reflow.
         let cursor_paragraph = self.keep_cursor_paragraph.then(|| self.cursor_paragraph());
+        let (old_len, old_cursor_line) = (self.raw.len(), self.cursor.point.line);
         self.columns = columns;
 
         // Remove the linewrap special case, by moving the cursor outside of the grid.
@@ -407,6 +408,19 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
         // Reverse iterator and use it as the new grid storage.
         let mut reversed: Vec<Row<T>> = new_raw.drain(..).rev().collect();
+        if reflow && self.keep_cursor_paragraph {
+            // oxty: xterm.js _reflowSmaller는 늘어난 줄마다, 히스토리가 비어 있고 커서가 맨 아랫줄이
+            // 아니면 맨 아랫줄을 버리고 커서를 내린다. 그 밖에는 히스토리로 밀고 커서 행은 그대로다.
+            // 문단이 커서 아래에 있어도 같다.
+            let added = reversed.len() - old_len;
+            let kept = if old_len == self.lines {
+                min(added, self.lines - 1 - old_cursor_line.0 as usize)
+            } else {
+                0
+            };
+            reversed.drain(..kept);
+            self.cursor.point.line = old_cursor_line + kept;
+        }
         reversed.truncate(self.max_scroll_limit + self.lines);
         self.raw.replace_inner(reversed);
 

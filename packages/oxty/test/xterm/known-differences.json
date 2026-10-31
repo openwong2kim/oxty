@@ -1,7 +1,4 @@
 [
-  { "id": "reflow-shrink-scrolls-history", "proofs": ["A", "B"], "cases": ["text/resize-narrow"], "blocksSwap": true,
-    "fields": ["baseY", "cursor.y", "lines"],
-    "reason": "16→8열로 줄일 때 oxty는 맨 윗줄을 히스토리로 밀고 맨 아래 빈 줄을 남긴다. xterm은 4줄을 화면에 꽉 차게 둔다. wmux 텍스트 벤치는 끝 빈 줄을 버려서 못 봤다. 패인을 좁힐 때 화면에 보인다" },
   { "id": "wide-leader-keeps-fg", "proofs": ["A"], "cases": ["seed/2"], "blocksSwap": true,
     "fields": ["lines.cells.fg"],
     "reason": "와이드 문자의 뒷칸을 덮어써 앞칸이 빈칸이 될 때 oxty는 원래 fg를 남기고 xterm은 기본값으로 지운다. 배경색이었다면 화면에 보인다" },

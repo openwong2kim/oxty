@@ -399,3 +399,33 @@ fn mode_1048_saves_and_restores_cursor() {
     assert_eq!(t.row_text(2).unwrap(), "  X");
     assert_eq!((t.cursor().line, t.cursor().col), (2, 3));
 }
+
+#[test]
+fn narrowing_fills_empty_rows_before_history_like_xterm() {
+    // xterm.js _reflowSmaller: 히스토리가 비어 있으면 늘어난 줄만큼 커서 아래 줄을 버리고 커서를 내린다.
+    let rows = |t: &Engine| {
+        (0..t.rows() as i32)
+            .map(|y| t.row_text(y).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let mut t = Engine::new(16, 4, 100);
+    t.feed("abc한글0123456789\r\nlast".as_bytes());
+    t.resize(8, 4);
+    assert_eq!(t.history_len(), 0);
+    assert_eq!(rows(&t), ["abc한글0", "12345678", "9", "last"]);
+    assert_eq!((t.cursor().line, t.cursor().col), (3, 4));
+    // 화면 끝에 닿으면 나머지는 히스토리로 간다.
+    let mut t = Engine::new(16, 6, 100);
+    t.feed(b"abcdefghijklmnopqrstuvwxyz0123456\r\nlast");
+    t.resize(4, 6);
+    assert_eq!(t.history_len(), 4);
+    assert_eq!(rows(&t), ["qrst", "uvwx", "yz01", "2345", "6", "last"]);
+    assert_eq!((t.cursor().line, t.cursor().col), (5, 3));
+    // 커서 아래 문단이 늘어도 xterm.js는 커서를 늘어난 줄 수만큼 내린다.
+    let mut t = Engine::new(16, 4, 100);
+    t.feed("top\r\nabc한글0123456789\x1b[1;4H".as_bytes());
+    t.resize(8, 4);
+    assert_eq!(t.history_len(), 0);
+    assert_eq!(rows(&t), ["top", "abc한글0", "12345678", "9"]);
+    assert_eq!((t.cursor().line, t.cursor().col), (1, 3));
+}
