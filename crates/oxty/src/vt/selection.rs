@@ -9,11 +9,11 @@ use std::cmp::min;
 use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
 
-use crate::grid::{Dimensions, GridCell, Indexed};
-use crate::index::{Boundary, Column, Line, Point, Side};
-use crate::term::Term;
-use crate::term::cell::{Cell, Flags};
-use crate::vte::ansi::CursorShape;
+use crate::vt::grid::{Dimensions, GridCell, Indexed};
+use crate::vt::index::{Boundary, Column, Line, Point, Side};
+use crate::vt::term::Term;
+use crate::vt::term::cell::{Cell, Flags};
+use crate::vt::vte::ansi::CursorShape;
 
 /// A Point and side within that point.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -396,9 +396,9 @@ impl Selection {
 mod tests {
     use super::*;
 
-    use crate::index::{Column, Point, Side};
-    use crate::term::test::TermSize;
-    use crate::term::{Config, Term};
+    use crate::vt::index::{Column, Point, Side};
+    use crate::vt::term::test::TermSize;
+    use crate::vt::term::{Config, Term};
 
     fn term(height: usize, width: usize) -> Term<()> {
         let size = TermSize::new(width, height);

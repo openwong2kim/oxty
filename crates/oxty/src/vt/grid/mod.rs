@@ -6,9 +6,9 @@ use std::ops::{Bound, Deref, Index, IndexMut, Range, RangeBounds};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::index::{Column, Line, Point};
-use crate::term::cell::{Flags, ResetDiscriminant};
-use crate::vte::ansi::{CharsetIndex, StandardCharset};
+use crate::vt::index::{Column, Line, Point};
+use crate::vt::term::cell::{Flags, ResetDiscriminant};
+use crate::vt::vte::ansi::{CharsetIndex, StandardCharset};
 
 pub mod resize;
 mod row;
@@ -135,6 +135,11 @@ pub struct Grid<T> {
 
     /// Maximum number of lines in history.
     max_scroll_limit: usize,
+
+    /// oxty: 리사이즈 때 커서가 있는 문단을 reflow하지 않는다(xterm.js `reflowCursorLine: false`).
+    /// 기본값 `false`는 Alacritty 원래 동작이다.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    keep_cursor_paragraph: bool,
 }
 
 impl<T: GridCell + Default + PartialEq> Grid<T> {
@@ -147,7 +152,13 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             cursor: Cursor::default(),
             lines,
             columns,
+            keep_cursor_paragraph: false,
         }
+    }
+
+    /// oxty: 리사이즈 때 커서 문단을 reflow하지 않을지 정한다(xterm.js `reflowCursorLine: false`).
+    pub fn set_keep_cursor_paragraph(&mut self, keep: bool) {
+        self.keep_cursor_paragraph = keep;
     }
 
     /// Update the size of the scrollback history.

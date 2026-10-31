@@ -2,14 +2,27 @@
 name = "oxty"
 description = "A terminal emulator engine in Rust: parse VT bytes, keep the screen, hand any renderer the rows that changed. Runs natively and in WebAssembly."
 version.workspace = true
-edition.workspace = true
+# 내장한 vt 모듈(Alacritty 0.26)이 2024 edition이다.
+edition = "2024"
 rust-version.workspace = true
-license.workspace = true
+# oxty 코드는 MIT OR Apache-2.0, 내장 vt 모듈은 Apache-2.0, Unicode 11 표는 MIT(xterm.js). NOTICE.md 참고.
+license = "(MIT OR Apache-2.0) AND Apache-2.0 AND MIT"
 repository.workspace = true
 authors.workspace = true
 readme = "../../README.md"
 keywords = ["terminal", "vt100", "xterm", "wasm", "emulator"]
 categories = ["command-line-interface", "wasm"]
 
+[features]
+# vt 모듈(내장 Alacritty)의 serde 지원. 기본은 꺼짐.
+serde = ["dep:serde", "bitflags/serde", "vte/serde"]
+
 [dependencies]
-alacritty_terminal = { path = "../../vendor/alacritty_terminal", version = "=0.26.0", default-features = false }
+# vt 모듈(내장 Alacritty)의 의존성 — PTY·이벤트 루프를 뺐으므로 이것뿐이다.
+base64 = "0.22.0"
+bitflags = "2.4.1"
+log = "0.4"
+regex-automata = "0.4.3"
+unicode-width = "0.2.0"
+vte = { version = "0.15.0", default-features = false, features = ["std", "ansi"] }
+serde = { version = "1", features = ["derive", "rc"], optional = true }

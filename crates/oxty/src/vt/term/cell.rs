@@ -5,9 +5,9 @@ use bitflags::bitflags;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::grid::{self, GridCell};
-use crate::index::Column;
-use crate::vte::ansi::{Color, Hyperlink as VteHyperlink, NamedColor};
+use crate::vt::grid::{self, GridCell};
+use crate::vt::index::Column;
+use crate::vt::vte::ansi::{Color, Hyperlink as VteHyperlink, NamedColor};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -296,8 +296,8 @@ mod tests {
 
     use std::mem;
 
-    use crate::grid::Row;
-    use crate::index::Column;
+    use crate::vt::grid::Row;
+    use crate::vt::index::Column;
 
     #[test]
     fn cell_size_is_below_cap() {

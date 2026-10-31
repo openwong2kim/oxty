@@ -13,17 +13,16 @@ Source: https://github.com/alacritty/alacritty
 Licensed under the Apache License, Version 2.0. A copy of the license is
 included in this package as `LICENSE-APACHE`.
 
-**Modified.** oxty compiles a patched copy (`vendor/alacritty_terminal` in
+**Modified.** oxty compiles a patched copy (`crates/oxty/src/vt` in
 https://github.com/openwong2kim/oxty). The changes are:
 
 - character widths use the xterm.js Unicode 11 table (below);
-- resizing preserves the cursor paragraph without reflow;
+- resizing can leave the cursor paragraph without reflow (xterm.js
+  `reflowCursorLine: false`), which oxty enables;
 - SGR 5 blink is stored in a cell flag;
-- the PTY and event-loop modules, and the `polling` and `home` dependencies,
-  are left out of `wasm32` builds.
+- the PTY and event-loop modules and their dependencies are removed.
 
-The full list is in `vendor/alacritty_terminal/WMUX-PATCH.md` in the
-repository.
+The full list is in `crates/oxty/src/vt/PATCHES.md` in the repository.
 
 ---
 

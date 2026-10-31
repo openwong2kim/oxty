@@ -3,11 +3,11 @@
 use std::cmp::{Ordering, max, min};
 use std::mem;
 
-use crate::index::{Boundary, Column, Line};
-use crate::term::cell::{Flags, ResetDiscriminant};
+use crate::vt::index::{Boundary, Column, Line};
+use crate::vt::term::cell::{Flags, ResetDiscriminant};
 
-use crate::grid::row::Row;
-use crate::grid::{Dimensions, Grid, GridCell};
+use crate::vt::grid::row::Row;
+use crate::vt::grid::{Dimensions, Grid, GridCell};
 
 impl<T: GridCell + Default + PartialEq> Grid<T> {
     // wmux: xterm's default reflowCursorLine=false leaves the entire cursor
@@ -127,7 +127,8 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
     /// Grow number of columns in each row, reflowing if necessary.
     fn grow_columns(&mut self, reflow: bool, columns: usize) {
-        let cursor_paragraph = self.cursor_paragraph();
+        // oxty: 커서 문단 유지가 꺼져 있으면 None → Alacritty 원래 reflow.
+        let cursor_paragraph = self.keep_cursor_paragraph.then(|| self.cursor_paragraph());
         // Check if a row needs to be wrapped.
         let should_reflow = |row: &Row<T>| -> bool {
             let len = Column(row.len());
@@ -148,7 +149,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         let mut rows = self.raw.take_all();
 
         for (i, mut row) in rows.drain(..).enumerate().rev() {
-            if reflow && cursor_paragraph.contains(&i) {
+            if reflow && cursor_paragraph.as_ref().is_some_and(|p| p.contains(&i)) {
                 Self::resize_cursor_row(&mut row, columns);
                 reversed.push(row);
                 continue;
@@ -277,7 +278,8 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
     /// Shrink number of columns in each row, reflowing if necessary.
     fn shrink_columns(&mut self, reflow: bool, columns: usize) {
-        let cursor_paragraph = self.cursor_paragraph();
+        // oxty: 커서 문단 유지가 꺼져 있으면 None → Alacritty 원래 reflow.
+        let cursor_paragraph = self.keep_cursor_paragraph.then(|| self.cursor_paragraph());
         self.columns = columns;
 
         // Remove the linewrap special case, by moving the cursor outside of the grid.
@@ -291,7 +293,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
         let mut rows = self.raw.take_all();
         for (i, mut row) in rows.drain(..).enumerate().rev() {
-            if reflow && cursor_paragraph.contains(&i) {
+            if reflow && cursor_paragraph.as_ref().is_some_and(|p| p.contains(&i)) {
                 Self::resize_cursor_row(&mut row, columns);
                 new_raw.push(row);
                 continue;
@@ -411,10 +413,22 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Clamp display offset in case some lines went off.
         self.display_offset = min(self.display_offset, self.history_size());
 
-        // wmux: the cursor paragraph was not reflowed. xterm clamps its cursor
-        // and clears pending wrap after a shrink, even if older lines reflowed.
-        self.cursor.point.column = min(self.cursor.point.column, Column(columns - 1));
-        self.cursor.input_needs_wrap = false;
+        if self.keep_cursor_paragraph {
+            // wmux: the cursor paragraph was not reflowed. xterm clamps its cursor
+            // and clears pending wrap after a shrink, even if older lines reflowed.
+            self.cursor.point.column = min(self.cursor.point.column, Column(columns - 1));
+            self.cursor.input_needs_wrap = false;
+        } else if !reflow {
+            // Reflow the primary cursor, or clamp it if reflow is disabled.
+            self.cursor.point.column = min(self.cursor.point.column, Column(columns - 1));
+        } else if self.cursor.point.column == columns
+            && !self[self.cursor.point.line][Column(columns - 1)].flags().contains(Flags::WRAPLINE)
+        {
+            self.cursor.input_needs_wrap = true;
+            self.cursor.point.column -= 1;
+        } else {
+            self.cursor.point = self.cursor.point.grid_clamp(self, Boundary::Cursor);
+        }
 
         // Clamp the saved cursor to the grid.
         self.saved_cursor.point.column = min(self.saved_cursor.point.column, Column(columns - 1));

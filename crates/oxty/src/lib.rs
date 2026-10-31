@@ -18,17 +18,21 @@
 //!
 //! Parsing and the screen model come from a lightly patched
 //! [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 0.26
-//! (see `vendor/alacritty_terminal/WMUX-PATCH.md`).
+//! built into this crate as [`vt`] (see `src/vt/PATCHES.md`).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::{Column, Line};
-use alacritty_terminal::term::cell::{Cell as AlacCell, Flags};
-use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
-use alacritty_terminal::vte::ansi::{Color, Processor, Timeout};
+// 내장 Alacritty 포크. 원본 서식을 유지해 업그레이드 diff를 작게 한다.
+#[rustfmt::skip]
+pub mod vt;
+
+use crate::vt::event::{Event, EventListener};
+use crate::vt::grid::Dimensions;
+use crate::vt::index::{Column, Line};
+use crate::vt::term::cell::{Cell as AlacCell, Flags};
+use crate::vt::term::{Config, Term, TermDamage, TermMode};
+use crate::vt::vte::ansi::{Color, Processor, Timeout};
 
 /// Smallest and largest accepted dimensions.
 pub const MIN_COLS: u16 = 2;
@@ -219,6 +223,8 @@ impl Engine {
     pub fn new(cols: u16, rows: u16, scrollback: usize) -> Self {
         let config = Config {
             scrolling_history: scrollback.min(MAX_SCROLLBACK),
+            // xterm.js 기본값(reflowCursorLine: false)과 같게 커서 문단은 reflow하지 않는다.
+            reflow_cursor_line: false,
             ..Config::default()
         };
         let inbox = Listener::default();

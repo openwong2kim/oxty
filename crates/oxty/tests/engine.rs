@@ -1,4 +1,4 @@
-use oxty::{attr, color, mode, Cell, Damage, Engine};
+use oxty::{Cell, Damage, Engine, attr, color, mode};
 
 fn term() -> Engine {
     Engine::new(80, 24, 1000)
@@ -191,6 +191,24 @@ fn resize_keeps_content_and_clamps() {
     assert_eq!(t.row_text(0).unwrap(), "keep me");
     t.resize(0, 0);
     assert_eq!((t.cols(), t.rows()), (oxty::MIN_COLS, oxty::MIN_ROWS));
+}
+
+#[test]
+fn resize_reflows_all_but_the_cursor_paragraph() {
+    // xterm.js reflowCursorLine: false — 커서가 있는 문단만 줄을 다시 나누지 않는다.
+    let mut t = Engine::new(10, 5, 100);
+    t.feed(b"0123456789ab\r\nXXXXXXXXXXyy");
+    t.resize(20, 5);
+    let rows: Vec<String> = (0..3).map(|y| t.row_text(y).unwrap()).collect();
+    assert_eq!(rows, ["0123456789ab", "XXXXXXXXXX", "yy"]);
+}
+
+#[test]
+fn secondary_device_attributes_report_alacritty_version() {
+    // 내장 후에도 DA2 응답은 oxty 버전이 아니라 Alacritty 0.26.0(2600)이다.
+    let mut t = term();
+    t.feed(b"\x1b[>c");
+    assert_eq!(t.take_replies(), b"\x1b[>0;2600;1c");
 }
 
 #[test]

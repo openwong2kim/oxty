@@ -3,11 +3,11 @@ use std::cmp::min;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::event::EventListener;
-use crate::grid::{Dimensions, GridCell};
-use crate::index::{Boundary, Column, Direction, Line, Point, Side};
-use crate::term::Term;
-use crate::term::cell::Flags;
+use crate::vt::event::EventListener;
+use crate::vt::grid::{Dimensions, GridCell};
+use crate::vt::index::{Boundary, Column, Direction, Line, Point, Side};
+use crate::vt::term::Term;
+use crate::vt::term::cell::Flags;
 
 /// Possible vi mode motion movements.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -413,11 +413,11 @@ fn is_boundary<T>(term: &Term<T>, point: Point, direction: Direction) -> bool {
 mod tests {
     use super::*;
 
-    use crate::event::VoidListener;
-    use crate::index::{Column, Line};
-    use crate::term::test::TermSize;
-    use crate::term::{Config, Term};
-    use crate::vte::ansi::Handler;
+    use crate::vt::event::VoidListener;
+    use crate::vt::index::{Column, Line};
+    use crate::vt::term::test::TermSize;
+    use crate::vt::term::{Config, Term};
+    use crate::vt::vte::ansi::Handler;
 
     fn term() -> Term<VoidListener> {
         let size = TermSize::new(20, 20);

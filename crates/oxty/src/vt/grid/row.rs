@@ -7,9 +7,9 @@ use std::{ptr, slice};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::grid::GridCell;
-use crate::index::Column;
-use crate::term::cell::ResetDiscriminant;
+use crate::vt::grid::GridCell;
+use crate::vt::index::Column;
+use crate::vt::term::cell::ResetDiscriminant;
 
 /// A row in the grid.
 #[derive(Default, Clone, Debug)]

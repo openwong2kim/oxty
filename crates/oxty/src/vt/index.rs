@@ -8,7 +8,7 @@ use std::ops::{Add, AddAssign, Deref, Sub, SubAssign};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::grid::Dimensions;
+use crate::vt::grid::Dimensions;
 
 /// The side of a cell.
 pub type Side = Direction;

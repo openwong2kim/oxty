@@ -2,7 +2,7 @@
 
 use super::*;
 
-use crate::term::cell::Cell;
+use crate::vt::term::cell::Cell;
 
 impl GridCell for usize {
     fn is_empty(&self) -> bool {

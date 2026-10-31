@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["crates/oxty", "crates/oxty-wasm", "crates/oxty-node"]
-exclude = ["vendor/alacritty_terminal"]
 
 [workspace.package]
 version = "0.0.1"

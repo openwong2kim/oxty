@@ -7,7 +7,7 @@ use std::ops::{Index, IndexMut};
 use serde::{Deserialize, Serialize};
 
 use super::Row;
-use crate::index::Line;
+use crate::vt::index::Line;
 
 /// Maximum number of buffered lines outside of the grid for performance optimization.
 const MAX_CACHE_SIZE: usize = 1_000;
@@ -265,11 +265,11 @@ impl<T> IndexMut<Line> for Storage<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::grid::GridCell;
-    use crate::grid::row::Row;
-    use crate::grid::storage::{MAX_CACHE_SIZE, Storage};
-    use crate::index::{Column, Line};
-    use crate::term::cell::Flags;
+    use crate::vt::grid::GridCell;
+    use crate::vt::grid::row::Row;
+    use crate::vt::grid::storage::{MAX_CACHE_SIZE, Storage};
+    use crate::vt::index::{Column, Line};
+    use crate::vt::term::cell::Flags;
 
     impl GridCell for char {
         fn is_empty(&self) -> bool {

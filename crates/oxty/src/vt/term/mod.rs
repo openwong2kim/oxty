@@ -13,14 +13,14 @@ use bitflags::bitflags;
 use log::{debug, trace};
 use unicode_width::UnicodeWidthChar;
 
-use crate::event::{Event, EventListener};
-use crate::grid::{Dimensions, Grid, GridIterator, Scroll};
-use crate::index::{self, Boundary, Column, Direction, Line, Point, Side};
-use crate::selection::{Selection, SelectionRange, SelectionType};
-use crate::term::cell::{Cell, Flags, LineLength};
-use crate::term::color::Colors;
-use crate::vi_mode::{ViModeCursor, ViMotion};
-use crate::vte::ansi::{
+use crate::vt::event::{Event, EventListener};
+use crate::vt::grid::{Dimensions, Grid, GridIterator, Scroll};
+use crate::vt::index::{self, Boundary, Column, Direction, Line, Point, Side};
+use crate::vt::selection::{Selection, SelectionRange, SelectionType};
+use crate::vt::term::cell::{Cell, Flags, LineLength};
+use crate::vt::term::color::Colors;
+use crate::vt::vi_mode::{ViModeCursor, ViMotion};
+use crate::vt::vte::ansi::{
     self, Attr, CharsetIndex, Color, CursorShape, CursorStyle, Handler, Hyperlink, KeyboardModes,
     KeyboardModesApplyBehavior, NamedColor, NamedMode, NamedPrivateMode, PrivateMode, Rgb,
     StandardCharset,
@@ -351,6 +351,10 @@ pub struct Config {
 
     /// OSC52 support mode.
     pub osc52: Osc52,
+
+    /// oxty: 리사이즈 때 커서가 있는 문단도 reflow할지(xterm.js `reflowCursorLine`).
+    /// 기본값 `true`는 Alacritty 원래 동작이다.
+    pub reflow_cursor_line: bool,
 }
 
 impl Default for Config {
@@ -362,6 +366,7 @@ impl Default for Config {
             vi_mode_cursor_style: Default::default(),
             kitty_keyboard: Default::default(),
             osc52: Default::default(),
+            reflow_cursor_line: true,
         }
     }
 }
@@ -412,8 +417,10 @@ impl<T> Term<T> {
         let num_lines = dimensions.screen_lines();
 
         let history_size = config.scrolling_history;
-        let grid = Grid::new(num_lines, num_cols, history_size);
-        let inactive_grid = Grid::new(num_lines, num_cols, 0);
+        let mut grid = Grid::new(num_lines, num_cols, history_size);
+        let mut inactive_grid = Grid::new(num_lines, num_cols, 0);
+        grid.set_keep_cursor_paragraph(!config.reflow_cursor_line);
+        inactive_grid.set_keep_cursor_paragraph(!config.reflow_cursor_line);
 
         let tabs = TabStops::new(grid.columns());
 
@@ -508,6 +515,9 @@ impl<T> Term<T> {
         };
 
         self.event_proxy.send_event(title_event);
+
+        self.grid.set_keep_cursor_paragraph(!self.config.reflow_cursor_line);
+        self.inactive_grid.set_keep_cursor_paragraph(!self.config.reflow_cursor_line);
 
         if self.mode.contains(TermMode::ALT_SCREEN) {
             self.inactive_grid.update_history(self.config.scrolling_history);
@@ -1066,7 +1076,7 @@ impl<T: EventListener> Handler for Term<T> {
     #[inline(never)]
     fn input(&mut self, c: char) {
         // Number of cells the char will occupy.
-        let width = match crate::wmux_unicode11::width(c) {
+        let width = match crate::vt::wmux_unicode11::width(c) {
             Some(width) => width,
             None => return,
         };
@@ -1268,7 +1278,7 @@ impl<T: EventListener> Handler for Term<T> {
             },
             Some('>') => {
                 trace!("Reporting secondary device attributes");
-                let version = version_number(env!("CARGO_PKG_VERSION"));
+                let version = version_number("0.26.0");
                 let text = format!("\x1b[>0;{version};1c");
                 self.event_proxy.send_event(Event::PtyWrite(text));
             },
@@ -2425,7 +2435,7 @@ pub mod test {
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
 
-    use crate::event::VoidListener;
+    use crate::vt::event::VoidListener;
 
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct TermSize {
@@ -2460,7 +2470,7 @@ pub mod test {
     /// # Examples
     ///
     /// ```rust
-    /// use alacritty_terminal::term::test::mock_term;
+    /// use oxty::vt::term::test::mock_term;
     ///
     /// // Create a terminal with the following cells:
     /// //
@@ -2516,13 +2526,13 @@ mod tests {
 
     use std::mem;
 
-    use crate::event::VoidListener;
-    use crate::grid::{Grid, Scroll};
-    use crate::index::{Column, Point, Side};
-    use crate::selection::{Selection, SelectionType};
-    use crate::term::cell::{Cell, Flags};
-    use crate::term::test::TermSize;
-    use crate::vte::ansi::{self, CharsetIndex, Handler, StandardCharset};
+    use crate::vt::event::VoidListener;
+    use crate::vt::grid::{Grid, Scroll};
+    use crate::vt::index::{Column, Point, Side};
+    use crate::vt::selection::{Selection, SelectionType};
+    use crate::vt::term::cell::{Cell, Flags};
+    use crate::vt::term::test::TermSize;
+    use crate::vt::vte::ansi::{self, CharsetIndex, Handler, StandardCharset};
 
     #[test]
     fn scroll_display_page_up() {
@@ -3299,7 +3309,7 @@ mod tests {
 
     #[test]
     fn parse_cargo_version() {
-        assert!(version_number(env!("CARGO_PKG_VERSION")) >= 10_01);
+        assert!(version_number("0.26.0") >= 10_01);
         assert_eq!(version_number("0.0.1-dev"), 1);
         assert_eq!(version_number("0.1.2-dev"), 1_02);
         assert_eq!(version_number("1.2.3-dev"), 1_02_03);

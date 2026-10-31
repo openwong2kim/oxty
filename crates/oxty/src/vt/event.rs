@@ -3,8 +3,8 @@ use std::fmt::{self, Debug, Formatter};
 use std::process::ExitStatus;
 use std::sync::Arc;
 
-use crate::term::ClipboardType;
-use crate::vte::ansi::Rgb;
+use crate::vt::term::ClipboardType;
+use crate::vt::vte::ansi::Rgb;
 
 /// Terminal event.
 ///

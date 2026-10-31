@@ -97,16 +97,13 @@ node --test crates/oxty-node/test.cjs  # N-API tests
 ```
 
 Requires Rust ≥ 1.85 and Node ≥ 18. Format with
-`cargo fmt -p oxty -p oxty-wasm -p oxty-node` — `--all` would also reformat
-the vendored Alacritty, which is kept byte-identical to its patched upstream.
+`cargo fmt -p oxty -p oxty-wasm -p oxty-node`. The built-in Alacritty fork
+(`crates/oxty/src/vt`) is `#[rustfmt::skip]` so it stays close to upstream.
 
 ## Roadmap
 
-0. **Publish the patched Alacritty fork as its own crate** (e.g. `oxty-vt`).
-   `cargo publish` replaces the `vendor/` path with upstream
-   `alacritty_terminal` 0.26.0, which lacks the wasm32 gates, the Unicode 11
-   table and `Flags::BLINK`, so the `oxty` crate cannot go to crates.io until
-   then. The npm package is unaffected (it ships the compiled wasm).
+0. **Publish to crates.io and npm.** The patched Alacritty fork is built into
+   the `oxty` crate as `oxty::vt`, so `oxty` publishes as a single crate.
 1. **xterm.js-compatible facade** — `new Terminal(options)`, `open(element)`,
    `onData`, `write`, `buffer` — over the oxty engine, keeping xterm.js's
    WebGL/DOM renderers and addons.
@@ -120,10 +117,10 @@ the vendored Alacritty, which is kept byte-identical to its patched upstream.
 ## Credits
 
 The parser and screen model are
-[`alacritty_terminal`](https://github.com/alacritty/alacritty) 0.26, vendored
-with small compatibility patches (xterm Unicode 11 widths, resize behaviour,
-blink, and a wasm32 build) described in
-[`vendor/alacritty_terminal/WMUX-PATCH.md`](vendor/alacritty_terminal/WMUX-PATCH.md).
+[`alacritty_terminal`](https://github.com/alacritty/alacritty) 0.26, built in
+as `oxty::vt` with small compatibility patches (xterm Unicode 11 widths, resize
+behaviour, blink, and no PTY/event loop so it builds for wasm32) described in
+[`crates/oxty/src/vt/PATCHES.md`](crates/oxty/src/vt/PATCHES.md).
 oxty grew out of the terminal engine in [wmux](https://github.com/openwong2kim/wmux).
 See [NOTICE.md](NOTICE.md).
 

@@ -2,20 +2,22 @@
 
 ## alacritty_terminal 0.26.0
 
-`vendor/alacritty_terminal` is the published `alacritty_terminal` 0.26.0 crate
+`crates/oxty/src/vt` is the published `alacritty_terminal` 0.26.0 crate
 by Christian Duerr, Joe Wilm and the Alacritty contributors, licensed under
-the Apache License 2.0 (`vendor/alacritty_terminal/LICENSE-APACHE`).
+the Apache License 2.0 (`crates/oxty/LICENSE-APACHE`), built into the `oxty`
+crate as the `oxty::vt` module.
 
-It is modified. The changes, carried over from wmux, are listed in
-`vendor/alacritty_terminal/WMUX-PATCH.md`: an xterm Unicode 11 width table,
-cursor-paragraph resize behaviour, SGR blink, and gating of the PTY/event-loop
-modules and their dependencies so the crate builds for `wasm32-unknown-unknown`.
+It is modified. The changes, partly carried over from wmux, are listed in
+`crates/oxty/src/vt/PATCHES.md`: an xterm Unicode 11 width table, an option for
+xterm.js cursor-paragraph resize behaviour, SGR blink, and removal of the
+PTY/event-loop modules and their dependencies so the code builds for
+`wasm32-unknown-unknown`.
 
 ## xterm.js Unicode 11 width table
 
-`vendor/alacritty_terminal/src/wmux_unicode11.rs` is generated from the
+`crates/oxty/src/vt/wmux_unicode11.rs` is generated from the
 xterm.js Unicode 11 provider, Copyright (c) 2017–2019 The xterm.js authors,
-MIT license (`vendor/alacritty_terminal/LICENSE-XTERM`).
+MIT license (`crates/oxty/LICENSE-XTERM`).
 
 ## wmux
 
