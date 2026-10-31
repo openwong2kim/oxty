@@ -13,7 +13,8 @@ single crate.
   hash. The xterm.js MIT license is included as `../../LICENSE-XTERM`.
   Regenerate deliberately after a provider update.
 - `mod.rs` registers that module; `term/mod.rs` uses its width lookup for
-  character input and exposes read-only `inactive_grid()` for snapshot replay.
+  character input and exposes read-only `inactive_grid()` and
+  `scroll_region()` for snapshot replay.
 - Cursor-paragraph resize (xterm.js `reflowCursorLine: false`) is an option:
   `term::Config::reflow_cursor_line` (default `true`, upstream behaviour) sets
   `Grid::set_keep_cursor_paragraph`. When kept, `grid/resize.rs` leaves the
@@ -26,6 +27,11 @@ single crate.
   bottom lines, moves the last cursor point along, and counts the rows in
   `Term::damage_scrolled()`. Region scrolls, a scrolled-back view, or scrolling
   a full screen height still give full damage. `oxty::Engine` turns it on.
+- RIS keeping the cursor hidden is an option:
+  `term::Config::ris_keeps_cursor_visibility` (default `false`, upstream: RIS
+  shows the cursor again). When on, `reset_state` restores DECTCEM
+  (`TermMode::SHOW_CURSOR`) after resetting the modes, as xterm.js does.
+  `oxty::Engine` turns it on.
 - `term/cell.rs` uses the remaining u16 flag bit for SGR blink; `term/mod.rs`
   retains SGR 5, ignores SGR 6 like xterm, and clears blink on SGR 25/reset.
   This keeps the 24-byte cell layout while allowing ANSI replay to preserve blink.

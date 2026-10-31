@@ -382,6 +382,10 @@ pub struct Config {
     /// 켜면 [`Term::damage_scrolled`]만큼 렌더러가 기존 줄을 위로 옮긴 뒤 damage 줄만 다시 그린다.
     /// 기본값 `false`는 Alacritty 원래 동작(스크롤마다 전체 damage)이다.
     pub scroll_damage: bool,
+
+    /// oxty: RIS(`ESC c`)가 커서 숨김(DECTCEM)을 유지할지(xterm.js 동작).
+    /// 기본값 `false`는 Alacritty 원래 동작(RIS가 커서를 다시 보이게 함)이다.
+    pub ris_keeps_cursor_visibility: bool,
 }
 
 impl Default for Config {
@@ -395,6 +399,7 @@ impl Default for Config {
             osc52: Default::default(),
             reflow_cursor_line: true,
             scroll_damage: false,
+            ris_keeps_cursor_visibility: false,
         }
     }
 }
@@ -699,6 +704,11 @@ impl<T> Term<T> {
     /// wmux snapshot access; does not swap grids or mutate saved cursor state.
     pub fn inactive_grid(&self) -> &Grid<Cell> {
         &self.inactive_grid
+    }
+
+    /// oxty snapshot access: the active scroll region (DECSTBM), `0..screen_lines` when unset.
+    pub fn scroll_region(&self) -> &Range<Line> {
+        &self.scroll_region
     }
 
     /// Resize terminal to new dimensions.
@@ -1913,8 +1923,12 @@ impl<T: EventListener> Handler for Term<T> {
         self.inactive_keyboard_mode_stack = Default::default();
 
         // Preserve vi mode across resets.
+        let cursor_shown = self.mode.contains(TermMode::SHOW_CURSOR);
         self.mode &= TermMode::VI;
         self.mode.insert(TermMode::default());
+        if self.config.ris_keeps_cursor_visibility {
+            self.mode.set(TermMode::SHOW_CURSOR, cursor_shown);
+        }
 
         self.event_proxy.send_event(Event::CursorBlinkingChange);
         self.mark_fully_damaged();

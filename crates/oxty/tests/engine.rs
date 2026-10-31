@@ -153,6 +153,17 @@ fn synchronized_output_waits_for_end_or_host_flush() {
 }
 
 #[test]
+fn reset_keeps_cursor_hidden_like_xterm() {
+    let mut t = term();
+    t.feed(b"\x1b[?25l\x1b[?2004hX\x1bc");
+    assert!(!t.cursor().visible);
+    assert_eq!(t.modes() & mode::BRACKETED_PASTE, 0);
+    assert_eq!(t.row_text(0).unwrap(), "");
+    t.feed(b"\x1b[?25h\x1bc");
+    assert!(t.cursor().visible);
+}
+
+#[test]
 fn combining_marks_are_kept() {
     let mut t = term();
     t.feed("e\u{301}x".as_bytes());

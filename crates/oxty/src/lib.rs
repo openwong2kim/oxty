@@ -265,6 +265,8 @@ impl Engine {
             reflow_cursor_line: false,
             // 스크롤 때 화면 전체 대신 스크롤 줄 수와 새 줄만 damage로 낸다.
             scroll_damage: true,
+            // xterm.js처럼 RIS 뒤에도 커서 숨김을 유지한다.
+            ris_keeps_cursor_visibility: true,
             ..Config::default()
         };
         let inbox = Listener::default();
