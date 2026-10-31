@@ -1,0 +1,11 @@
+{
+  "workloadName": "scroll-flood",
+  "seed": 0,
+  "workloadHash": "2dd963f5e2fb4fa64f4dc3be32caf816e25732e8543ae784453a50596e2b2494",
+  "synthetic": true,
+  "createdVia": "synthetic-generator",
+  "initialGeometry": {
+    "cols": 80,
+    "rows": 24
+  }
+}

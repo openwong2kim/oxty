@@ -1,0 +1,11 @@
+{
+  "workloadName": "alt-screen",
+  "seed": 0,
+  "workloadHash": "98ada7189d1f52e7fa31fdbc2cab6135c2cfef45b128bef2ef2bbb38fa8bc82b",
+  "synthetic": true,
+  "createdVia": "synthetic-generator",
+  "initialGeometry": {
+    "cols": 80,
+    "rows": 24
+  }
+}

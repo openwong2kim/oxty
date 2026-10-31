@@ -1,0 +1,11 @@
+{
+  "workloadName": "sgr-spectrum",
+  "seed": 0,
+  "workloadHash": "834127530a06cab353128943b6d815ce016c2bf9def5548f48b07c2ed084ee0a",
+  "synthetic": true,
+  "createdVia": "synthetic-generator",
+  "initialGeometry": {
+    "cols": 80,
+    "rows": 24
+  }
+}

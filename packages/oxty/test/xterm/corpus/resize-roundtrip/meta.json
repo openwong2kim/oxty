@@ -1,0 +1,11 @@
+{
+  "workloadName": "resize-roundtrip",
+  "seed": 0,
+  "workloadHash": "3563797602fca17f98f54db7a00238949fb895f077ec6676dd816716bf6b4512",
+  "synthetic": true,
+  "createdVia": "synthetic-generator",
+  "initialGeometry": {
+    "cols": 80,
+    "rows": 24
+  }
+}

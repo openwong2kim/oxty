@@ -1,0 +1,11 @@
+{
+  "workloadName": "cjk-emoji",
+  "seed": 0,
+  "workloadHash": "9f577aa2ed438cc05712e97870adb1d4d931dd74dd4dc5808c35393a1a5eb2c0",
+  "synthetic": true,
+  "createdVia": "synthetic-generator",
+  "initialGeometry": {
+    "cols": 80,
+    "rows": 24
+  }
+}

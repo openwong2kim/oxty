@@ -1,0 +1,11 @@
+{
+  "workloadName": "resize-reflow",
+  "seed": 0,
+  "workloadHash": "7fb612760a62d6b7e27bb6150a1b9a47bf90025da912ce0e2c73404ee915ada3",
+  "synthetic": true,
+  "createdVia": "synthetic-generator",
+  "initialGeometry": {
+    "cols": 80,
+    "rows": 24
+  }
+}
