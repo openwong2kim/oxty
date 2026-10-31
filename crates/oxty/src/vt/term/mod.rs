@@ -2018,7 +2018,19 @@ impl<T: EventListener> Handler for Term<T> {
         let mode = match mode {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
-                debug!("Ignoring unknown mode {mode} in set_private_mode");
+                match mode {
+                    // oxty: vte 테이블에 없는 xterm 모드. 47/1047은 1049처럼 대체 화면으로 가되
+                    // 커서를 저장하지 않는다(xterm.js setModePrivate). swap_alt가 덮은 저장 커서를 되돌리고,
+                    // ?1049l로 나오면 xterm.js는 그 저장 커서로 돌아가므로 주 화면 커서도 저장 커서로 둔다.
+                    47 | 1047 => if !self.mode.contains(TermMode::ALT_SCREEN) {
+                        let saved_cursor = self.grid.saved_cursor.clone();
+                        self.swap_alt();
+                        self.inactive_grid.cursor = saved_cursor.clone();
+                        self.inactive_grid.saved_cursor = saved_cursor;
+                    },
+                    1048 => self.save_cursor_position(),
+                    _ => debug!("Ignoring unknown mode {mode} in set_private_mode"),
+                }
                 return;
             },
         };
@@ -2081,7 +2093,15 @@ impl<T: EventListener> Handler for Term<T> {
         let mode = match mode {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
-                debug!("Ignoring unknown mode {mode} in unset_private_mode");
+                match mode {
+                    // oxty: xterm.js activateNormalBuffer처럼 주 화면 커서가 대체 화면 커서를 이어받는다.
+                    47 | 1047 => if self.mode.contains(TermMode::ALT_SCREEN) {
+                        self.swap_alt();
+                        self.grid.cursor = self.inactive_grid.cursor.clone();
+                    },
+                    1048 => self.restore_cursor_position(),
+                    _ => debug!("Ignoring unknown mode {mode} in unset_private_mode"),
+                }
                 return;
             },
         };

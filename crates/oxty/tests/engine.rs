@@ -368,3 +368,34 @@ fn erase_display_keeps_history_like_xterm() {
     assert!((0..6).all(|y| t.row_text(y).unwrap().is_empty()));
     assert_eq!((t.cursor().line, t.cursor().col), (2, 1));
 }
+
+#[test]
+fn legacy_alternate_screen_modes_match_xterm() {
+    for enter in ["\x1b[?47h", "\x1b[?1047h"] {
+        let mut t = Engine::new(20, 6, 100);
+        t.feed(format!("main{enter}alt").as_bytes());
+        assert_ne!(t.modes() & mode::ALT_SCREEN, 0, "{enter:?}");
+        assert_eq!(t.row_text(0).unwrap(), "    alt");
+        // xterm.js: 나올 때 주 화면 커서는 대체 화면 커서 위치를 이어받는다(1049와 달리 복원 없음).
+        t.feed(format!("\x1b[3;5H{}", enter.replace('h', "l")).as_bytes());
+        assert_eq!(t.modes() & mode::ALT_SCREEN, 0);
+        assert_eq!(t.row_text(0).unwrap(), "main");
+        assert_eq!((t.cursor().line, t.cursor().col), (2, 4));
+    }
+    // 47/1047은 저장된 커서(DECSC)를 덮어쓰지 않는다.
+    let mut t = Engine::new(20, 6, 100);
+    t.feed(b"\x1b[2;2H\x1b7\x1b[H\x1b[?47h\x1b[?47l\x1b8");
+    assert_eq!((t.cursor().line, t.cursor().col), (1, 1));
+    // 47로 들어가 ?1049l로 나오면 xterm.js는 주 화면 저장 커서(여기선 저장한 적 없어 홈)로 간다.
+    let mut t = Engine::new(20, 6, 100);
+    t.feed(b"main\x1b[?47halt\x1b[?1049lX");
+    assert_eq!(t.row_text(0).unwrap(), "Xain");
+}
+
+#[test]
+fn mode_1048_saves_and_restores_cursor() {
+    let mut t = Engine::new(20, 6, 100);
+    t.feed(b"\x1b[3;3H\x1b[?1048h\x1b[H\x1b[?1048lX");
+    assert_eq!(t.row_text(2).unwrap(), "  X");
+    assert_eq!((t.cursor().line, t.cursor().col), (2, 3));
+}

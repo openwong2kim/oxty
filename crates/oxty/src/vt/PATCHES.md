@@ -38,6 +38,14 @@ single crate.
   `Grid::clear_viewport`). When off, `clear_screen` resets the screen in place
   as on the alternate screen, like xterm.js `scrollOnEraseInDisplay: false`.
   `oxty::Engine` turns it off.
+- `term/mod.rs` handles the xterm private modes 47, 1047 and 1048, which the
+  `vte` table reports as `PrivateMode::Unknown` and upstream ignores. 47/1047
+  switch screens through `swap_alt` like 1049 but keep the primary saved
+  cursor; while on the alternate screen the primary cursor is that saved
+  cursor, so a later `?1049l` returns to it as xterm.js `restoreCursor` does.
+  Leaving with 47/1047 gives the primary screen the alternate cursor (xterm.js
+  `activateNormalBuffer`). 1048 saves/restores the cursor like
+  DECSC/DECRC.
 - `term/cell.rs` uses the remaining u16 flag bit for SGR blink; `term/mod.rs`
   retains SGR 5, ignores SGR 6 like xterm, and clears blink on SGR 25/reset.
   This keeps the 24-byte cell layout while allowing ANSI replay to preserve blink.
