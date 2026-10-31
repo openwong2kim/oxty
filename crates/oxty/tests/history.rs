@@ -1,6 +1,13 @@
 //! 압축 히스토리 차분 테스트: 같은 입력·resize·뷰 스크롤을 압축한 엔진과 압축하지 않은 엔진
 //! (Alacritty 원래 배치)에 주고 화면·히스토리·damage·스냅샷이 모두 같은지 본다.
-use oxty::{Cell, CellExtra, Engine};
+use oxty::vt::event::VoidListener;
+use oxty::vt::grid::{Dimensions, Row};
+use oxty::vt::index::{Column, Line};
+use oxty::vt::term::cell::{Cell as AlacCell, Flags};
+use oxty::vt::term::test::TermSize;
+use oxty::vt::term::{Config, Term, TermMode};
+use oxty::vt::vte::ansi::{Color, Processor, StdSyncHandler};
+use oxty::{Cell, CellExtra, Engine, TermHistory};
 
 /// 재현 가능한 의사 난수(xorshift64*).
 struct Rng(u64);
@@ -248,4 +255,89 @@ fn compressed_history_matches_uncompressed() {
 fn compressed_history_keeps_long_scrollback() {
     // 블록 경계와 오래된 줄 버리기가 여러 번 일어나도록 길게 돌린다.
     run(7, 4000, 3000);
+}
+
+/// 칸 비교용 값. 링크는 URI만 본다(ID 없는 링크에 Alacritty가 프로세스 전역 번호를 붙인다).
+type CellKey = (
+    char,
+    Color,
+    Color,
+    Flags,
+    Vec<char>,
+    Option<Color>,
+    Option<String>,
+);
+
+/// 주 화면의 히스토리와 화면 줄 전체(오래된 줄부터)를 칸 단위로 꺼낸다.
+fn primary_rows(term: &Term<VoidListener>, older: Option<&TermHistory>) -> Vec<Vec<CellKey>> {
+    let grid = if term.mode().contains(TermMode::ALT_SCREEN) {
+        term.inactive_grid()
+    } else {
+        term.grid()
+    };
+    let cells = |row: &Row<AlacCell>| {
+        (0..grid.columns())
+            .map(|x| {
+                let c = &row[Column(x)];
+                let link = c.hyperlink().map(|h| h.uri().to_owned());
+                let zerowidth = c.zerowidth().unwrap_or_default().to_vec();
+                (
+                    c.c,
+                    c.fg,
+                    c.bg,
+                    c.flags,
+                    zerowidth,
+                    c.underline_color(),
+                    link,
+                )
+            })
+            .collect()
+    };
+    let mut rows: Vec<_> = (0..older.map_or(0, TermHistory::len))
+        .map(|i| cells(&older.unwrap().row(i)))
+        .collect();
+    for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
+        rows.push(cells(&grid[Line(y)]));
+    }
+    rows
+}
+
+#[test]
+fn term_history_matches_plain_term() {
+    // Engine 없이 Term을 직접 쓰는 쪽(wmux 스냅샷)도 압축 히스토리로 같은 줄을 얻는다.
+    // 기본 Config라 ED2가 화면을 히스토리로 미는 경로도 탄다.
+    for seed in 1..=20u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        let (cols, rows) = (rng.below(70) as usize + 10, rng.below(10) as usize + 4);
+        let scrollback = [20, 200, 2000][seed as usize % 3];
+        let config = |history| Config {
+            scrolling_history: history,
+            reflow_cursor_line: false,
+            ..Config::default()
+        };
+        let size = |cols, rows| TermSize::new(cols, rows);
+        let mut packed = Term::new(config(TermHistory::RECENT), &size(cols, rows), VoidListener);
+        let history = TermHistory::attach(&mut packed, scrollback);
+        let mut plain = Term::new(config(scrollback), &size(cols, rows), VoidListener);
+        let (mut a, mut b) = (
+            Processor::<StdSyncHandler>::new(),
+            Processor::<StdSyncHandler>::new(),
+        );
+        for step in 0..600 {
+            if rng.below(15) == 0 {
+                let (c, r) = (rng.below(110) as usize + 2, rng.below(16) as usize + 1);
+                history.resize(&mut packed, size(c, r));
+                plain.resize(size(c, r));
+            } else {
+                let bytes = chunk(&mut rng).into_bytes();
+                a.advance(&mut packed, &bytes);
+                b.advance(&mut plain, &bytes);
+            }
+            assert_eq!(
+                primary_rows(&packed, Some(&history)),
+                primary_rows(&plain, None),
+                "seed {seed} step {step}"
+            );
+        }
+    }
 }

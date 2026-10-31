@@ -20,7 +20,7 @@
 //! [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 0.26
 //! built into this crate as [`vt`] (see `src/vt/PATCHES.md`).
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 // 내장 Alacritty 포크. 원본 서식을 유지해 업그레이드 diff를 작게 한다.
@@ -29,11 +29,12 @@ pub mod vt;
 
 mod history;
 mod snapshot;
+pub use history::TermHistory;
 pub use snapshot::SnapshotRefusal;
 
 use crate::history::History;
 use crate::vt::event::{Event, EventListener};
-use crate::vt::grid::{Dimensions, Grid, HistorySink, Row, Scroll};
+use crate::vt::grid::{Dimensions, Grid, Row, Scroll};
 use crate::vt::index::Line;
 use crate::vt::term::cell::{Cell as AlacCell, Flags};
 use crate::vt::term::{Config, Term, TermDamage, TermMode};
@@ -46,10 +47,6 @@ pub const MIN_ROWS: u16 = 1;
 pub const MAX_ROWS: u16 = 1000;
 /// Upper bound on retained scrollback lines.
 pub const MAX_SCROLLBACK: usize = 100_000;
-
-/// 압축 히스토리일 때 Alacritty 그리드에 그대로 두는 최근 히스토리 줄 수. 넓은 글자를 덮어쓸 때
-/// 바로 윗줄(히스토리일 수 있다)을 고치므로 0으로 둘 수 없다.
-const RECENT_HISTORY: usize = 16;
 
 /// How long a synchronized update (`CSI ? 2026 h`) may hold output back
 /// before the host should call [`Engine::flush_sync`]. Matches Alacritty.
@@ -264,8 +261,8 @@ pub struct Engine {
     tail: snapshot::RawTail,
     // vte 동기화 버퍼의 사본. vte는 내용을 공개하지 않고 개수만 알려 준다.
     held: Vec<u8>,
-    // 압축 히스토리. 켜져 있으면 Alacritty는 최근 RECENT_HISTORY줄만 들고 더 오래된 줄을 여기로 넘긴다.
-    history: Option<Arc<Mutex<History>>>,
+    // 압축 히스토리. 켜져 있으면 Alacritty는 최근 TermHistory::RECENT줄만 들고 더 오래된 줄을 여기로 넘긴다.
+    history: Option<TermHistory>,
     scrollback: usize,
     // 압축 히스토리일 때 주 화면의 뷰 위치는 엔진이 정한다(Alacritty 쪽은 늘 0).
     offset: usize,
@@ -294,9 +291,13 @@ impl Engine {
 
     fn build(cols: u16, rows: u16, scrollback: usize, compress: bool) -> Self {
         let scrollback = scrollback.min(MAX_SCROLLBACK);
-        let compress = compress && scrollback > RECENT_HISTORY;
+        let compress = compress && scrollback > TermHistory::RECENT;
         let config = Config {
-            scrolling_history: if compress { RECENT_HISTORY } else { scrollback },
+            scrolling_history: if compress {
+                TermHistory::RECENT
+            } else {
+                scrollback
+            },
             // xterm.js 기본값(reflowCursorLine: false)과 같게 커서 문단은 reflow하지 않는다.
             reflow_cursor_line: false,
             // 스크롤 때 화면 전체 대신 스크롤 줄 수와 새 줄만 damage로 낸다.
@@ -309,12 +310,7 @@ impl Engine {
         };
         let inbox = Listener::default();
         let mut term = Term::new(config, &size(cols, rows), inbox.clone());
-        let history = compress.then(|| {
-            let history = Arc::new(Mutex::new(History::new(scrollback - RECENT_HISTORY)));
-            let sink: Arc<Mutex<dyn HistorySink<AlacCell>>> = history.clone();
-            term.grid_mut().set_history_sink(Some(sink));
-            history
-        });
+        let history = compress.then(|| TermHistory::attach(&mut term, scrollback));
         Self {
             term,
             parser: Processor::new(),
@@ -342,18 +338,9 @@ impl Engine {
         }
     }
 
-    fn primary_mut(&mut self) -> &mut Grid<AlacCell> {
-        if self.alt_screen() {
-            self.term.inactive_grid_mut()
-        } else {
-            self.term.grid_mut()
-        }
-    }
-
     /// 압축 히스토리. 대체 화면에서는 히스토리가 보이지 않으므로 `None`이다.
     fn stored(&self) -> Option<MutexGuard<'_, History>> {
-        let history = self.history.as_ref().filter(|_| !self.alt_screen())?;
-        Some(history.lock().unwrap_or_else(PoisonError::into_inner))
+        Some(self.history.as_ref().filter(|_| !self.alt_screen())?.lock())
     }
 
     /// 주 화면이 스크롤한 만큼 뒤로 올린 뷰를 따라 올린다(Alacritty `display_offset`과 같다).
@@ -364,9 +351,10 @@ impl Engine {
         let scrolled = self.primary().scrolled_lines();
         let delta = (scrolled - self.scrolled_seen) as usize;
         self.scrolled_seen = scrolled;
-        let cleared = self.history.as_ref().is_some_and(|h| {
-            std::mem::take(&mut h.lock().unwrap_or_else(PoisonError::into_inner).cleared)
-        });
+        let cleared = self
+            .history
+            .as_ref()
+            .is_some_and(|h| std::mem::take(&mut h.lock().cleared));
         // Alacritty는 히스토리를 지우면 뷰를 맨 아래로 돌린다(damage는 내지 않는다).
         if cleared {
             self.offset = 0;
@@ -415,33 +403,13 @@ impl Engine {
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].
     pub fn resize(&mut self, cols: u16, rows: u16) {
-        let Some(history) = self.history.clone() else {
-            self.term.resize(size(cols, rows));
-            return;
-        };
-        // 압축 히스토리를 그리드에 잠시 풀어 넣고 Alacritty의 reflow를 그대로 탄 뒤 다시 압축한다.
-        let older = history
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take_all();
-        let (scrollback, offset) = (self.scrollback, self.offset);
-        let grid = self.primary_mut();
-        let sink = grid.set_history_sink(None);
-        grid.prepend_history(older, scrollback);
-        grid.set_display_offset(offset);
-        self.term.resize(size(cols, rows));
-        let grid = self.primary_mut();
-        let offset = grid.display_offset();
-        let older = grid.split_off_history(RECENT_HISTORY);
-        let scrolled = grid.scrolled_lines();
-        grid.set_history_sink(sink);
-        let mut stored = history.lock().unwrap_or_else(PoisonError::into_inner);
-        for row in &older {
-            stored.push(row);
+        match &self.history {
+            Some(history) => {
+                self.offset = history.reflow(&mut self.term, size(cols, rows), self.offset);
+                self.scrolled_seen = self.primary().scrolled_lines();
+            }
+            None => self.term.resize(size(cols, rows)),
         }
-        drop(stored);
-        self.offset = offset;
-        self.scrolled_seen = scrolled;
     }
 
     pub fn cols(&self) -> u16 {
@@ -722,10 +690,7 @@ impl Engine {
     /// replay the raw output instead.
     pub fn ansi_snapshot(&self) -> Result<Vec<u8>, SnapshotRefusal> {
         let held = self.sync_pending().then_some(self.held.as_slice());
-        let history = self
-            .history
-            .as_ref()
-            .map(|h| h.lock().unwrap_or_else(PoisonError::into_inner));
+        let history = self.history.as_ref().map(TermHistory::lock);
         snapshot::ansi(&self.term, held, &self.tail, history.as_deref())
     }
 }

@@ -8,10 +8,12 @@
 //! 줄은 64 KiB 블록에 이어 붙이고, 오래된 줄이 다 빠진 블록을 통째로 버린다.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use crate::vt::grid::{HistorySink, Row};
+use crate::vt::event::EventListener;
+use crate::vt::grid::{Dimensions, HistorySink, Row};
 use crate::vt::term::cell::{Cell, CellExtra, Flags};
+use crate::vt::term::{Term, TermMode};
 use crate::vt::vte::ansi::{Color, NamedColor, Rgb};
 
 const BLOCK_BYTES: usize = 64 << 10;
@@ -154,6 +156,94 @@ impl HistorySink<Cell> for History {
     fn clear(&mut self) {
         self.drop_all();
         self.cleared = true;
+    }
+}
+
+/// Compressed scrollback for a caller that drives its own [`Term`] instead of
+/// an [`Engine`](crate::Engine).
+///
+/// Build the term with `scrolling_history: TermHistory::RECENT` and attach
+/// this before feeding it: the primary grid then keeps the newest `RECENT`
+/// history rows and hands older ones here. Rows are numbered oldest first and
+/// sit above the grid's own history; they belong to the primary screen. Resize
+/// through [`TermHistory::resize`] so that reflow sees the whole history.
+#[derive(Clone)]
+pub struct TermHistory {
+    inner: Arc<Mutex<History>>,
+    scrollback: usize,
+}
+
+impl TermHistory {
+    /// History rows the grid itself keeps.
+    // 넓은 글자를 덮어쓸 때 바로 윗줄(히스토리일 수 있다)을 고치므로 0으로 둘 수 없다.
+    pub const RECENT: usize = 16;
+
+    /// Attaches to the primary grid of `term`, keeping `scrollback` history
+    /// rows in all.
+    pub fn attach<T>(term: &mut Term<T>, scrollback: usize) -> Self {
+        let inner = Arc::new(Mutex::new(History::new(
+            scrollback.saturating_sub(Self::RECENT),
+        )));
+        let sink: Arc<Mutex<dyn HistorySink<Cell>>> = inner.clone();
+        term.grid_mut().set_history_sink(Some(sink));
+        Self { inner, scrollback }
+    }
+
+    pub(crate) fn lock(&self) -> MutexGuard<'_, History> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Rows held here, above the grid's history.
+    pub fn len(&self) -> usize {
+        self.lock().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Row `i`, 0 being the oldest.
+    pub fn row(&self, i: usize) -> Row<Cell> {
+        self.lock().row(i)
+    }
+
+    /// Resizes `term`, reflowing these rows with the grid's.
+    pub fn resize<T: EventListener>(&self, term: &mut Term<T>, size: impl Dimensions) {
+        self.reflow(term, size, 0);
+    }
+
+    /// 압축 히스토리를 주 화면 그리드에 잠시 풀어 넣고 Alacritty의 reflow를 그대로 탄 뒤 다시 압축한다.
+    /// `offset`은 주 화면 뷰 위치이고, reflow 뒤의 위치를 돌려준다.
+    pub(crate) fn reflow<T: EventListener>(
+        &self,
+        term: &mut Term<T>,
+        size: impl Dimensions,
+        offset: usize,
+    ) -> usize {
+        let older = self.lock().take_all();
+        let alt = term.mode().contains(TermMode::ALT_SCREEN);
+        let grid = if alt {
+            term.inactive_grid_mut()
+        } else {
+            term.grid_mut()
+        };
+        let sink = grid.set_history_sink(None);
+        grid.prepend_history(older, self.scrollback);
+        grid.set_display_offset(offset);
+        term.resize(size);
+        let grid = if alt {
+            term.inactive_grid_mut()
+        } else {
+            term.grid_mut()
+        };
+        let offset = grid.display_offset();
+        let older = grid.split_off_history(Self::RECENT);
+        grid.set_history_sink(sink);
+        let mut stored = self.lock();
+        for row in &older {
+            stored.push(row);
+        }
+        offset
     }
 }
 
