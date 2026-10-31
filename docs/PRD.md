@@ -254,7 +254,7 @@ M2는 xterm.js에서 차용한 키 입력 코드로 동작한다. M3에서 인�
 | 성능 | `write`→프레임 end-to-end 처리량이 같은 코퍼스에서 xterm.js 이상. 목표값은 M1 기준선 측정 후 확정 |
 | 메모리 | 셀 크기(24B)로 인한 스크롤백 메모리를 README에 공개, 압축 저장은 1.0 전 검토(D6) |
 | 플랫폼 | Windows·macOS·Linux 네이티브, 최신 브라우저, Node 18 이상 |
-| 라이선스 | oxty 코드는 MIT OR Apache-2.0. 내장한 `vt` 모듈(Alacritty 포크)은 Apache-2.0 + `LICENSE-XTERM`(Unicode 11 표)으로 MIT 재라이선스 불가 — 크레이트 라이선스 표기와 NOTICE에 반영. xterm.js 차용 모듈은 출처·커밋을 `THIRD_PARTY_NOTICES.md`에 기록. GPL 코드는 참고만 하고 복사하지 않음 |
+| 라이선스 | oxty 코드는 Apache-2.0(2026-10-31 오너 결정, MIT 병기 폐지). 내장한 `vt` 모듈(Alacritty 포크)도 Apache-2.0, 함께 들어간 Unicode 11 표는 xterm.js MIT(`LICENSE-XTERM`) — 크레이트·npm 표기는 `Apache-2.0 AND MIT`, NOTICE에 반영. xterm.js 차용 모듈은 출처·커밋을 `THIRD_PARTY_NOTICES.md`에 기록. GPL 코드는 참고만 하고 복사하지 않음 |
 
 ---
 

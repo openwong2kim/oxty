@@ -6,7 +6,7 @@ members = ["crates/oxty", "crates/oxty-wasm", "crates/oxty-node"]
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.85"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 repository = "https://github.com/openwong2kim/oxty"
 authors = ["wong2kim"]
 

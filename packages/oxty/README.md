@@ -25,5 +25,5 @@ term.takeReplies();    // bytes to write back to the PTY
 **Status: 0.0.1, experimental.** An xterm.js-compatible front end is the next
 milestone. Docs, Rust crate and roadmap: https://github.com/openwong2kim/oxty
 
-License: MIT OR Apache-2.0. Includes `alacritty_terminal` (Apache-2.0) and the
+License: Apache-2.0. Includes `alacritty_terminal` (Apache-2.0) and the
 xterm.js Unicode 11 width table (MIT).

@@ -3,7 +3,7 @@
 //! 출처: wmux(openwong2kim/wmux, 오너 작성 MIT)의 `core/wmux-term/src/native_serialize.rs`
 //! (직렬화기)와, 호스트가 메우던 보정 `src/daemon/RustSnapshot.ts`·
 //! `src/daemon/util/ansiStreamScan.ts`(미완 escape 꼬리, UTF-8 carry, 마진 거부)를 옮겼다.
-//! oxty에서는 MIT OR Apache-2.0으로 배포한다.
+//! 같은 작성자가 oxty에서는 Apache-2.0으로 다시 배포한다.
 //!
 //! 출력 = 직렬화(grid) ‖ 원문 꼬리. 동기화 중이면 직렬화(BSU 전 grid) ‖ `CSI ?2026h` ‖ 대기 바이트 원문.
 //! 커서 가시성은 엔진 상태(`SHOW_CURSOR`)를 그대로 싣는다 — RIS 동작은 vt 옵션

@@ -1,7 +1,7 @@
 # Third-party notices for the `oxty` npm package
 
 `dist/oxty.wasm` is compiled from oxty and the third-party code below. oxty's
-own code is licensed under MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`).
+own code is licensed under Apache-2.0 (`LICENSE-APACHE`).
 
 ---
 

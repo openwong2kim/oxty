@@ -151,5 +151,5 @@ See [NOTICE.md](NOTICE.md).
 
 ## License
 
-Licensed under either of [Apache License 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option.
+Licensed under the [Apache License 2.0](LICENSE-APACHE). Third-party code it
+includes keeps its own license; see [NOTICE.md](NOTICE.md).

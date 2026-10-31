@@ -14,7 +14,6 @@
   },
   "files": [
     "dist",
-    "LICENSE-MIT",
     "LICENSE-APACHE",
     "THIRD_PARTY_NOTICES.md"
   ],
@@ -31,7 +30,7 @@
     "rust",
     "emulator"
   ],
-  "license": "MIT OR Apache-2.0",
+  "license": "Apache-2.0 AND MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/openwong2kim/oxty.git",

@@ -5,8 +5,8 @@ version.workspace = true
 # 내장한 vt 모듈(Alacritty 0.26)이 2024 edition이다.
 edition = "2024"
 rust-version.workspace = true
-# oxty 코드는 MIT OR Apache-2.0, 내장 vt 모듈은 Apache-2.0, Unicode 11 표는 MIT(xterm.js). NOTICE.md 참고.
-license = "(MIT OR Apache-2.0) AND Apache-2.0 AND MIT"
+# oxty 코드와 내장 vt 모듈은 Apache-2.0, 함께 들어간 Unicode 11 표는 xterm.js의 MIT. NOTICE.md 참고.
+license = "Apache-2.0 AND MIT"
 repository.workspace = true
 authors.workspace = true
 readme = "../../README.md"
