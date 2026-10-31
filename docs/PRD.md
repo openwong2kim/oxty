@@ -161,7 +161,7 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 - wterm처럼 바쁜 패인이 많을 때 메인 스레드를 비우기 위해. 엔진 API가 이미 "바뀐 줄"만 주므로 Worker 경계를 넘기기 쉽다(M4).
 
 **D8. oxty 저장소에서 개발하고, wmux는 처음부터 의존성으로 쓴다**
-- "wmux 안에서 만들고 나중에 떼어내기"는 하지 않는다. 안에서 키우면 wmux 정책이 엔진에 섞인다. 이미 리사이즈 패치("wmux의 xterm 설정에 맞춰 커서 문단은 reflow하지 않음")와 데몬 API(`textSnapshot`, `feedFrozen`)가 wmux 모양이다.
+- "wmux 안에서 만들고 나중에 떼어내기"는 하지 않는다. 안에서 키우면 wmux 정책이 엔진에 섞인다. 이미 데몬 API(`textSnapshot`, `feedFrozen`)가 wmux 모양이다.
 - wmux는 `oxty`를 git rev로 의존한다. 로컬 개발은 Cargo `[patch]`와 `npm link`로 바로 연결한다.
 - wmux 전용 코드(스냅샷 형식, frozen ring, 패키징·서명)는 wmux-term에 남기고, 엔진만 oxty로 옮긴다.
 - wmux 전용 동작은 엔진 옵션으로 열고, 기본값은 업스트림 동작으로 둔다. wmux가 옵션을 골라 기존 픽스처를 맞춘다.
@@ -183,9 +183,9 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 | 요구사항 | 수용 기준 |
 | --- | --- |
 | 이름 선점: npm `oxty`, crates.io `oxty` | 각 레지스트리에 등록됨 |
-| Alacritty 포크를 `oxty` 크레이트 안 `vt` 모듈로 내장 (D1) | 경로 변환 스크립트로 재현 가능, `cargo test`·wasm 빌드·`cargo publish --dry-run -p oxty` 통과 |
+| ✅ Alacritty 포크를 `oxty` 크레이트 안 `vt` 모듈로 내장 (D1) | 경로 변환 스크립트로 재현 가능, `cargo test`·wasm 빌드·`cargo publish --dry-run -p oxty` 통과 — `d321607`, PTY·이벤트 루프 모듈 제거 |
 | **wmux-term이 vendor 포크 대신 `oxty`에 의존** (D8) | wmux의 기존 Rust 테스트·픽스처 84건 통과, wmux 쪽 vendor 사본 제거 |
-| wmux 정책 패치(커서 문단 reflow 보존)를 엔진 옵션으로 | 기본값은 업스트림 동작, wmux가 옵션을 켜면 기존 픽스처와 일치 |
+| ✅ 커서 문단 reflow 보존 패치를 옵션으로 — wmux 정책이 아니라 xterm.js 기본값(`reflowCursorLine: false`)이었다 | `vt::term::Config::reflow_cursor_line`(기본 `true` = Alacritty 동작), `oxty::Engine`은 xterm.js 동작 유지. Alacritty 원본 테스트 130건 통과 — `d321607` |
 | ANSI serialize (wmux-term `native_serialize` 이식) | 직렬화→복원 후 화면 지문이 원본과 일치 |
 | 차분 테스트 장치: 같은 입력을 oxty와 `@xterm/headless`에 넣고 비교 | wmux 픽스처 84건 이식, 전부 일치 또는 차이를 문서화 |
 | M2용 API 공백: 뷰포트(스크롤 위치·`scrollLines`), 커서 모양(DECSCUSR), 셀 확장 테이블(밑줄 색 SGR 58, OSC 8 링크) (D2) | 각 항목이 차분 테스트에서 xterm.js와 일치. 셀 형식 고정 |
