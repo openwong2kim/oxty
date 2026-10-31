@@ -297,7 +297,7 @@ fn cursor(out: &mut String, grid: &Grid<Cell>) {
         col = col.saturating_sub(1);
     }
     let _ = write!(out, "\x1b[{};{}H", point.line.0 + 1, col + 1);
-    // CUP clears wrap-pending. Repaint the edge cell to restore that state.
+    // CUP는 줄 끝 대기를 지우므로 가장자리 칸을 다시 써서 그 상태를 되살린다.
     if grid.cursor.input_needs_wrap {
         let cell = &grid[point.line][Column(col)];
         out.push_str(&style(cell));
@@ -325,8 +325,8 @@ fn screen(out: &mut String, grid: &Grid<Cell>) {
         if y < grid.screen_lines() as i32 - 1
             && !line[grid.last_column()].flags.contains(Flags::WRAPLINE)
         {
-            // Clear rendition before scrolling; otherwise a colored blank
-            // template can paint extra cells beyond the serialized content.
+            // 스크롤 전에 속성을 지운다. 안 그러면 색이 있는 빈칸 템플릿이
+            // 직렬화한 내용 밖의 칸까지 칠한다.
             out.push_str("\x1b[0m\r\n");
             previous_style.clear();
         }
@@ -334,9 +334,11 @@ fn screen(out: &mut String, grid: &Grid<Cell>) {
 }
 
 fn serialize<T: EventListener>(term: &Term<T>) -> Result<String, SnapshotRefusal> {
-    // xterm can retain half a wide glyph when clipping the cursor paragraph.
-    // Printing that glyph would wrap instead. Refuse instead of corrupting it.
-    for grid in [term.grid(), term.inactive_grid()] {
+    // 커서 문단을 자를 때 xterm은 넓은 글자 반쪽을 남길 수 있다. 그 글자를 출력하면
+    // 줄이 넘어가므로 망가뜨리지 않고 거부한다. 비활성 그리드는 대체 화면일 때만
+    // 직렬화하므로 그때만 본다(나온 뒤 남은 대체 화면 내용으로 거부하지 않게).
+    let alt = term.mode().contains(TermMode::ALT_SCREEN);
+    for grid in std::iter::once(term.grid()).chain(alt.then(|| term.inactive_grid())) {
         for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
             if grid[Line(y)][grid.last_column()]
                 .flags

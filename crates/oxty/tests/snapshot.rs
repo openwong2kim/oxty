@@ -4,10 +4,6 @@ fn snapshot(t: &mut Engine) -> Vec<u8> {
     t.ansi_snapshot().expect("snapshot")
 }
 
-fn ends_with(payload: &[u8], tail: &[u8]) -> bool {
-    payload.ends_with(tail)
-}
-
 fn find(payload: &[u8], needle: &[u8]) -> usize {
     payload
         .windows(needle.len())
@@ -76,9 +72,9 @@ fn keeps_unfinished_escape_raw_across_feeds() {
     t.feed(b"hello\x1b[3");
     t.feed(b"1;");
     let payload = snapshot(&mut t);
-    assert!(ends_with(&payload, b"\x1b[31;"));
+    assert!(payload.ends_with(b"\x1b[31;"));
     t.feed(b"4mX");
-    assert!(ends_with(&snapshot(&mut t), b"\x1b[?25h"));
+    assert!(snapshot(&mut t).ends_with(b"\x1b[?25h"));
 }
 
 #[test]
@@ -86,7 +82,7 @@ fn keeps_split_utf8_raw() {
     let mut t = Engine::new(10, 4, 0);
     t.feed(b"ready\xf0");
     t.feed(b"\x9f");
-    assert!(ends_with(&snapshot(&mut t), b"\x1b[?25h\xf0\x9f"));
+    assert!(snapshot(&mut t).ends_with(b"\x1b[?25h\xf0\x9f"));
     let mut copy = assert_round_trip(&mut t, 0);
     t.feed(b"\x98\x80");
     copy.feed(b"\x98\x80");
@@ -102,7 +98,7 @@ fn held_sync_is_applied_reopened_and_repeatable() {
     assert!(t.sync_pending());
     assert_eq!(snapshot(&mut t), first);
     assert!(find(&first, b"hello") < find(&first, b"\x1b[?2026h"));
-    assert!(ends_with(&first, b"\x1b[?2026h"));
+    assert!(first.ends_with(b"\x1b[?2026h"));
     t.feed(b" world\x1b[?2026l");
     assert!(!t.sync_pending());
     assert_eq!(t.row_text(0).unwrap(), "hello world");
@@ -119,7 +115,7 @@ fn held_sync_survives_refusal_and_unfinished_tail() {
     t.feed(b"\x1b[r\x1b[3");
     let first = snapshot(&mut t);
     assert_eq!(snapshot(&mut t), first);
-    assert!(ends_with(&first, b"\x1b[?2026h\x1b[3"));
+    assert!(first.ends_with(b"\x1b[?2026h\x1b[3"));
     // 재진입이 파서의 미완 CSI를 깨지 않았다.
     t.feed(b"1mY\x1b[?2026l");
     let mut cells = Vec::new();
@@ -185,4 +181,15 @@ fn control_inside_unfinished_sequence_is_not_replayed() {
     t.feed(b"mX");
     copy.feed(b"mX");
     assert_same_screen(&t, &copy);
+}
+
+#[test]
+fn leftover_alt_screen_does_not_refuse_after_exit() {
+    // 대체 화면에서 잘린 넓은 글자가 남아도, 나온 뒤에는 기본 화면만 직렬화하므로 거부하면 안 된다.
+    let mut t = Engine::new(4, 3, 10);
+    t.feed("\x1b[?1049hab한".as_bytes());
+    t.resize(3, 3);
+    assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::WideEdge));
+    t.feed(b"\x1b[?1049lok");
+    assert_round_trip(&mut t, 10);
 }
