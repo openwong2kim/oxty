@@ -1,4 +1,4 @@
-use oxty::{Cell, Engine, SnapshotRefusal};
+use oxty::{Cell, Damage, Engine, SnapshotRefusal};
 
 fn snapshot(t: &mut Engine) -> Vec<u8> {
     t.ansi_snapshot().expect("snapshot")
@@ -121,6 +121,109 @@ fn held_sync_survives_refusal_and_unfinished_tail() {
     let mut cells = Vec::new();
     t.row_cells(0, &mut cells);
     assert_eq!((cells[0].ch, cells[0].fg), ('Y', oxty::color::NAMED | 1));
+}
+
+#[test]
+#[ignore = "수정 전 재현 — 다음 커밋에서 해제"]
+fn snapshot_between_split_esu_lets_the_update_end() {
+    let mut t = Engine::new(20, 4, 0);
+    t.feed(b"\x1b[?2026hframe\x1b[?2026");
+    snapshot(&mut t);
+    t.feed(b"l");
+    assert_eq!(
+        (t.sync_pending(), t.row_text(0).unwrap()),
+        (false, "frame".into())
+    );
+}
+
+#[test]
+#[ignore = "수정 전 재현 — 다음 커밋에서 해제"]
+fn snapshot_leaves_the_live_engine_untouched() {
+    let mut t = Engine::new(20, 4, 0);
+    t.feed(b"before\x1b[?2026h\x1b[2Hframe");
+    t.take_damage();
+    let first = snapshot(&mut t);
+    // 커서 줄(0)은 vt가 늘 damage로 낸다.
+    let none = Damage::Lines {
+        scroll: 0,
+        lines: vec![0],
+    };
+    assert_eq!(
+        (t.take_damage(), t.row_text(1).unwrap(), t.sync_pending()),
+        (none, "".into(), true)
+    );
+    assert_eq!(snapshot(&mut t), first);
+}
+
+#[test]
+#[ignore = "수정 전 재현 — 다음 커밋에서 해제"]
+fn snapshot_during_sync_replays_into_the_same_update() {
+    let mut t = Engine::new(20, 4, 0);
+    t.feed(b"before\r\n\x1b[?2026hframe\x1b[31");
+    let mut copy = Engine::new(20, 4, 0);
+    copy.feed(&snapshot(&mut t));
+    assert_eq!(
+        (
+            copy.sync_pending(),
+            copy.row_text(0).unwrap(),
+            copy.row_text(1).unwrap()
+        ),
+        (true, "before".into(), "".into())
+    );
+    for e in [&mut t, &mut copy] {
+        e.feed(b"mX\x1b[?2026l");
+    }
+    assert!(!copy.sync_pending());
+    assert_same_screen(&t, &copy);
+}
+
+fn rows(e: &Engine) -> Vec<String> {
+    (0..e.rows() as i32)
+        .map(|l| e.row_text(l).unwrap())
+        .collect()
+}
+
+/// 동기화 경계를 쪼개는 모든 지점에서 스냅샷을 찍어도 엔진은 그대로이고, 받은 쪽은 같은 업데이트 안에 있다.
+#[test]
+#[ignore = "수정 전 재현 — 다음 커밋에서 해제"]
+fn snapshot_at_every_split_of_synchronized_output() {
+    // ESU 바로 뒤 BSU(한 번에 넣으면 vte가 새 BSU부터 버퍼에 남긴다), 동기화 안의 넓은 글자·미완 CSI.
+    let input =
+        "pre\r\n\x1b[?2026hA\x1b[31mB\x1b[?2026l\x1b[?2026hC한\x1b[4\x1b[?2026lD\x1b[?2026hE"
+            .as_bytes();
+    for at in 0..=input.len() {
+        for bytewise in [false, true] {
+            let mut t = Engine::new(20, 4, 0);
+            if bytewise {
+                input[..at].iter().for_each(|b| t.feed(&[*b]));
+            } else {
+                t.feed(&input[..at]);
+            }
+            let mut untouched = Engine::new(20, 4, 0);
+            untouched.feed(&input[..at]);
+            let mut copy = Engine::new(20, 4, 0);
+            copy.feed(&snapshot(&mut t));
+            let at = (at, bytewise);
+            assert_eq!(
+                (rows(&t), t.sync_pending()),
+                (rows(&untouched), untouched.sync_pending()),
+                "{at:?}"
+            );
+            assert_eq!(
+                (rows(&copy), copy.sync_pending()),
+                (rows(&t), t.sync_pending()),
+                "{at:?}"
+            );
+            assert_same_screen(&t, &copy);
+            for e in [&mut t, &mut copy, &mut untouched] {
+                e.feed(&input[at.0..]);
+                e.flush_sync();
+            }
+            assert_eq!(rows(&t), rows(&untouched), "{at:?}");
+            assert_same_screen(&t, &untouched);
+            assert_same_screen(&t, &copy);
+        }
+    }
 }
 
 #[test]
