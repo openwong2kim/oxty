@@ -20,12 +20,16 @@
 //! [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 0.26
 //! built into this crate as [`vt`] (see `src/vt/PATCHES.md`).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // 내장 Alacritty 포크. 원본 서식을 유지해 업그레이드 diff를 작게 한다.
 #[rustfmt::skip]
 pub mod vt;
+
+mod snapshot;
+pub use snapshot::SnapshotRefusal;
 
 use crate::vt::event::{Event, EventListener};
 use crate::vt::grid::{Dimensions, Scroll};
@@ -208,18 +212,26 @@ impl EventListener for Listener {
 /// [`Engine::flush_sync`] after [`SYNC_TIMEOUT`].
 #[derive(Default)]
 struct HostTimeout {
-    pending: bool,
+    // 원자값인 이유: ansi_snapshot이 `Processor::sync_timeout()`(공유 참조)만으로 동기화를 다시 연다.
+    pending: AtomicBool,
+}
+
+impl HostTimeout {
+    /// BSU를 파서에 넣지 않고 동기화를 연다 — 파서가 들고 있는 미완 시퀀스·UTF-8이 그대로 남는다.
+    fn reopen(&self) {
+        self.pending.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Timeout for HostTimeout {
     fn set_timeout(&mut self, _: Duration) {
-        self.pending = true;
+        *self.pending.get_mut() = true;
     }
     fn clear_timeout(&mut self) {
-        self.pending = false;
+        *self.pending.get_mut() = false;
     }
     fn pending_timeout(&self) -> bool {
-        self.pending
+        self.pending.load(Ordering::Relaxed)
     }
 }
 
@@ -252,6 +264,7 @@ pub struct Engine {
     term: Term<Listener>,
     parser: Processor<HostTimeout>,
     inbox: Listener,
+    tail: snapshot::RawTail,
 }
 
 impl Engine {
@@ -274,6 +287,7 @@ impl Engine {
             term: Term::new(config, &size(cols, rows), inbox.clone()),
             parser: Processor::new(),
             inbox,
+            tail: Default::default(),
         }
     }
 
@@ -281,6 +295,7 @@ impl Engine {
     /// may be split across calls).
     pub fn feed(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+        self.tail.push(bytes);
     }
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].
@@ -540,6 +555,29 @@ impl Engine {
         if self.sync_pending() {
             self.parser.stop_sync(&mut self.term);
         }
+    }
+
+    /// Bytes that rebuild this screen in a fresh xterm.js terminal of the same
+    /// size and scrollback: history, both buffers, cursor (pending wrap
+    /// included), pen and modes, followed — raw — by the escape sequence or
+    /// UTF-8 character the output ended in the middle of, so the program's
+    /// next bytes continue there as they do here.
+    ///
+    /// A synchronized update holding output back is applied first and opened
+    /// again at the end of the payload (`CSI ? 2026 h`); the engine stays in
+    /// it too, so calling this twice gives the same bytes.
+    ///
+    /// On a [`SnapshotRefusal`] these bytes could not reproduce the screen;
+    /// replay the raw output instead.
+    pub fn ansi_snapshot(&mut self) -> Result<Vec<u8>, SnapshotRefusal> {
+        let held = self.sync_pending();
+        self.flush_sync();
+        let snapshot = snapshot::ansi(&self.term, held, &self.tail);
+        // 거부여도 다시 연다 — 스냅샷을 부른 것만으로 동기화가 풀리면 안 된다.
+        if held {
+            self.parser.sync_timeout().reopen();
+        }
+        snapshot
     }
 }
 

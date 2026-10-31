@@ -23,3 +23,6 @@ MIT license (`crates/oxty/LICENSE-XTERM`).
 
 The engine integration started in
 [openwong2kim/wmux](https://github.com/openwong2kim/wmux) (MIT).
+`crates/oxty/src/snapshot.rs` (ANSI snapshot) is ported from its
+`native_serialize.rs` and snapshot host code by the same author, relicensed
+MIT OR Apache-2.0.
