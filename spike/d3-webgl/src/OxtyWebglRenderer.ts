@@ -104,17 +104,24 @@ export class OxtyWebglRenderer {
   /** 엔진 damage를 읽어 바뀐 줄만 모델에 반영하고 그린다. */
   public render(): void {
     const damage = this._term.takeDamage();
-    // 스크롤 이동(damage.scroll)은 글리프 버퍼를 옮겨야 해서 스파이크에서는 전체 다시 그리기로 처리한다
-    if (this._glyphs.beginFrame() || damage.full || damage.scroll > 0) {
+    if (this._glyphs.beginFrame()) {
       this._model.clear();
       this._glyphs.clear();
-      this._updateRows(Array.from({ length: this._term.rows }, (_, i) => i));
+      this._updateRows(this._allRows());
+    } else if (damage.full || damage.scroll > 0) {
+      // 글리프 정점에 칸 위치가 들어 있어 줄을 옮길 수 없다. xterm.js처럼 모든 줄을 다시 보되
+      // 지우지 않으므로 렌더 모델과 같은 칸은 건너뛴다
+      this._updateRows(this._allRows());
     } else {
       this._updateRows(damage.lines);
     }
     this._rectangles.renderBackgrounds();
     this._glyphs.render(this._model);
     this._rectangles.renderCursor();
+  }
+
+  private _allRows(): number[] {
+    return Array.from({ length: this._term.rows }, (_, i) => i);
   }
 
   // WebglRenderer._updateModel에서 결합 문자(joiner)·선택·커서 깜빡임을 뺀 것

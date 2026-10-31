@@ -27,6 +27,19 @@ npm run screenshot   # 로컬 서버 + 시스템 Chrome(headless) → screenshot
 - 커서는 블록으로 그려진다. 2차 write 뒤 마지막 줄로 옮겨졌고, 이전 커서 칸은 지워졌다.
 - 예상한 차이: curly 밑줄을 빨강(SGR 58)으로 지정했지만 전경색으로 그려진다. oxty 셀 형식에 밑줄 색이 없기 때문이다(아래 "엔진 API에 부족했던 점" 1).
 
+## 렌더러 벤치
+
+같은 바이트를 xterm.js 6.1(WebGL 애드온)과 oxty(이 렌더러 + `src/WriteQueue.ts`) 패널 N개에 rAF마다 나눠 넣는다. 표본마다 Chrome을 새로 띄우고, 메인 스레드 CPU(CDP `TaskDuration`), 프레임 간격, 렌더러·GPU 프로세스 RSS를 잰다. 두 쪽의 화면 해시가 같아야 한다.
+
+```sh
+cd spike/d3-webgl/bench && npm install && cd ..
+node bench/run.mjs out.json            # log·tui × 패널 8개, 3회 반복 (--quick, --align)
+node bench/summ.mjs out.json           # 중앙값 요약
+node bench/check.mjs                   # 증분 렌더와 처음부터 그린 화면의 픽셀이 같은지 검사
+```
+
+`--align`은 TUI 출력을 동기화 블록(`?2026`) 경계에서만 끊는다. 기본 설정처럼 블록 중간에서 끊으면 xterm.js는 rAF 때마다 동기화 중이어서 끝날 때까지 거의 그리지 않는다.
+
 ## xterm.js 출처
 
 - 저장소: https://github.com/xtermjs/xterm.js
@@ -98,7 +111,7 @@ xterm.js는 `BufferLine.loadCell(x, CellData)`로 셀을 읽고, `CellColorResol
 
 ## oxty 엔진 API에 부족했던 점
 
-> 1~4는 모두 반영했다(엔진 API 공백 메우기 커밋). 밑줄 색·결합 문자는 `rowExtras()`, 커서 모양은 `cursor().shape/blink`, 번들은 `external` 없이 빌드된다. 스크린샷에서 curly 밑줄이 빨강, 커서가 막대로 그려진다. 스크롤 이동(`takeDamage().scroll`)은 스파이크에서 전체 다시 그리기로 처리한다.
+> 1~4는 모두 반영했다(엔진 API 공백 메우기 커밋). 밑줄 색·결합 문자는 `rowExtras()`, 커서 모양은 `cursor().shape/blink`, 번들은 `external` 없이 빌드된다. 스크린샷에서 curly 밑줄이 빨강, 커서가 막대로 그려진다. 스크롤 이동(`takeDamage().scroll`)이 오면 xterm.js처럼 모든 줄을 다시 보되, 지우지 않으므로 렌더 모델과 같은 칸은 건너뛴다. 글리프 정점에 칸 위치가 들어 있어서 줄을 통째로 옮기지는 않는다.
 
 1. **밑줄 색(SGR 58) 없음**: 셀 4워드에 자리가 없어 curly 밑줄이 전경색으로 그려진다. PRD D2의 행별 확장 테이블이 필요하다. xterm 쪽은 `ext` 하위 26비트(`underlineColor`)에 바로 넣으면 된다.
 2. **결합 문자 문자열을 칸마다 따로 가져와야 함**: `rowCells`에는 `COMBINING` 플래그만 있고, 문자열은 `cellText(y, x)`를 칸마다 불러야 한다. 결합 문자가 많은 줄(데바나가리·한글 자모 조합 등)에서는 wasm 경계 호출이 칸 수만큼 늘어난다. 행 단위로 받는 API(예: 열 → 문자열 확장 테이블)가 있으면 좋다. D2 확장 테이블에 함께 넣는 것을 권한다.
@@ -111,6 +124,6 @@ xterm.js는 `BufferLine.loadCell(x, CellData)`로 셀을 읽고, `CellColorResol
 
 - **범위 밖이라 검증하지 않음**: 선택·IME·키 입력·스크롤·링크·접근성. 선택은 `SelectionRenderModel`과 `CellColorResolver`의 선택 색 처리를 이미 복사해 두어서, 선택 범위(Rust, D4)만 받으면 연결된다.
 - **아직 붙이지 않은 부품**: WebGL 컨텍스트 손실 복구, DPR 변화 감지(`DevicePixelObserver` 40줄), 커서 깜빡임(`CursorBlinkStateManager` 146줄. `ICoreBrowserService`에 멤버가 몇 개 더 필요), 리거처(`ICharacterJoinerService`), 테마·글꼴 변경 시 아틀라스 재생성. 모두 원본 `WebglRenderer`에 패턴이 있어서 옮길 수 있다고 보지만, 스텁 멤버가 몇 개 더 늘어난다.
-- **성능은 재지 않음**: `rowCells`가 줄마다 `slice()`로 복사하는 비용, `cellText` 호출 비용, 큰 화면(200×60)에서 전체를 갱신하는 프레임 시간.
+- **성능**: 아래 "렌더러 벤치"로 xterm.js(WebGL 애드온)와 비교한다. 줄마다 `slice()`로 복사하는 비용은 프로파일에서 크지 않았다. 큰 화면(200×60)은 재지 않았다.
 - **실행 환경**: macOS headless Chrome 한 곳에서만 확인했다. 한글은 Menlo에 없어 시스템 대체 글꼴(Apple SD Gothic Neo)로 그려졌다. 다른 OS의 글꼴 대체와 폭 맞춤은 확인하지 않았다.
 - **업스트림 추적**: 복사본은 6.0.0에 고정했다. 업스트림을 따라갈 의무는 없지만, 아틀라스 버그 수정을 가져오려면 손으로 비교해야 한다. 원문을 그대로 두었으므로 `diff`로 비교할 수 있다.
