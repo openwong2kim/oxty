@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/oxty", "crates/oxty-wasm", "crates/oxty-node"]
+exclude = ["vendor/alacritty_terminal"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/openwong2kim/oxty"
+authors = ["wong2kim"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+# Small, abort-on-panic build for the browser package.
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+panic = "abort"
+strip = true

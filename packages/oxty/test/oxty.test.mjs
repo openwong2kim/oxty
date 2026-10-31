@@ -1,0 +1,123 @@
+import { test, before } from 'node:test';
+import assert from 'node:assert/strict';
+import { init, Terminal, Attr, Mode, decodeColor } from '../dist/index.js';
+
+before(async () => {
+  await init();
+  await init(); // idempotent
+});
+
+const make = (o) => new Terminal({ cols: 80, rows: 24, ...o });
+
+test('korean and ascii in one row, wide cells flagged', () => {
+  const t = make();
+  t.write('안녕 hello\r\n');
+  assert.equal(t.rowText(0), '안녕 hello');
+  const cells = t.rowCells(0);
+  assert.equal(String.fromCodePoint(cells[0]), '안');
+  assert.ok(cells[3] & Attr.WIDE);
+  assert.ok(cells[4 + 3] & Attr.WIDE_SPACER);
+  assert.deepEqual(t.cursor(), { line: 1, col: 0, visible: true });
+  t.dispose();
+});
+
+test('bytes split anywhere still decode', () => {
+  const t = make();
+  const bytes = new TextEncoder().encode('한\x1b[31mX');
+  for (const b of bytes) t.write(Uint8Array.of(b));
+  assert.equal(t.rowText(0), '한X');
+  assert.deepEqual(decodeColor(t.rowCells(0)[2 * 4 + 1]), { kind: 'named', value: 1 });
+});
+
+test('256 and truecolor', () => {
+  const t = make();
+  t.write('\x1b[38;5;208mO\x1b[48;2;10;20;30mT');
+  const c = t.rowCells(0);
+  assert.deepEqual(decodeColor(c[1]), { kind: 'indexed', value: 208 });
+  assert.deepEqual(decodeColor(c[4 + 2]), { kind: 'rgb', value: 0x0a141e });
+});
+
+test('alternate screen and modes', () => {
+  const t = make();
+  t.write('main\x1b[?1049h\x1b[H\x1b[2Jalt\x1b[?2004h');
+  assert.ok(t.modes() & Mode.ALT_SCREEN);
+  assert.ok(t.modes() & Mode.BRACKETED_PASTE);
+  assert.equal(t.rowText(0), 'alt');
+  t.write('\x1b[?1049l');
+  assert.equal(t.rowText(0), 'main');
+});
+
+test('scrollback with negative lines', () => {
+  const t = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+  for (let i = 0; i < 12; i++) t.write(`line ${i}\r\n`);
+  assert.equal(t.historyLength, 8);
+  assert.equal(t.rowText(-8), 'line 0');
+  assert.equal(t.rowText(0), 'line 8');
+  assert.equal(t.rowText(-9), null);
+});
+
+test('damage lists changed rows', () => {
+  const t = make();
+  assert.deepEqual(t.takeDamage(), { full: true, lines: [] });
+  t.write('\x1b[3;1Hhello');
+  const d = t.takeDamage();
+  assert.equal(d.full, false);
+  assert.ok(d.lines.includes(2));
+  t.resize(100, 30);
+  assert.equal(t.takeDamage().full, true);
+  assert.equal(t.cols, 100);
+});
+
+test('replies, title, bell', () => {
+  const t = make();
+  t.write('\x1b[3;7H\x1b[6n\x1b]2;build\x07\x07');
+  assert.equal(new TextDecoder().decode(t.takeReplies()), '\x1b[3;7R');
+  assert.equal(t.takeReplies().length, 0);
+  assert.equal(t.takeTitle(), 'build');
+  assert.equal(t.takeTitle(), null);
+  assert.equal(t.takeBells(), 1);
+});
+
+test('synchronized output: program ends it', () => {
+  const t = make();
+  t.write('\x1b[?2026hSYNC');
+  assert.equal(t.syncPending(), true);
+  assert.equal(t.rowText(0), '');
+  t.write('\x1b[?2026l');
+  assert.equal(t.rowText(0), 'SYNC');
+  t.dispose();
+});
+
+test('synchronized output: timeout flushes and notifies', async () => {
+  let flushed = 0;
+  const t = make({ syncTimeoutMs: 20, onSyncFlush: () => flushed++ });
+  t.write('\x1b[?2026hLATE');
+  assert.equal(t.rowText(0), '');
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(flushed, 1);
+  assert.equal(t.rowText(0), 'LATE');
+  t.dispose();
+});
+
+test('terminals are independent and disposable', () => {
+  const a = make();
+  const b = make();
+  a.write('A');
+  b.write('B');
+  assert.equal(a.rowText(0), 'A');
+  assert.equal(b.rowText(0), 'B');
+  a.dispose();
+  a.dispose();
+  assert.throws(() => a.rowText(0), /disposed/);
+  assert.equal(b.rowText(0), 'B');
+  const c = make(); // reuses a's slot
+  assert.equal(c.rowText(0), '');
+});
+
+test('large write grows the input buffer', () => {
+  const t = new Terminal({ cols: 80, rows: 24, scrollback: 10000 });
+  const chunk = 'x'.repeat(79) + '\r\n';
+  t.write(chunk.repeat(5000));
+  assert.equal(t.historyLength, 5000 - 23);
+  assert.equal(t.rowText(0), 'x'.repeat(79));
+});

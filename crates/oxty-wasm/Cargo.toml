@@ -1,0 +1,17 @@
+[package]
+name = "oxty-wasm"
+description = "WebAssembly exports for the oxty npm package."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+test = false
+doctest = false
+
+[dependencies]
+oxty = { path = "../oxty" }
