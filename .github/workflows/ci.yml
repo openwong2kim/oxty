@@ -31,6 +31,8 @@ jobs:
         with:
           node-version: 22
       - run: bash scripts/build-wasm.sh
+      - run: npm ci
+        working-directory: packages/oxty
       - run: npm test
         working-directory: packages/oxty
 
