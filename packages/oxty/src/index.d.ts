@@ -53,7 +53,8 @@ export interface CellExtra {
 /**
  * `payload` written to a fresh xterm.js of the same size and scrollback
  * rebuilds this screen; it ends with the unfinished escape sequence or UTF-8
- * character the output stopped in, and re-opens a held synchronized update.
+ * character the output stopped in. During a synchronized update it is the
+ * screen from before the update, then `CSI ? 2026 h` and the held output raw.
  * On refusal replay the raw output instead.
  */
 export type AnsiSnapshot =
@@ -94,7 +95,7 @@ export class Terminal {
   takeBells(): number;
   syncPending(): boolean;
   flushSync(): void;
-  /** Applies a held synchronized update first; the engine stays in it, so two calls give the same bytes. */
+  /** Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes. */
   ansiSnapshot(): AnsiSnapshot;
   dispose(): void;
 }

@@ -223,7 +223,7 @@ impl Terminal {
 
     /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.
     #[napi]
-    pub fn ansi_snapshot(&mut self) -> AnsiSnapshot {
+    pub fn ansi_snapshot(&self) -> AnsiSnapshot {
         match self.inner.ansi_snapshot() {
             Ok(bytes) => AnsiSnapshot {
                 ok: true,

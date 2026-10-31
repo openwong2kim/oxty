@@ -96,15 +96,16 @@ match term.take_damage() {
   calls `onSyncFlush`; Rust and N-API hosts call `flush_sync()` themselves.
 - **Snapshots.** `ansiSnapshot()` returns `{ ok: true, payload }`: bytes that
   rebuild the screen, scrollback, cursor, pen and modes in another terminal,
-  including a held synchronized update and any unfinished escape or UTF-8
-  tail, so live output can continue right after it. It returns
+  including any unfinished escape or UTF-8 tail, so live output can continue
+  right after it. It returns
   `{ ok: false, reason }` (`unsupported-wide-edge`, `margins`,
   `partial-tail-overflow`) when ANSI cannot express the state; replay the raw
   bytes instead. Not carried over yet: charset designation and shift, the
-  DECSC saved cursor, custom tab stops, cursor shape and OSC 8 links. Taking
-  a snapshot also applies a held synchronized update to the engine's own
-  screen, so call it on a terminal you replay for the snapshot rather than on
-  the one a renderer is drawing.
+  DECSC saved cursor, custom tab stops, cursor shape and OSC 8 links. During
+  a synchronized update the payload is the screen from before it followed by
+  `CSI ? 2026 h` and the held output raw, so the receiver is inside the same
+  update. Taking a snapshot never changes the engine, so it is safe on the
+  terminal a renderer is drawing.
 - **xterm.js parity.** `cd packages/oxty && npm ci && npm test` feeds wmux's
   91 fixtures to oxty and `@xterm/headless` and fails on any difference not
   listed, with a reason, in `test/xterm/known-differences.json`.

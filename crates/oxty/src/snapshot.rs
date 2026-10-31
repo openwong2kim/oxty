@@ -5,7 +5,7 @@
 //! `src/daemon/util/ansiStreamScan.ts`(미완 escape 꼬리, UTF-8 carry, 마진 거부)를 옮겼다.
 //! oxty에서는 MIT OR Apache-2.0으로 배포한다.
 //!
-//! 출력 = 직렬화(grid) ‖ (동기화가 열려 있었으면 `CSI ?2026h`) ‖ 원문 꼬리.
+//! 출력 = 직렬화(grid) ‖ 원문 꼬리. 동기화 중이면 직렬화(BSU 전 grid) ‖ `CSI ?2026h` ‖ 대기 바이트 원문.
 //! 커서 가시성은 엔진 상태(`SHOW_CURSOR`)를 그대로 싣는다 — RIS 동작은 vt 옵션
 //! `ris_keeps_cursor_visibility`가 xterm.js에 맞춘다.
 use crate::vt::event::EventListener;
@@ -189,16 +189,20 @@ fn incomplete_utf8_suffix_len(buf: &[u8]) -> usize {
 /// [`crate::Engine::ansi_snapshot`]의 본체. 거부 순서는 wmux와 같다: 마진 → 꼬리 넘침 → 와이드 가장자리.
 pub(crate) fn ansi<T: EventListener>(
     term: &Term<T>,
-    held_sync: bool,
+    held_sync: Option<&[u8]>,
     tail: &RawTail,
 ) -> Result<Vec<u8>, SnapshotRefusal> {
     let region = term.scroll_region();
     if region.start.0 != 0 || region.end.0 != term.screen_lines() as i32 {
         return Err(SnapshotRefusal::Margins);
     }
-    let tail = tail.pending()?;
+    // 동기화 중엔 BSU 뒤 원문 전체가 꼬리다(BSU 직후 파서는 ground) — 넘침 검사가 필요 없다.
+    let tail = match held_sync {
+        Some(held) => held,
+        None => tail.pending()?,
+    };
     let mut out = serialize(term)?;
-    if held_sync {
+    if held_sync.is_some() {
         out.push_str("\x1b[?2026h");
     }
     let mut bytes = out.into_bytes();

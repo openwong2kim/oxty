@@ -91,40 +91,44 @@ fn keeps_split_utf8_raw() {
 }
 
 #[test]
-fn held_sync_is_applied_reopened_and_repeatable() {
+fn held_sync_is_carried_raw_and_repeatable() {
     let mut t = Engine::new(20, 4, 0);
     t.feed(b"\x1b[?2026hhello");
     let first = snapshot(&mut t);
     assert!(t.sync_pending());
     assert_eq!(snapshot(&mut t), first);
-    assert!(find(&first, b"hello") < find(&first, b"\x1b[?2026h"));
-    assert!(first.ends_with(b"\x1b[?2026h"));
+    assert!(first.ends_with(b"\x1b[?2026hhello"));
     t.feed(b" world\x1b[?2026l");
     assert!(!t.sync_pending());
     assert_eq!(t.row_text(0).unwrap(), "hello world");
 }
 
 #[test]
-fn held_sync_survives_refusal_and_unfinished_tail() {
+fn held_sync_is_judged_on_the_screen_before_it() {
     let mut t = Engine::new(10, 4, 0);
-    t.feed(b"\x1b[?2026h\x1b[2;3rX");
+    // 업데이트가 마진을 풀어도 아직 반영 전이므로 거부한다.
+    t.feed(b"\x1b[2;3r\x1b[?2026h\x1b[r");
     assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::Margins));
     assert!(t.sync_pending());
-    assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::Margins));
-    assert!(t.sync_pending());
-    t.feed(b"\x1b[r\x1b[3");
+    // 반대로 업데이트 안의 마진·긴 미완 시퀀스는 원문으로 넘어가므로 거부 사유가 아니다.
+    t.feed(b"\x1b[?2026l\x1b[?2026h\x1b[2;3rX\x1b]0;");
+    t.feed(&[b'a'; 5000]);
+    t.feed(b"\x07\x1b[3");
     let first = snapshot(&mut t);
     assert_eq!(snapshot(&mut t), first);
-    assert!(first.ends_with(b"\x1b[?2026h\x1b[3"));
-    // 재진입이 파서의 미완 CSI를 깨지 않았다.
-    t.feed(b"1mY\x1b[?2026l");
+    assert!(first.ends_with(b"\x07\x1b[3"));
+    let mut copy = Engine::new(10, 4, 0);
+    copy.feed(&first);
+    for e in [&mut t, &mut copy] {
+        e.feed(b"1mY\x1b[?2026l");
+    }
     let mut cells = Vec::new();
     t.row_cells(0, &mut cells);
-    assert_eq!((cells[0].ch, cells[0].fg), ('Y', oxty::color::NAMED | 1));
+    assert_eq!((cells[1].ch, cells[1].fg), ('Y', oxty::color::NAMED | 1));
+    assert_same_screen(&t, &copy);
 }
 
 #[test]
-#[ignore = "수정 전 재현 — 다음 커밋에서 해제"]
 fn snapshot_between_split_esu_lets_the_update_end() {
     let mut t = Engine::new(20, 4, 0);
     t.feed(b"\x1b[?2026hframe\x1b[?2026");
@@ -137,7 +141,6 @@ fn snapshot_between_split_esu_lets_the_update_end() {
 }
 
 #[test]
-#[ignore = "수정 전 재현 — 다음 커밋에서 해제"]
 fn snapshot_leaves_the_live_engine_untouched() {
     let mut t = Engine::new(20, 4, 0);
     t.feed(b"before\x1b[?2026h\x1b[2Hframe");
@@ -156,7 +159,6 @@ fn snapshot_leaves_the_live_engine_untouched() {
 }
 
 #[test]
-#[ignore = "수정 전 재현 — 다음 커밋에서 해제"]
 fn snapshot_during_sync_replays_into_the_same_update() {
     let mut t = Engine::new(20, 4, 0);
     t.feed(b"before\r\n\x1b[?2026hframe\x1b[31");
@@ -185,7 +187,6 @@ fn rows(e: &Engine) -> Vec<String> {
 
 /// 동기화 경계를 쪼개는 모든 지점에서 스냅샷을 찍어도 엔진은 그대로이고, 받은 쪽은 같은 업데이트 안에 있다.
 #[test]
-#[ignore = "수정 전 재현 — 다음 커밋에서 해제"]
 fn snapshot_at_every_split_of_synchronized_output() {
     // ESU 바로 뒤 BSU(한 번에 넣으면 vte가 새 BSU부터 버퍼에 남긴다), 동기화 안의 넓은 글자·미완 CSI.
     let input =

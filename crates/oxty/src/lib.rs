@@ -20,7 +20,6 @@
 //! [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 0.26
 //! built into this crate as [`vt`] (see `src/vt/PATCHES.md`).
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -212,26 +211,18 @@ impl EventListener for Listener {
 /// [`Engine::flush_sync`] after [`SYNC_TIMEOUT`].
 #[derive(Default)]
 struct HostTimeout {
-    // 원자값인 이유: ansi_snapshot이 `Processor::sync_timeout()`(공유 참조)만으로 동기화를 다시 연다.
-    pending: AtomicBool,
-}
-
-impl HostTimeout {
-    /// BSU를 파서에 넣지 않고 동기화를 연다 — 파서가 들고 있는 미완 시퀀스·UTF-8이 그대로 남는다.
-    fn reopen(&self) {
-        self.pending.store(true, Ordering::Relaxed);
-    }
+    pending: bool,
 }
 
 impl Timeout for HostTimeout {
     fn set_timeout(&mut self, _: Duration) {
-        *self.pending.get_mut() = true;
+        self.pending = true;
     }
     fn clear_timeout(&mut self) {
-        *self.pending.get_mut() = false;
+        self.pending = false;
     }
     fn pending_timeout(&self) -> bool {
-        self.pending.load(Ordering::Relaxed)
+        self.pending
     }
 }
 
@@ -265,6 +256,8 @@ pub struct Engine {
     parser: Processor<HostTimeout>,
     inbox: Listener,
     tail: snapshot::RawTail,
+    // vte 동기화 버퍼의 사본. vte는 내용을 공개하지 않고 개수만 알려 준다.
+    held: Vec<u8>,
 }
 
 impl Engine {
@@ -288,6 +281,7 @@ impl Engine {
             parser: Processor::new(),
             inbox,
             tail: Default::default(),
+            held: Vec::new(),
         }
     }
 
@@ -296,6 +290,17 @@ impl Engine {
     pub fn feed(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
         self.tail.push(bytes);
+        // vte 동기화 버퍼는 항상 입력 스트림의 연속된 끝부분이라 개수만으로 사본을 맞출 수 있다.
+        let n = self.parser.sync_bytes_count();
+        if n <= bytes.len() {
+            self.held.clear();
+            self.held.extend_from_slice(&bytes[bytes.len() - n..]);
+        } else {
+            let drop = (self.held.len() + bytes.len()).saturating_sub(n);
+            self.held.drain(..drop);
+            self.held.extend_from_slice(bytes);
+        }
+        debug_assert_eq!(self.held.len(), n);
     }
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].
@@ -554,6 +559,7 @@ impl Engine {
     pub fn flush_sync(&mut self) {
         if self.sync_pending() {
             self.parser.stop_sync(&mut self.term);
+            self.held.clear();
         }
     }
 
@@ -563,21 +569,20 @@ impl Engine {
     /// UTF-8 character the output ended in the middle of, so the program's
     /// next bytes continue there as they do here.
     ///
-    /// A synchronized update holding output back is applied first and opened
-    /// again at the end of the payload (`CSI ? 2026 h`); the engine stays in
-    /// it too, so calling this twice gives the same bytes.
+    /// During a synchronized update the payload is the screen from before the
+    /// update, then `CSI ? 2026 h` and the held output raw, so the receiver
+    /// is inside the same update and ends it on the same bytes. Refusals are
+    /// judged on that earlier screen.
+    ///
+    /// The engine is not changed (no damage, the update stays held), so it is
+    /// safe on an engine being drawn, and calling this twice gives the same
+    /// bytes.
     ///
     /// On a [`SnapshotRefusal`] these bytes could not reproduce the screen;
     /// replay the raw output instead.
-    pub fn ansi_snapshot(&mut self) -> Result<Vec<u8>, SnapshotRefusal> {
-        let held = self.sync_pending();
-        self.flush_sync();
-        let snapshot = snapshot::ansi(&self.term, held, &self.tail);
-        // 거부여도 다시 연다 — 스냅샷을 부른 것만으로 동기화가 풀리면 안 된다.
-        if held {
-            self.parser.sync_timeout().reopen();
-        }
-        snapshot
+    pub fn ansi_snapshot(&self) -> Result<Vec<u8>, SnapshotRefusal> {
+        let held = self.sync_pending().then_some(self.held.as_slice());
+        snapshot::ansi(&self.term, held, &self.tail)
     }
 }
 
