@@ -60,6 +60,24 @@ single crate.
   `StdSyncHandler` calls `Instant::now()`, which traps on wasm32 as soon as a
   synchronized update `CSI ?2026h` starts) and expire it with
   `Processor::stop_sync`.
+- History kept outside the grid: `grid::HistorySink` receives the rows a full
+  history drops, oldest first (`Grid::set_history_sink`; `scroll_up` hands
+  them over before rotating, `clear_history` calls `HistorySink::clear`).
+  `Grid::scrolled_lines` counts scrolled lines under the same condition that
+  moves `display_offset`. `Grid::prepend_history` / `split_off_history` move
+  history rows in and out (oxty puts its compressed history back for a
+  resize reflow), `Grid::set_display_offset` sets the view without clamping,
+  and `Term::inactive_grid_mut` reaches the primary grid on the alternate
+  screen. Without a sink the grid behaves as upstream. `oxty::Engine` keeps
+  16 recent history rows in the grid and compresses older ones
+  (`src/history.rs`).
+- `Storage::initialize_up_to` caps the row cache (`MAX_CACHE_SIZE` spare rows)
+  at the history limit; `Grid::increase_scroll_limit` uses it so a short
+  history does not allocate 1000 spare rows.
+- `Row::grow` and `Row::append` count the old cells as occupied. Upstream left
+  `occ` short there, so the lazy `Row::reset` could skip cells whose
+  background differed from the last cell, and a reused row kept a stale
+  background after a resize.
 - Mechanical changes by `scripts/vendor-vt.sh`: `lib.rs` → `mod.rs` without
   Alacritty's crate-wide lint attributes, `crate::` → `crate::vt::`,
   `alacritty_terminal::` → `oxty::vt::` in doc examples, and

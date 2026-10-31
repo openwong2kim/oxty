@@ -711,6 +711,11 @@ impl<T> Term<T> {
         &self.inactive_grid
     }
 
+    /// oxty: the grid not on screen (the primary grid while the alternate screen is active).
+    pub fn inactive_grid_mut(&mut self) -> &mut Grid<Cell> {
+        &mut self.inactive_grid
+    }
+
     /// oxty snapshot access: the active scroll region (DECSTBM), `0..screen_lines` when unset.
     pub fn scroll_region(&self) -> &Range<Line> {
         &self.scroll_region

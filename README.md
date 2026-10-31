@@ -9,7 +9,7 @@ Feed it PTY bytes. It keeps the screen and tells your renderer which rows change
 [![ci](https://github.com/openwong2kim/oxty/actions/workflows/ci.yml/badge.svg)](https://github.com/openwong2kim/oxty/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE-APACHE)
 ![rust](https://img.shields.io/badge/rust-1.85%2B-orange)
-![wasm](https://img.shields.io/badge/wasm-207%20KB%20%C2%B7%2073%20KB%20gzip-654ff0)
+![wasm](https://img.shields.io/badge/wasm-230%20KB%20%C2%B7%2081%20KB%20gzip-654ff0)
 ![status](https://img.shields.io/badge/status-0.0.1%20experimental-lightgrey)
 
 </div>
@@ -46,6 +46,9 @@ flowchart LR
 - **Snapshots that resume.** `ansiSnapshot()` returns bytes that rebuild the
   screen, scrollback, cursor, pen and modes in another terminal, including an
   unfinished escape sequence, so live output can continue right after it.
+- **Compressed scrollback.** History older than the newest 16 lines is stored
+  as UTF-8 text plus runs of equal attributes: a 120-column log line takes
+  about 100 bytes instead of 1440 in xterm.js. Rows decode on read.
 - **Built for TUIs.** Synchronized output (`CSI ? 2026 h`), used heavily by
   coding agents, is held until the program ends the update.
 - **Checked against xterm.js.** Every fixture is fed to oxty and to
@@ -117,7 +120,8 @@ Visible rows are `0..rows`. Scrollback is addressed with negative numbers: `-1`
 is the newest history line, `-historyLength` the oldest. A renderer can keep
 only what is on screen and fetch history on demand. `scrollDisplay(delta)` /
 `scrollToBottom()` move the view; viewport row `y` then shows line
-`y - displayOffset`.
+`y - displayOffset`. History rows are kept compressed and decoded when read, so
+read only the rows you draw.
 
 </details>
 

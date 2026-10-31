@@ -62,6 +62,9 @@ impl<T: Default> Row<T> {
             return;
         }
 
+        // oxty: cells past `occ` must all match the last cell for the lazy `reset`; the new
+        // default cells may not match the old ones, so the old cells count as occupied.
+        self.occ = self.inner.len();
         self.inner.resize_with(columns, T::default);
     }
 
@@ -138,7 +141,8 @@ impl<T> Row<T> {
     where
         T: GridCell,
     {
-        self.occ += vec.len();
+        // oxty: the appended cells sit past every old cell, so all of them count as occupied.
+        self.occ = self.inner.len() + vec.len();
         self.inner.append(vec);
     }
 

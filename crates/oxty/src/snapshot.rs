@@ -8,8 +8,9 @@
 //! 출력 = 직렬화(grid) ‖ 원문 꼬리. 동기화 중이면 직렬화(BSU 전 grid) ‖ `CSI ?2026h` ‖ 대기 바이트 원문.
 //! 커서 가시성은 엔진 상태(`SHOW_CURSOR`)를 그대로 싣는다 — RIS 동작은 vt 옵션
 //! `ris_keeps_cursor_visibility`가 xterm.js에 맞춘다.
+use crate::history::History;
 use crate::vt::event::EventListener;
-use crate::vt::grid::{Dimensions, Grid};
+use crate::vt::grid::{Dimensions, Grid, Row};
 use crate::vt::index::{Column, Line};
 use crate::vt::term::cell::{Cell, Flags};
 use crate::vt::term::{Term, TermMode};
@@ -191,6 +192,7 @@ pub(crate) fn ansi<T: EventListener>(
     term: &Term<T>,
     held_sync: Option<&[u8]>,
     tail: &RawTail,
+    older: Option<&History>,
 ) -> Result<Vec<u8>, SnapshotRefusal> {
     let region = term.scroll_region();
     if region.start.0 != 0 || region.end.0 != term.screen_lines() as i32 {
@@ -201,7 +203,7 @@ pub(crate) fn ansi<T: EventListener>(
         Some(held) => held,
         None => tail.pending()?,
     };
-    let mut out = serialize(term)?;
+    let mut out = serialize(term, older)?;
     if held_sync.is_some() {
         out.push_str("\x1b[?2026h");
     }
@@ -310,12 +312,11 @@ fn cursor(out: &mut String, grid: &Grid<Cell>) {
     out.push_str(&style(&grid.cursor.template));
 }
 
-fn screen(out: &mut String, grid: &Grid<Cell>) {
+/// `older`는 이 그리드보다 오래된 압축 히스토리(주 화면일 때만).
+fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
     let mut previous_style = String::new();
-    for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
-        let line = &grid[Line(y)];
-        for x in 0..grid.columns() {
-            let cell = &line[Column(x)];
+    let mut row = |out: &mut String, line: &Row<Cell>, last: bool| {
+        for cell in &line[..] {
             if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
                 continue;
             }
@@ -326,18 +327,25 @@ fn screen(out: &mut String, grid: &Grid<Cell>) {
             }
             glyph(out, cell);
         }
-        if y < grid.screen_lines() as i32 - 1
-            && !line[grid.last_column()].flags.contains(Flags::WRAPLINE)
-        {
+        if !last && !line[grid.last_column()].flags.contains(Flags::WRAPLINE) {
             // 스크롤 전에 속성을 지운다. 안 그러면 색이 있는 빈칸 템플릿이
             // 직렬화한 내용 밖의 칸까지 칠한다.
             out.push_str("\x1b[0m\r\n");
             previous_style.clear();
         }
+    };
+    for i in 0..older.map_or(0, History::len) {
+        row(out, &older.expect("len is 0 without history").row(i), false);
+    }
+    for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
+        row(out, &grid[Line(y)], y == grid.screen_lines() as i32 - 1);
     }
 }
 
-fn serialize<T: EventListener>(term: &Term<T>) -> Result<String, SnapshotRefusal> {
+fn serialize<T: EventListener>(
+    term: &Term<T>,
+    older: Option<&History>,
+) -> Result<String, SnapshotRefusal> {
     // 커서 문단을 자를 때 xterm은 넓은 글자 반쪽을 남길 수 있다. 그 글자를 출력하면
     // 줄이 넘어가므로 망가뜨리지 않고 거부한다. 비활성 그리드는 대체 화면일 때만
     // 직렬화하므로 그때만 본다(나온 뒤 남은 대체 화면 내용으로 거부하지 않게).
@@ -352,14 +360,21 @@ fn serialize<T: EventListener>(term: &Term<T>) -> Result<String, SnapshotRefusal
             }
         }
     }
+    if let Some(older) = older {
+        let last = term.grid().last_column();
+        if (0..older.len()).any(|i| older.row(i)[last].flags.contains(Flags::WIDE_CHAR)) {
+            return Err(SnapshotRefusal::WideEdge);
+        }
+    }
     let mut out = String::from("\x1b[0m\x1b[?6l\x1b[?7h\x1b[4l\x1b[H");
     let modes = term.mode();
-    if modes.contains(TermMode::ALT_SCREEN) {
-        screen(&mut out, term.inactive_grid());
+    let alt = modes.contains(TermMode::ALT_SCREEN);
+    if alt {
+        screen(&mut out, term.inactive_grid(), older);
         cursor(&mut out, term.inactive_grid());
         out.push_str("\x1b[?1049h\x1b[0m\x1b[H");
     }
-    screen(&mut out, term.grid());
+    screen(&mut out, term.grid(), if alt { None } else { older });
     // DECOM을 켜면 커서가 홈으로 가므로 CUP보다 먼저 낸다(마진은 거부되므로 CUP 기준은 화면 전체).
     if modes.contains(TermMode::ORIGIN) {
         out.push_str("\x1b[?6h");

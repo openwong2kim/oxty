@@ -1,7 +1,10 @@
 //! A specialized 2D grid implementation optimized for use in a terminal.
 
 use std::cmp::{max, min};
+use std::fmt;
+use std::mem;
 use std::ops::{Bound, Deref, Index, IndexMut, Range, RangeBounds};
+use std::sync::{Arc, Mutex, PoisonError};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -140,6 +143,24 @@ pub struct Grid<T> {
     /// 기본값 `false`는 Alacritty 원래 동작이다.
     #[cfg_attr(feature = "serde", serde(skip))]
     keep_cursor_paragraph: bool,
+
+    /// oxty: 히스토리가 꽉 차서 버려질 줄을 받는 곳(oxty는 압축해 보관한다).
+    /// `None`이면 Alacritty 원래 동작대로 버린다.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    history_sink: Option<Arc<Mutex<dyn HistorySink<T>>>>,
+
+    /// oxty: 지금까지 위로 스크롤된 줄 수. `display_offset`을 올리는 것과 같은 조건으로 센다.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    scrolled_lines: u64,
+}
+
+/// oxty: receives the rows a full history drops, oldest first, so they can
+/// be kept outside the grid.
+pub trait HistorySink<T>: fmt::Debug + Send {
+    fn push(&mut self, row: &Row<T>);
+
+    /// The history was cleared (`CSI 3 J`, reset).
+    fn clear(&mut self);
 }
 
 impl<T: GridCell + Default + PartialEq> Grid<T> {
@@ -153,7 +174,50 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             lines,
             columns,
             keep_cursor_paragraph: false,
+            history_sink: None,
+            scrolled_lines: 0,
         }
+    }
+
+    /// oxty: sets where rows dropped from a full history go; returns the previous sink.
+    pub fn set_history_sink(
+        &mut self,
+        sink: Option<Arc<Mutex<dyn HistorySink<T>>>>,
+    ) -> Option<Arc<Mutex<dyn HistorySink<T>>>> {
+        mem::replace(&mut self.history_sink, sink)
+    }
+
+    /// oxty: sets the view offset as it is, without clamping to the history
+    /// (scrolling can leave it past the history; see `scroll_up`).
+    pub fn set_display_offset(&mut self, offset: usize) {
+        self.display_offset = offset;
+    }
+
+    /// oxty: lines scrolled up so far; the view moves by this much while scrolled back.
+    pub fn scrolled_lines(&self) -> u64 {
+        self.scrolled_lines
+    }
+
+    /// oxty: puts `older` rows (oldest first) above the current history and
+    /// raises the history limit to `max_scroll_limit`.
+    pub fn prepend_history(&mut self, older: Vec<Row<T>>, max_scroll_limit: usize) {
+        let mut inner = self.raw.take_all();
+        inner.extend(older.into_iter().rev());
+        self.raw.replace_inner(inner);
+        self.max_scroll_limit = max_scroll_limit;
+    }
+
+    /// oxty: removes the history above the newest `keep` rows and returns it
+    /// oldest first; the history limit becomes `keep` and the view returns to
+    /// the bottom.
+    pub fn split_off_history(&mut self, keep: usize) -> Vec<Row<T>> {
+        let mut inner = self.raw.take_all();
+        let mut older = inner.split_off(min(self.lines + keep, inner.len()));
+        older.reverse();
+        self.raw.replace_inner(inner);
+        self.max_scroll_limit = keep;
+        self.display_offset = 0;
+        older
     }
 
     /// oxty: 리사이즈 때 커서 문단을 reflow하지 않을지 정한다(xterm.js `reflowCursorLine: false`).
@@ -186,7 +250,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
     fn increase_scroll_limit(&mut self, count: usize) {
         let count = min(count, self.max_scroll_limit - self.history_size());
         if count != 0 {
-            self.raw.initialize(count, self.columns);
+            self.raw.initialize_up_to(count, self.columns, self.max_scroll_limit + self.lines);
         }
     }
 
@@ -278,9 +342,21 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         if self.display_offset != 0 {
             self.display_offset = min(self.display_offset + positions, self.max_scroll_limit);
         }
+        self.scrolled_lines += positions as u64;
 
         // Only rotate the entire history if the active region starts at the top.
         if region.start == 0 {
+            // oxty: hand the rows a full history is about to drop to the sink. They are the
+            // oldest history rows, then (with less history than `positions`) the top screen rows.
+            if let Some(sink) = &self.history_sink {
+                let history = self.history_size();
+                let dropped = (history + positions).saturating_sub(self.max_scroll_limit);
+                let mut sink = sink.lock().unwrap_or_else(PoisonError::into_inner);
+                for i in 0..dropped {
+                    sink.push(&self.raw[Line(i as i32 - history as i32)]);
+                }
+            }
+
             // Create scrollback for the new lines.
             self.increase_scroll_limit(positions);
 
@@ -392,6 +468,10 @@ impl<T> Grid<T> {
 
     #[inline]
     pub fn clear_history(&mut self) {
+        if let Some(sink) = &self.history_sink {
+            sink.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        }
+
         // Explicitly purge all lines from history.
         self.raw.shrink_lines(self.history_size());
 

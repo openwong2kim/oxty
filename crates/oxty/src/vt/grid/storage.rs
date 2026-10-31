@@ -127,10 +127,22 @@ impl<T> Storage<T> {
     where
         T: Default,
     {
+        self.initialize_up_to(additional_rows, columns, usize::MAX);
+    }
+
+    /// oxty: like [`Storage::initialize`], but the row cache never grows the
+    /// buffer past `max_len` rows, so a short history does not keep
+    /// `MAX_CACHE_SIZE` spare rows.
+    #[inline]
+    pub fn initialize_up_to(&mut self, additional_rows: usize, columns: usize, max_len: usize)
+    where
+        T: Default,
+    {
         if self.len + additional_rows > self.inner.len() {
             self.rezero();
 
-            let realloc_size = self.inner.len() + max(additional_rows, MAX_CACHE_SIZE);
+            let realloc_size = (self.inner.len() + max(additional_rows, MAX_CACHE_SIZE))
+                .min(max(max_len, self.len + additional_rows));
             self.inner.resize_with(realloc_size, || Row::new(columns));
         }
 

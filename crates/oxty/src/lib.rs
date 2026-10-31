@@ -20,19 +20,21 @@
 //! [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 0.26
 //! built into this crate as [`vt`] (see `src/vt/PATCHES.md`).
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 // 내장 Alacritty 포크. 원본 서식을 유지해 업그레이드 diff를 작게 한다.
 #[rustfmt::skip]
 pub mod vt;
 
+mod history;
 mod snapshot;
 pub use snapshot::SnapshotRefusal;
 
+use crate::history::History;
 use crate::vt::event::{Event, EventListener};
-use crate::vt::grid::{Dimensions, Scroll};
-use crate::vt::index::{Column, Line};
+use crate::vt::grid::{Dimensions, Grid, HistorySink, Row, Scroll};
+use crate::vt::index::Line;
 use crate::vt::term::cell::{Cell as AlacCell, Flags};
 use crate::vt::term::{Config, Term, TermDamage, TermMode};
 use crate::vt::vte::ansi::{Color, CursorShape as AlacCursorShape, Processor, Timeout};
@@ -44,6 +46,10 @@ pub const MIN_ROWS: u16 = 1;
 pub const MAX_ROWS: u16 = 1000;
 /// Upper bound on retained scrollback lines.
 pub const MAX_SCROLLBACK: usize = 100_000;
+
+/// 압축 히스토리일 때 Alacritty 그리드에 그대로 두는 최근 히스토리 줄 수. 넓은 글자를 덮어쓸 때
+/// 바로 윗줄(히스토리일 수 있다)을 고치므로 0으로 둘 수 없다.
+const RECENT_HISTORY: usize = 16;
 
 /// How long a synchronized update (`CSI ? 2026 h`) may hold output back
 /// before the host should call [`Engine::flush_sync`]. Matches Alacritty.
@@ -258,15 +264,39 @@ pub struct Engine {
     tail: snapshot::RawTail,
     // vte 동기화 버퍼의 사본. vte는 내용을 공개하지 않고 개수만 알려 준다.
     held: Vec<u8>,
+    // 압축 히스토리. 켜져 있으면 Alacritty는 최근 RECENT_HISTORY줄만 들고 더 오래된 줄을 여기로 넘긴다.
+    history: Option<Arc<Mutex<History>>>,
+    scrollback: usize,
+    // 압축 히스토리일 때 주 화면의 뷰 위치는 엔진이 정한다(Alacritty 쪽은 늘 0).
+    offset: usize,
+    // 주 화면 그리드가 위로 스크롤한 줄 수 중 이미 반영한 값.
+    scrolled_seen: u64,
+    // 뷰가 움직여서 다음 damage는 전체다.
+    view_moved: bool,
 }
 
 impl Engine {
     /// Creates a screen of `cols` × `rows` keeping up to `scrollback` lines of
     /// history. Dimensions are clamped to [`MIN_COLS`]..=[`MAX_COLS`] and
     /// [`MIN_ROWS`]..=[`MAX_ROWS`]; scrollback to [`MAX_SCROLLBACK`].
+    ///
+    /// History older than the newest few lines is kept compressed (text plus
+    /// runs of equal attributes); reading it decodes one row at a time.
     pub fn new(cols: u16, rows: u16, scrollback: usize) -> Self {
+        Self::build(cols, rows, scrollback, true)
+    }
+
+    /// Like [`Engine::new`], but keeps the whole history uncompressed in the
+    /// grid, as upstream Alacritty does. For comparison and fallback.
+    pub fn new_uncompressed(cols: u16, rows: u16, scrollback: usize) -> Self {
+        Self::build(cols, rows, scrollback, false)
+    }
+
+    fn build(cols: u16, rows: u16, scrollback: usize, compress: bool) -> Self {
+        let scrollback = scrollback.min(MAX_SCROLLBACK);
+        let compress = compress && scrollback > RECENT_HISTORY;
         let config = Config {
-            scrolling_history: scrollback.min(MAX_SCROLLBACK),
+            scrolling_history: if compress { RECENT_HISTORY } else { scrollback },
             // xterm.js 기본값(reflowCursorLine: false)과 같게 커서 문단은 reflow하지 않는다.
             reflow_cursor_line: false,
             // 스크롤 때 화면 전체 대신 스크롤 줄 수와 새 줄만 damage로 낸다.
@@ -278,19 +308,97 @@ impl Engine {
             ..Config::default()
         };
         let inbox = Listener::default();
+        let mut term = Term::new(config, &size(cols, rows), inbox.clone());
+        let history = compress.then(|| {
+            let history = Arc::new(Mutex::new(History::new(scrollback - RECENT_HISTORY)));
+            let sink: Arc<Mutex<dyn HistorySink<AlacCell>>> = history.clone();
+            term.grid_mut().set_history_sink(Some(sink));
+            history
+        });
         Self {
-            term: Term::new(config, &size(cols, rows), inbox.clone()),
+            term,
             parser: Processor::new(),
             inbox,
             tail: Default::default(),
             held: Vec::new(),
+            history,
+            scrollback,
+            offset: 0,
+            scrolled_seen: 0,
+            view_moved: false,
         }
+    }
+
+    fn alt_screen(&self) -> bool {
+        self.term.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    /// 히스토리를 가진 주 화면 그리드(대체 화면일 때는 화면 밖에 있다).
+    fn primary(&self) -> &Grid<AlacCell> {
+        if self.alt_screen() {
+            self.term.inactive_grid()
+        } else {
+            self.term.grid()
+        }
+    }
+
+    fn primary_mut(&mut self) -> &mut Grid<AlacCell> {
+        if self.alt_screen() {
+            self.term.inactive_grid_mut()
+        } else {
+            self.term.grid_mut()
+        }
+    }
+
+    /// 압축 히스토리. 대체 화면에서는 히스토리가 보이지 않으므로 `None`이다.
+    fn stored(&self) -> Option<MutexGuard<'_, History>> {
+        let history = self.history.as_ref().filter(|_| !self.alt_screen())?;
+        Some(history.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// 주 화면이 스크롤한 만큼 뒤로 올린 뷰를 따라 올린다(Alacritty `display_offset`과 같다).
+    fn follow_scroll(&mut self) {
+        if self.history.is_none() {
+            return;
+        }
+        let scrolled = self.primary().scrolled_lines();
+        let delta = (scrolled - self.scrolled_seen) as usize;
+        self.scrolled_seen = scrolled;
+        let cleared = self.history.as_ref().is_some_and(|h| {
+            std::mem::take(&mut h.lock().unwrap_or_else(PoisonError::into_inner).cleared)
+        });
+        // Alacritty는 히스토리를 지우면 뷰를 맨 아래로 돌린다(damage는 내지 않는다).
+        if cleared {
+            self.offset = 0;
+        }
+        // Alacritty처럼 영역 스크롤에도 올리고, 히스토리가 아니라 한도로 자른다.
+        if self.offset > 0 && delta > 0 {
+            self.offset = (self.offset + delta).min(self.scrollback);
+            self.view_moved = true;
+        }
+    }
+
+    /// `line`의 행을 `f`에 넘긴다. 압축 히스토리의 줄은 그 자리에서 풀어서 넘긴다.
+    fn with_row<R>(&self, line: i32, f: impl FnOnce(&Row<AlacCell>) -> R) -> Option<R> {
+        let grid = self.term.grid();
+        let recent = grid.history_size() as i32;
+        if (-recent..self.rows() as i32).contains(&line) {
+            return Some(f(&grid[Line(line)]));
+        }
+        let stored = self.stored()?;
+        let older = stored.len() as i32;
+        if line < -recent && line >= -(recent + older) {
+            let row = stored.row((older + recent + line) as usize);
+            return Some(f(&row));
+        }
+        None
     }
 
     /// Interprets bytes written by the program (UTF-8 and escape sequences
     /// may be split across calls).
     pub fn feed(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+        self.follow_scroll();
         self.tail.push(bytes);
         // vte 동기화 버퍼는 항상 입력 스트림의 연속된 끝부분이라 개수만으로 사본을 맞출 수 있다.
         let n = self.parser.sync_bytes_count();
@@ -307,7 +415,33 @@ impl Engine {
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        let Some(history) = self.history.clone() else {
+            self.term.resize(size(cols, rows));
+            return;
+        };
+        // 압축 히스토리를 그리드에 잠시 풀어 넣고 Alacritty의 reflow를 그대로 탄 뒤 다시 압축한다.
+        let older = history
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take_all();
+        let (scrollback, offset) = (self.scrollback, self.offset);
+        let grid = self.primary_mut();
+        let sink = grid.set_history_sink(None);
+        grid.prepend_history(older, scrollback);
+        grid.set_display_offset(offset);
         self.term.resize(size(cols, rows));
+        let grid = self.primary_mut();
+        let offset = grid.display_offset();
+        let older = grid.split_off_history(RECENT_HISTORY);
+        let scrolled = grid.scrolled_lines();
+        grid.set_history_sink(sink);
+        let mut stored = history.lock().unwrap_or_else(PoisonError::into_inner);
+        for row in &older {
+            stored.push(row);
+        }
+        drop(stored);
+        self.offset = offset;
+        self.scrolled_seen = scrolled;
     }
 
     pub fn cols(&self) -> u16 {
@@ -321,71 +455,56 @@ impl Engine {
     /// Lines currently held in scrollback. History rows are addressed with
     /// negative line numbers: `-1` is the newest, `-(history_len)` the oldest.
     pub fn history_len(&self) -> usize {
-        self.term.grid().history_size()
-    }
-
-    fn line(&self, line: i32) -> Option<Line> {
-        let history = self.history_len() as i32;
-        (-history..self.rows() as i32)
-            .contains(&line)
-            .then_some(Line(line))
+        self.term.grid().history_size() + self.stored().map_or(0, |s| s.len())
     }
 
     /// Text of one row with trailing blanks removed; wide-character spacers
     /// skipped and combining marks kept. `None` if `line` is out of range.
     pub fn row_text(&self, line: i32) -> Option<String> {
-        let line = self.line(line)?;
-        let row = &self.term.grid()[line];
-        let mut text = String::with_capacity(self.cols() as usize);
-        for col in 0..self.term.columns() {
-            let cell = &row[Column(col)];
-            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                continue;
+        self.with_row(line, |row| {
+            let mut text = String::with_capacity(row.len());
+            for cell in &row[..] {
+                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    continue;
+                }
+                text.push(cell.c);
+                if let Some(marks) = cell.zerowidth() {
+                    text.extend(marks);
+                }
             }
-            text.push(cell.c);
-            if let Some(marks) = cell.zerowidth() {
-                text.extend(marks);
-            }
-        }
-        text.truncate(text.trim_end().len());
-        Some(text)
+            text.truncate(text.trim_end().len());
+            text
+        })
     }
 
     /// Whether `line` continues on the next line (soft wrap).
     pub fn row_wrapped(&self, line: i32) -> bool {
-        self.line(line).is_some_and(|line| {
-            self.term.grid()[line][Column(self.term.columns() - 1)]
-                .flags
-                .contains(Flags::WRAPLINE)
+        self.with_row(line, |row| {
+            row.last()
+                .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE))
         })
+        .unwrap_or(false)
     }
 
     /// Cells of one row, appended to `out` (cleared first). Returns `false`
     /// if `line` is out of range.
     pub fn row_cells(&self, line: i32, out: &mut Vec<Cell>) -> bool {
         out.clear();
-        let Some(line) = self.line(line) else {
-            return false;
-        };
-        let row = &self.term.grid()[line];
-        out.extend((0..self.term.columns()).map(|col| flatten(&row[Column(col)])));
-        true
+        self.with_row(line, |row| out.extend(row[..].iter().map(flatten)))
+            .is_some()
     }
 
     /// Cells of one row as `[ch, fg, bg, attrs]` words — the form handed to
     /// WebAssembly and N-API hosts. Returns `false` if `line` is out of range.
     pub fn row_packed(&self, line: i32, out: &mut Vec<u32>) -> bool {
         out.clear();
-        let Some(line) = self.line(line) else {
-            return false;
-        };
-        let row = &self.term.grid()[line];
-        out.reserve(self.term.columns() * Cell::PACKED_WORDS);
-        for col in 0..self.term.columns() {
-            let cell = flatten(&row[Column(col)]);
-            out.extend([cell.ch as u32, cell.fg, cell.bg, cell.attrs]);
-        }
-        true
+        self.with_row(line, |row| {
+            out.reserve(row.len() * Cell::PACKED_WORDS);
+            for cell in row[..].iter().map(flatten) {
+                out.extend([cell.ch as u32, cell.fg, cell.bg, cell.attrs]);
+            }
+        })
+        .is_some()
     }
 
     /// Cells of one row that carry combining marks, an underline colour or a
@@ -393,52 +512,48 @@ impl Engine {
     /// are skipped. Returns `false` if `line` is out of range.
     pub fn row_extras(&self, line: i32, out: &mut Vec<CellExtra>) -> bool {
         out.clear();
-        let Some(line) = self.line(line) else {
-            return false;
-        };
-        let row = &self.term.grid()[line];
-        for col in 0..self.term.columns() {
-            let cell = &row[Column(col)];
-            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                continue;
-            }
-            let text = cell
-                .zerowidth()
-                .filter(|marks| !marks.is_empty())
-                .map(|marks| {
-                    std::iter::once(cell.c)
-                        .chain(marks.iter().copied())
-                        .collect()
+        self.with_row(line, |row| {
+            for (col, cell) in row[..].iter().enumerate() {
+                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    continue;
+                }
+                let text = cell
+                    .zerowidth()
+                    .filter(|marks| !marks.is_empty())
+                    .map(|marks| {
+                        std::iter::once(cell.c)
+                            .chain(marks.iter().copied())
+                            .collect()
+                    });
+                let underline_color = cell.underline_color().map(pack_color);
+                let hyperlink = cell.hyperlink().map(|link| Hyperlink {
+                    id: link.id().to_owned(),
+                    uri: link.uri().to_owned(),
                 });
-            let underline_color = cell.underline_color().map(pack_color);
-            let hyperlink = cell.hyperlink().map(|link| Hyperlink {
-                id: link.id().to_owned(),
-                uri: link.uri().to_owned(),
-            });
-            if text.is_some() || underline_color.is_some() || hyperlink.is_some() {
-                out.push(CellExtra {
-                    col: col as u16,
-                    text,
-                    underline_color,
-                    hyperlink,
-                });
+                if text.is_some() || underline_color.is_some() || hyperlink.is_some() {
+                    out.push(CellExtra {
+                        col: col as u16,
+                        text,
+                        underline_color,
+                        hyperlink,
+                    });
+                }
             }
-        }
-        true
+        })
+        .is_some()
     }
 
     /// Full text of one cell including combining marks.
     pub fn cell_text(&self, line: i32, col: u16) -> Option<String> {
-        let line = self.line(line)?;
-        if col as usize >= self.term.columns() {
-            return None;
-        }
-        let cell = &self.term.grid()[line][Column(col as usize)];
-        let mut text = String::from(cell.c);
-        if let Some(marks) = cell.zerowidth() {
-            text.extend(marks);
-        }
-        Some(text)
+        self.with_row(line, |row| {
+            let cell = row[..].get(col as usize)?;
+            let mut text = String::from(cell.c);
+            if let Some(marks) = cell.zerowidth() {
+                text.extend(marks);
+            }
+            Some(text)
+        })
+        .flatten()
     }
 
     pub fn cursor(&self) -> Cursor {
@@ -464,18 +579,29 @@ impl Engine {
     /// Rows the view is scrolled back into history (0 = following output).
     /// Viewport row `y` shows line `y - display_offset` (see [`Engine::row_cells`]).
     pub fn display_offset(&self) -> usize {
-        self.term.grid().display_offset()
+        if self.history.is_some() && !self.alt_screen() {
+            self.offset
+        } else {
+            self.term.grid().display_offset()
+        }
     }
 
     /// Scrolls the view; positive `delta` goes back into history. Clamped to
     /// the history. Damage becomes [`Damage::Full`] when the view moves.
     pub fn scroll_display(&mut self, delta: i32) {
-        self.term.scroll_display(Scroll::Delta(delta));
+        if self.history.is_some() && !self.alt_screen() {
+            let offset = (self.offset as i64 + delta as i64).clamp(0, self.history_len() as i64);
+            self.view_moved |= offset as usize != self.offset;
+            self.offset = offset as usize;
+        } else {
+            self.term.scroll_display(Scroll::Delta(delta));
+        }
     }
 
     /// Returns the view to the newest output.
     pub fn scroll_to_bottom(&mut self) {
-        self.term.scroll_display(Scroll::Bottom);
+        let offset = self.display_offset() as i32;
+        self.scroll_display(-offset);
     }
 
     /// Active modes as [`mode`] bits.
@@ -510,14 +636,25 @@ impl Engine {
     /// Viewport changes since the previous call, then resets tracking.
     pub fn take_damage(&mut self) -> Damage {
         let rows = self.term.screen_lines();
-        let scroll = self.term.damage_scrolled() as u16;
+        let mut scroll = self.term.damage_scrolled() as u16;
+        let moved = std::mem::take(&mut self.view_moved);
+        // 압축 히스토리일 때 Alacritty는 뷰가 늘 맨 아래라고 보므로, 뒤로 올린 만큼 줄을 내린다.
+        let shift = if self.history.is_some() && !self.alt_screen() {
+            self.offset
+        } else {
+            0
+        };
+        if shift > 0 {
+            scroll = 0;
+        }
         let damage = match self.term.damage() {
             TermDamage::Full => Damage::Full,
+            _ if moved => Damage::Full,
             TermDamage::Partial(lines) => Damage::Lines {
                 scroll,
                 // 뷰가 히스토리로 올라가 있으면 화면 밖으로 밀린 줄은 뺀다.
                 lines: lines
-                    .map(|b| b.line)
+                    .map(|b| b.line + shift)
                     .filter(|&l| l < rows)
                     .map(|l| l as u16)
                     .collect(),
@@ -562,6 +699,7 @@ impl Engine {
         if self.sync_pending() {
             self.parser.stop_sync(&mut self.term);
             self.held.clear();
+            self.follow_scroll();
         }
     }
 
@@ -584,7 +722,11 @@ impl Engine {
     /// replay the raw output instead.
     pub fn ansi_snapshot(&self) -> Result<Vec<u8>, SnapshotRefusal> {
         let held = self.sync_pending().then_some(self.held.as_slice());
-        snapshot::ansi(&self.term, held, &self.tail)
+        let history = self
+            .history
+            .as_ref()
+            .map(|h| h.lock().unwrap_or_else(PoisonError::into_inner));
+        snapshot::ansi(&self.term, held, &self.tail, history.as_deref())
     }
 }
 
