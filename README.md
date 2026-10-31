@@ -1,8 +1,8 @@
 <div align="center">
 
-# oxty
+# oxty — a Rust terminal engine for wasm, Node and native apps
 
-**ox**(ide) + **tty** — a terminal emulator engine in Rust.
+**Diffed cell by cell against xterm.js. Scrollback at about 100 bytes a line.**
 
 Feed it PTY bytes. It keeps the screen and tells your renderer which rows changed.
 
@@ -12,17 +12,21 @@ Feed it PTY bytes. It keeps the screen and tells your renderer which rows change
 ![wasm](https://img.shields.io/badge/wasm-230%20KB%20%C2%B7%2081%20KB%20gzip-654ff0)
 ![status](https://img.shields.io/badge/status-0.0.1%20experimental-lightgrey)
 
+[Measurements](#measurements) · [Quick start](#quick-start) · [The model](#the-model) · [xterm.js parity](#xtermjs-parity) · [Roadmap](#roadmap)
+
 </div>
 
 ---
 
-oxty parses the bytes a program writes to its PTY and holds everything a
-terminal knows: characters, colours, cursor, modes and scrollback. It does not
-draw anything. Your renderer asks which rows changed and redraws only those.
+oxty (**ox**ide + **tty**) parses the bytes a program writes to its PTY and
+holds everything a terminal knows: characters, colours, cursor, modes and
+scrollback. It does not draw anything. Your renderer asks which rows changed
+and redraws only those.
 
-The same engine runs in a native daemon, in the browser and in an Electron
-renderer, so the daemon's snapshot and the screen in your browser cannot
-disagree about what a byte stream means.
+The parser and screen model are Alacritty's (`alacritty_terminal` 0.26, built
+in and patched to behave like xterm.js). The same engine runs in a native
+daemon, in the browser and in an Electron renderer, so the daemon's snapshot
+and the screen in your browser cannot disagree about what a byte stream means.
 
 ```mermaid
 flowchart LR
@@ -60,6 +64,43 @@ flowchart LR
 | Rust | crate [`oxty`](crates/oxty) | the engine |
 | Browser, Electron renderer, Node | npm [`oxty`](packages/oxty) | WebAssembly, no dependencies |
 | Node / Electron main, daemons | [`crates/oxty-node`](crates/oxty-node) | N-API binding, same API |
+
+## Measurements
+
+Compared with xterm.js 6.1 betas. Lower is better.
+
+**Browser renderer** — Chrome on an Apple M4, 8 panes of 120×40 with 10,000 lines of
+scrollback, 2 MiB of output per pane fed in chunks per frame; oxty drawn with
+the WebGL spike in [`spike/d3-webgl`](spike/d3-webgl), xterm.js with its WebGL
+addon. Both must end on the same screen hash.
+
+| Workload | oxty renderer RSS | xterm.js renderer RSS |
+| --- | ---: | ---: |
+| Log, 32 KiB chunks | 192 MiB | 350 MiB |
+| Log, 256 KiB chunks | 191 MiB | 356 MiB |
+| TUI (synchronized redraws) | 172 MiB | 183 MiB |
+
+**Buffer memory** — Node, 8 terminals of 120×40 with 10,000 lines of
+scrollback, oxty (wasm) against `@xterm/headless`.
+
+| Output | oxty | xterm.js |
+| --- | ---: | ---: |
+| Log lines | 24 MiB | 143 MiB |
+| Hangul lines | 32 MiB | 143 MiB |
+| A different colour in every cell | 24 MiB | 24 MiB |
+
+**Compressed history outside the engine** — with
+[`TermHistory`](#compressed-history-for-your-own-term), replaying an 8 MB
+output ring into 100,000 lines of scrollback peaked at 11 MiB, against 143 MiB
+for xterm.js headless (wmux daemon experiment, local).
+
+**The cost.** Compressing history makes wasm parsing slower than xterm.js on
+some output: 120 ms against 104 ms for log lines, 89 ms against 67 ms for
+Hangul lines. In the browser benchmark, CPU time including rendering was
+still lower than xterm.js's.
+
+Reproduce the browser numbers with `node bench/run.mjs out.json` in
+`spike/d3-webgl` (see its [README](spike/d3-webgl/README.md#렌더러-벤치)).
 
 ## Quick start
 
@@ -101,9 +142,34 @@ assert_eq!(term.row_text(0).as_deref(), Some("안녕 world"));
 
 match term.take_damage() {
     oxty::Damage::Full => { /* redraw all rows */ }
-    oxty::Damage::Lines(rows) => { /* redraw these */ }
+    oxty::Damage::Lines { scroll, lines } => { /* move up `scroll` rows, redraw `lines` */ }
 }
 ```
+
+### Compressed history for your own `Term`
+
+If you drive the built-in Alacritty `Term` yourself instead of `oxty::Engine`,
+`TermHistory` gives it the same compressed scrollback:
+
+```rust
+use oxty::TermHistory;
+use oxty::vt::event::VoidListener;
+use oxty::vt::term::{test::TermSize, Config, Term};
+use oxty::vt::vte::ansi::{Processor, StdSyncHandler};
+
+let config = Config { scrolling_history: TermHistory::RECENT, ..Config::default() };
+let mut term = Term::new(config, &TermSize::new(120, 40), VoidListener);
+let history = TermHistory::attach(&mut term, 100_000); // 100,000 lines in all
+
+Processor::<StdSyncHandler>::new().advance(&mut term, &output);
+let oldest = history.row(0);                        // rows 0..history.len(), oldest first
+history.resize(&mut term, TermSize::new(100, 30)); // reflows the compressed rows too
+```
+
+The grid keeps the newest `TermHistory::RECENT` (16) history rows; older ones
+live in `history`, above the grid's own history.
+
+### Installing
 
 oxty is not on crates.io or npm yet. Until then, depend on it from git:
 
