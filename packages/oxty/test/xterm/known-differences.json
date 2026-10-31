@@ -40,5 +40,8 @@
     "reason": "21→8열 리사이즈로 와이드 문자가 마지막 열에서 시작한다. 다시 출력하면 줄바꿈되므로 스냅샷을 거부한다. wmux 벤치도 이 케이스를 같은 이유로 거부했고, 거부 시 wmux는 스냅샷 없이 복원한다" },
   { "id": "margins-refused", "proofs": ["B"], "cases": ["margins", "text/scroll-margins"], "blocksSwap": false,
     "refusal": "margins",
-    "reason": "화면보다 좁은 DECSTBM 마진은 스냅샷에 싣지 않고 거부한다(wmux 직렬화기와 같은 범위). 싣는 시점은 오너 결정 대기" }
+    "reason": "화면보다 좁은 DECSTBM 마진은 스냅샷에 싣지 않고 거부한다(wmux 직렬화기와 같은 범위). 싣는 시점은 오너 결정 대기" },
+  { "id": "dl-top-scrolls-into-history", "proofs": ["A", "B"], "cases": ["known/dl-top-history"], "blocksSwap": false,
+    "fields": ["baseY", "lines", "lines.wrapped"],
+    "reason": "주 화면 첫 줄에서 DL(CSI M)을 하면 Alacritty는 지운 줄을 스크롤백으로 밀고(Grid::scroll_up이 0번 줄부터면 history로 회전) xterm은 버린다. 대체 화면은 스크롤백이 없어 같고, 주 화면 첫 줄 DL은 드물다" }
 ]

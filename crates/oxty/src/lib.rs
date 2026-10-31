@@ -306,6 +306,8 @@ impl Engine {
             ris_keeps_cursor_visibility: true,
             // xterm.js처럼 주 화면 ED2는 지우기만 하고 히스토리로 밀지 않는다.
             scroll_on_erase_in_display: false,
+            // xterm.js처럼 줄바꿈과 줄·화면 지우기가 줄 이어짐을 바꾼다.
+            xterm_line_wrap: true,
             ..Config::default()
         };
         let inbox = Listener::default();

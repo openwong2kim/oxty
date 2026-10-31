@@ -91,6 +91,22 @@ const TEXT = [
 // 차이가 없음을 고정하는 회귀 입력도 둔다(osc8-underline, tab-pending-wrap, decscusr, deccolm,
 // 직렬화기 수정의 B 회귀 tab-cell, origin-mode, c0-inside-csi).
 const KNOWN = {
+  // 감긴 줄 지우기: xterm은 isWrapped를 줄 속성으로 두고 지우기마다 정해진 규칙으로 바꾼다.
+  'el0-col0-wrapped': `${'X'.repeat(25)}\r\x1b[K`,
+  'el0-wrapping-row': `${'X'.repeat(25)}\x1b[1;5H\x1b[K`,
+  'el0-pending-wrap': `${'X'.repeat(20)}\x1b[K`,
+  'el1-last-col': `${'X'.repeat(25)}\x1b[1;20H\x1b[1K`,
+  'el2-wrapped': `${'X'.repeat(25)}\x1b[2K`,
+  'el2-wrapping-row': `${'X'.repeat(25)}\x1b[1;1H\x1b[2K`,
+  'ed0-col0-wrapped': `${'X'.repeat(25)}\r\x1b[J`,
+  'ed1-top-from-history': `a\r\nb\r\nc\r\nd\r\ne\r\n${'X'.repeat(30)}\r\n1\r\n2\r\n3\r\n4\r\n5\x1b[3;1H\x1b[1J`,
+  'ed2-top-from-history': `a\r\nb\r\nc\r\nd\r\ne\r\n${'X'.repeat(30)}\r\n1\r\n2\r\n3\r\n4\r\n5\x1b[2J`,
+  'ech-last-col': `${'X'.repeat(25)}\x1b[1;18H\x1b[5X`,
+  'dch-wrapping-row': `${'X'.repeat(25)}\x1b[1;5H\x1b[3P`,
+  'ich-wrapping-row': `${'X'.repeat(25)}\x1b[1;5H\x1b[3@`,
+  'il-above-continuation': `${'X'.repeat(25)}\x1b[2;1H\x1b[L`,
+  'dl-parent-row': `a\r\n${'X'.repeat(25)}\x1b[2;1H\x1b[M`,
+  'dl-top-history': `${'X'.repeat(25)}\x1b[1;1H\x1b[M`,
   'sgr-21': '\x1b[21mX',
   'sgr-53': '\x1b[53mO',
   'sgr-59': '\x1b[4;58;5;3mX\x1b[59mY',

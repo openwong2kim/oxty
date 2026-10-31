@@ -390,6 +390,14 @@ pub struct Config {
     /// oxty: 주 화면 ED2(`CSI 2 J`)가 화면 줄을 히스토리로 밀지(xterm.js `scrollOnEraseInDisplay`).
     /// 기본값 `true`는 Alacritty 원래 동작이다. `false`면 대체 화면처럼 화면만 지운다.
     pub scroll_on_erase_in_display: bool,
+
+    /// oxty: 줄바꿈과 줄·화면 지우기(EL, ED)가 줄 이어짐을 xterm.js 규칙대로 바꿀지.
+    /// xterm은 "앞줄에서 이어졌다"를 아랫줄 속성으로 둔다. 스크롤 없이 커서를 내리는 줄바꿈,
+    /// 첫 칸부터 지우는 EL0·EL2·ED0, 화면 첫 줄까지 지우는 ED1·ED2(스크롤 없음)에서 그 표시를 끊고,
+    /// 지운 줄이 아랫줄로 이어지는 표시는 남긴다. vte가 IND·NEL도 `linefeed`로 넘기므로 둘에도 적용된다
+    /// (xterm은 IND·NEL에서는 끊지 않는다).
+    /// 기본값 `false`는 Alacritty 원래 동작(지운 칸의 WRAPLINE이 함께 사라짐)이다.
+    pub xterm_line_wrap: bool,
 }
 
 impl Default for Config {
@@ -405,6 +413,7 @@ impl Default for Config {
             scroll_damage: false,
             ris_keeps_cursor_visibility: false,
             scroll_on_erase_in_display: true,
+            xterm_line_wrap: false,
         }
     }
 }
@@ -714,6 +723,38 @@ impl<T> Term<T> {
     /// oxty: the grid not on screen (the primary grid while the alternate screen is active).
     pub fn inactive_grid_mut(&mut self) -> &mut Grid<Cell> {
         &mut self.inactive_grid
+    }
+
+    /// oxty: xterm.js처럼 `line`이 앞줄에서 이어졌다는 표시(앞줄 마지막 칸의 WRAPLINE)를 지운다.
+    fn unwrap_from_previous(&mut self, line: Line) {
+        let previous: Line = line - 1;
+        if previous.0 < -(self.grid.history_size() as i32) {
+            return;
+        }
+        let last = self.grid.last_column();
+        self.grid[previous][last].flags.remove(Flags::WRAPLINE);
+    }
+
+    /// oxty: whether `line` continues into the next row (WRAPLINE on its last cell).
+    fn row_wraps(&self, line: Line) -> bool {
+        line.0 >= -(self.grid.history_size() as i32)
+            && line.0 < self.screen_lines() as i32
+            && self.grid[line][self.grid.last_column()].flags.contains(Flags::WRAPLINE)
+    }
+
+    /// oxty: sets whether `line` continues into the next row, clearing a WRAPLINE that
+    /// cell moves left mid-row.
+    fn set_row_wraps(&mut self, line: Line, wraps: bool) {
+        if line.0 < -(self.grid.history_size() as i32) || line.0 >= self.screen_lines() as i32 {
+            return;
+        }
+        let last = self.grid.last_column();
+        for cell in &mut self.grid[line][..] {
+            cell.flags.remove(Flags::WRAPLINE);
+        }
+        if wraps {
+            self.grid[line][last].flags.insert(Flags::WRAPLINE);
+        }
     }
 
     /// oxty snapshot access: the active scroll region (DECSTBM), `0..screen_lines` when unset.
@@ -1280,6 +1321,7 @@ impl<T: EventListener> Handler for Term<T> {
 
         let line = cursor.point.line;
         self.damage.damage_line(line.0 as usize, 0, self.columns() - 1);
+        let wraps = self.row_wraps(line);
 
         let row = &mut self.grid[line][..];
 
@@ -1291,6 +1333,10 @@ impl<T: EventListener> Handler for Term<T> {
         // fill in between source and dest with blanks.
         for cell in &mut row[source.0..destination] {
             *cell = bg.into();
+        }
+        // xterm keeps "the next row continues this one" while cells move.
+        if self.config.xterm_line_wrap {
+            self.set_row_wraps(line, wraps);
         }
     }
 
@@ -1512,6 +1558,10 @@ impl<T: EventListener> Handler for Term<T> {
             self.damage_cursor();
             self.grid.cursor.point.line += 1;
             self.damage_cursor();
+            // xterm: an explicit line feed ends "this row continues the previous one".
+            if self.config.xterm_line_wrap {
+                self.unwrap_from_previous(next);
+            }
         }
     }
 
@@ -1582,7 +1632,19 @@ impl<T: EventListener> Handler for Term<T> {
 
         let origin = self.grid.cursor.point.line;
         if self.scroll_region.contains(&origin) {
+            // xterm: inserted rows are not continuations; the shifted row keeps continuing
+            // whatever is now above it, and the row past the region keeps its own state.
+            let n = cmp::min(lines, (self.scroll_region.end - origin).0 as usize) as i32;
+            let bottom = self.scroll_region.end - 1;
+            let (top_wraps, bottom_wraps) = (self.row_wraps(origin - 1), self.row_wraps(bottom));
             self.scroll_down_relative(origin, lines);
+            if self.config.xterm_line_wrap {
+                self.set_row_wraps(origin - 1, false);
+                if origin + n <= bottom {
+                    self.set_row_wraps(origin + n - 1, top_wraps);
+                }
+                self.set_row_wraps(bottom, bottom_wraps);
+            }
         }
     }
 
@@ -1594,7 +1656,22 @@ impl<T: EventListener> Handler for Term<T> {
         trace!("Deleting {lines} lines");
 
         if lines > 0 && self.scroll_region.contains(&origin) {
+            // xterm: the row moving up to `origin` keeps continuing the row above it, the
+            // first blank row continues nothing, and the row past the region keeps its state.
+            let bottom = self.scroll_region.end - 1;
+            let n = cmp::min(lines as i32, (self.scroll_region.end - origin).0);
+            let (moved_wraps, bottom_wraps) =
+                (self.row_wraps(origin + n - 1), self.row_wraps(bottom));
             self.scroll_up_relative(origin, lines);
+            if self.config.xterm_line_wrap {
+                if origin + n <= bottom {
+                    self.set_row_wraps(origin - 1, moved_wraps);
+                    self.set_row_wraps(bottom - n, false);
+                } else {
+                    self.set_row_wraps(origin - 1, false);
+                }
+                self.set_row_wraps(bottom, bottom_wraps);
+            }
         }
     }
 
@@ -1611,9 +1688,13 @@ impl<T: EventListener> Handler for Term<T> {
         let bg = self.grid.cursor.template.bg;
         let line = cursor.point.line;
         self.damage.damage_line(line.0 as usize, start.0, end.0);
+        let wraps = self.row_wraps(line);
         let row = &mut self.grid[line];
         for cell in &mut row[start..end] {
             *cell = bg.into();
+        }
+        if self.config.xterm_line_wrap {
+            self.set_row_wraps(line, wraps);
         }
     }
 
@@ -1632,6 +1713,7 @@ impl<T: EventListener> Handler for Term<T> {
 
         let line = cursor.point.line;
         self.damage.damage_line(line.0 as usize, 0, self.columns() - 1);
+        let wraps = self.row_wraps(line);
         let row = &mut self.grid[line][..];
 
         for offset in 0..num_cells {
@@ -1643,6 +1725,9 @@ impl<T: EventListener> Handler for Term<T> {
         let end = columns - count;
         for cell in &mut row[end..] {
             *cell = bg.into();
+        }
+        if self.config.xterm_line_wrap {
+            self.set_row_wraps(line, wraps);
         }
     }
 
@@ -1731,9 +1816,20 @@ impl<T: EventListener> Handler for Term<T> {
 
         self.damage.damage_line(point.line.0 as usize, left.0, right.0 - 1);
 
+        let xterm = self.config.xterm_line_wrap;
+        let last = self.grid.last_column();
+        let to_end = right.0 == self.columns();
         let row = &mut self.grid[point.line];
+        let keep_wrap = xterm && to_end && row[last].flags.contains(Flags::WRAPLINE);
         for cell in &mut row[left..right] {
             *cell = bg.into();
+        }
+        if keep_wrap {
+            row[last].flags.insert(Flags::WRAPLINE);
+        }
+        // xterm: EL0 from the first column and EL2 end "this row continues the previous one".
+        if xterm && left.0 == 0 && !matches!(mode, ansi::LineClearMode::Left) {
+            self.unwrap_from_previous(point.line);
         }
 
         let range = self.grid.cursor.point.line..=self.grid.cursor.point.line;
@@ -1851,6 +1947,10 @@ impl<T: EventListener> Handler for Term<T> {
                 for cell in &mut self.grid[cursor.line][..end] {
                     *cell = bg.into();
                 }
+                // xterm resets the first screen row too, ending its continuation of history.
+                if self.config.xterm_line_wrap {
+                    self.unwrap_from_previous(Line(0));
+                }
 
                 let range = Line(0)..=cursor.line;
                 self.selection = self.selection.take().filter(|s| !s.intersects_range(range));
@@ -1859,6 +1959,9 @@ impl<T: EventListener> Handler for Term<T> {
                 let cursor = self.grid.cursor.point;
                 for cell in &mut self.grid[cursor.line][cursor.column..] {
                     *cell = bg.into();
+                }
+                if self.config.xterm_line_wrap && cursor.column.0 == 0 {
+                    self.unwrap_from_previous(cursor.line);
                 }
 
                 if (cursor.line.0 as usize) < screen_lines - 1 {
@@ -1871,6 +1974,9 @@ impl<T: EventListener> Handler for Term<T> {
             ansi::ClearMode::All => {
                 if self.mode.contains(TermMode::ALT_SCREEN) || !self.config.scroll_on_erase_in_display {
                     self.grid.reset_region(..);
+                    if self.config.xterm_line_wrap {
+                        self.unwrap_from_previous(Line(0));
+                    }
                 } else {
                     let old_offset = self.grid.display_offset();
 

@@ -42,6 +42,16 @@ single crate.
   `Grid::clear_viewport`). When off, `clear_screen` resets the screen in place
   as on the alternate screen, like xterm.js `scrollOnEraseInDisplay: false`.
   `oxty::Engine` turns it off.
+- Line continuation as xterm.js keeps it is an option:
+  `term::Config::xterm_line_wrap` (default `false`, upstream). xterm stores
+  "this row continues the previous one" on the lower row; Alacritty stores it
+  as `WRAPLINE` on the upper row's last cell. When on, a line feed that moves
+  the cursor down without scrolling, EL0/EL2 from the first column, ED0 from
+  the first column and ED1/ED2 (no scroll) end that continuation, while EL,
+  ECH, ICH and DCH keep the erased row's own `WRAPLINE` (DCH no longer leaves
+  it mid-row). IL and DL move the boundary flags as xterm's line splices do.
+  vte routes IND and NEL through `linefeed` as well, so they also end a
+  continuation there, unlike xterm. `oxty::Engine` turns it on.
 - `term/mod.rs` handles the xterm private modes 47, 1047 and 1048, which the
   `vte` table reports as `PrivateMode::Unknown` and upstream ignores. 47/1047
   switch screens through `swap_alt` like 1049 but keep the primary saved
