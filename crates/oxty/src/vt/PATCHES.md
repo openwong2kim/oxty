@@ -32,6 +32,12 @@ single crate.
   shows the cursor again). When on, `reset_state` restores DECTCEM
   (`TermMode::SHOW_CURSOR`) after resetting the modes, as xterm.js does.
   `oxty::Engine` turns it on.
+- ED2 scrolling into history is an option:
+  `term::Config::scroll_on_erase_in_display` (default `true`, upstream: on the
+  primary screen `CSI 2 J` pushes the screen into history through
+  `Grid::clear_viewport`). When off, `clear_screen` resets the screen in place
+  as on the alternate screen, like xterm.js `scrollOnEraseInDisplay: false`.
+  `oxty::Engine` turns it off.
 - `term/cell.rs` uses the remaining u16 flag bit for SGR blink; `term/mod.rs`
   retains SGR 5, ignores SGR 6 like xterm, and clears blink on SGR 25/reset.
   This keeps the 24-byte cell layout while allowing ANSI replay to preserve blink.

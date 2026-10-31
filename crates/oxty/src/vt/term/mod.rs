@@ -386,6 +386,10 @@ pub struct Config {
     /// oxty: RIS(`ESC c`)가 커서 숨김(DECTCEM)을 유지할지(xterm.js 동작).
     /// 기본값 `false`는 Alacritty 원래 동작(RIS가 커서를 다시 보이게 함)이다.
     pub ris_keeps_cursor_visibility: bool,
+
+    /// oxty: 주 화면 ED2(`CSI 2 J`)가 화면 줄을 히스토리로 밀지(xterm.js `scrollOnEraseInDisplay`).
+    /// 기본값 `true`는 Alacritty 원래 동작이다. `false`면 대체 화면처럼 화면만 지운다.
+    pub scroll_on_erase_in_display: bool,
 }
 
 impl Default for Config {
@@ -400,6 +404,7 @@ impl Default for Config {
             reflow_cursor_line: true,
             scroll_damage: false,
             ris_keeps_cursor_visibility: false,
+            scroll_on_erase_in_display: true,
         }
     }
 }
@@ -1859,7 +1864,7 @@ impl<T: EventListener> Handler for Term<T> {
                 self.selection = self.selection.take().filter(|s| !s.intersects_range(range));
             },
             ansi::ClearMode::All => {
-                if self.mode.contains(TermMode::ALT_SCREEN) {
+                if self.mode.contains(TermMode::ALT_SCREEN) || !self.config.scroll_on_erase_in_display {
                     self.grid.reset_region(..);
                 } else {
                     let old_offset = self.grid.display_offset();

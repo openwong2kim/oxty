@@ -358,3 +358,13 @@ fn scrolling_output_reports_scroll_and_new_lines() {
     t.feed(b"\x1b[2;4r\x1b[4;1H\n");
     assert_eq!(t.take_damage(), Damage::Full);
 }
+
+#[test]
+fn erase_display_keeps_history_like_xterm() {
+    // xterm.js scrollOnEraseInDisplay: false — 주 화면 ED2는 화면만 지우고 히스토리로 밀지 않는다.
+    let mut t = Engine::new(20, 6, 100);
+    t.feed(b"a\r\nb\r\nc\x1b[2J");
+    assert_eq!(t.history_len(), 0);
+    assert!((0..6).all(|y| t.row_text(y).unwrap().is_empty()));
+    assert_eq!((t.cursor().line, t.cursor().col), (2, 1));
+}
