@@ -2,11 +2,16 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.2 |
-| 작성일 | 2026-10-31 (v0.1), 2026-10-31 (v0.2) |
+| 문서 버전 | v0.3 |
+| 작성일 | 2026-10-31 (v0.1·v0.2·v0.3) |
 | 저장소 | github.com/openwong2kim/oxty (비공개) |
 | 현재 릴리스 | 0.0.1 — 엔진 코어, wasm, N-API, 테스트 (레지스트리 미배포) |
 | 첫 고객 | wmux |
+
+### v0.3 변경 요약
+
+- **이름 하나**: 공개 이름은 `oxty` 하나다. Alacritty 포크는 별도 크레이트(`oxty-vt`) 대신 `oxty` 크레이트 안의 `vt` 모듈로 내장하고, 웹 프런트는 `oxty/xterm` 하위 경로로 낸다.
+- **대상 재평가**: Orca가 wmux와 같은 xterm.js 스택을 쓴다(§2.2). herdr·t3code는 이미 libghostty-vt를 골랐다. 경쟁자 평가를 실사용 기준으로 고쳤다.
 
 ### v0.2 변경 요약
 
@@ -45,6 +50,11 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
   - ghostty-web(Coder, Zig): 같은 기간 **314,582**회, xterm.js API 호환을 목표로 함
   - vercel-labs/wterm(Zig): DOM 렌더러, 자체 API
   - riotermjs(Rust): 0.1.8, 초기 단계
+- 에이전트 터미널 앱의 엔진 선택 (2026-10-31, 각 저장소 의존성 파일 확인)
+  - **Orca**(stablyai, ★111k, MIT, Electron): xterm.js `6.1.0-beta.304` + `@xterm/headless` + serialize — wmux와 버전까지 같다. oxty가 wmux에 붙으면 거의 그대로 붙일 수 있는 1순위 외부 대상이다.
+  - **herdr**(★47k, Apache-2.0, Rust TUI): libghostty-vt를 저장소에 넣어 FFI로 쓴다.
+  - **t3code**(pingdotgg, ★33k, MIT, Electron + 웹): libghostty를 직접 wasm으로 빌드해 쓴다.
+  - 즉 실제 경쟁자는 libghostty-vt다. oxty는 "이미 xterm.js를 쓰는 앱"(wmux, Orca)이 import 교체로 옮겨 오는 자리를 노린다.
 - **Rust로 된, 성숙한, xterm.js 호환 엔진은 아직 없다.** oxty가 노릴 자리다.
 
 ### 2.3 장기 방향
@@ -60,7 +70,7 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 
 | ID | 목표 | 판단 기준 |
 | --- | --- | --- |
-| G1 | **엔진 하나** — 데몬·웹·네이티브가 같은 코어를 쓴다 | wmux-term이 `oxty-vt`에 의존(M1), wmux의 데몬과 화면이 같은 oxty 빌드를 사용(M2) |
+| G1 | **엔진 하나** — 데몬·웹·네이티브가 같은 코어를 쓴다 | wmux-term이 `oxty`에 의존(M1), wmux의 데몬과 화면이 같은 oxty 빌드를 사용(M2) |
 | G2 | **xterm.js 호환 프런트** — import 교체 수준으로 옮길 수 있다 | 정의한 API 체크리스트 통과(§6 M2) |
 | G3 | **wmux 적용** — 렌더러 엔진을 oxty로 교체 | 교체 전: `@xterm/headless` 차분 불일치 0. 교체 후: wmux e2e·IME 회귀·화면 스냅샷 회귀 0 |
 | G4 | **로직은 Rust에** — 입력 인코딩·선택·검색·링크까지 | 플랫폼별 코드는 IME·그리기·OS 입력만 |
@@ -82,7 +92,8 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 | 사용자 | 사용 사례 | 받는 경로 |
 | --- | --- | --- |
 | **wmux** (첫 고객) | 데몬 스냅샷, Electron 렌더러, 웹·모바일 클라이언트를 한 엔진으로 | N-API + wasm, git 의존성(D8) |
-| **웹 터미널 개발자** (xterm.js 사용자) | 클라우드 IDE, 웹 SSH, AI 에이전트 UI | npm `@oxty/xterm` |
+| **xterm.js를 쓰는 에이전트 터미널** (Orca 등) | wmux와 같은 "엔진 둘" 문제 해소 | npm `oxty`, `oxty/xterm` |
+| **웹 터미널 개발자** (xterm.js 사용자) | 클라우드 IDE, 웹 SSH, AI 에이전트 UI | npm `oxty/xterm` |
 | **Rust 앱 개발자** | 네이티브 터미널, TUI 테스트 도구, 에이전트 런타임 | crates.io |
 
 ---
@@ -94,7 +105,7 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ 프런트엔드                                                   │
-│  `@oxty/xterm` 얇은 자체 웹 프런트 + xterm.js 호환 API        │
+│  `oxty/xterm` 얇은 자체 웹 프런트 + xterm.js 호환 API         │
 │    (xterm.js에서 차용: WebGL 글리프 아틀라스·IME 조합·키 입력) │
 │  네이티브 렌더러 (wgpu + cosmic-text, 1.0 이후)               │
 ├──────────────────────────────────────────────────────────────┤
@@ -106,7 +117,7 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 │              + (M1~) serialize, 검색 / (M3~) 입력 인코딩 /     │
 │                (M4~) 선택, 링크 감지                          │
 ├──────────────────────────────────────────────────────────────┤
-│ 코어 `oxty-vt`  Alacritty 0.26 포크 (vte 파서 + 그리드)       │
+│ 코어 `oxty::vt`  Alacritty 0.26 포크 내장 (vte 파서 + 그리드) │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -114,9 +125,10 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 
 **D1. 코어는 Alacritty 포크** (`alacritty_terminal` 0.26, Apache-2.0)
 - 이유: Rust 네이티브이고 이미 패치·검증됐다. Unicode 11 폭·리사이즈·blink는 wmux에서, wasm32 빌드는 oxty 0.0.1에서 패치했다.
-- 대안 검토: libghostty-vt는 기능이 풍부하지만 Zig·C API이고 아직 알파라 API가 안정되지 않았다. 처음부터 작성하는 건 가치 대비 비용이 크다.
+- 대안 검토: libghostty-vt는 기능이 풍부하고 herdr·t3code가 실제로 쓰지만, Zig 도구가 함께 필요하고 C API라 Rust·N-API 연결이 번거롭다. wmux가 Alacritty 기반으로 맞춰 놓은 픽스처 84건을 다시 검증해야 하는 비용도 크다. 처음부터 작성하는 건 가치 대비 비용이 크다.
 - libghostty-vt는 **비교 대상이자 동작 기준점**으로 쓴다.
-- 포크는 한 벌만 둔다. wmux-term은 M1에서 `oxty-vt`를 의존성으로 쓰도록 바꾼다(D8).
+- 포크는 한 벌만 둔다. 별도 크레이트로 내지 않고 `oxty` 크레이트 안의 `vt` 모듈로 내장한다. crates.io는 의존성도 전부 레지스트리에 있어야 하므로, 내장하면 공개 이름이 `oxty` 하나로 끝난다. 내부 경로(`crate::`) 89곳은 스크립트로 바꾸고, Alacritty를 올릴 때 같은 스크립트를 다시 돌린다.
+- wmux-term은 M1에서 vendor 포크 대신 `oxty`를 의존성으로 쓰도록 바꾼다(D8).
 
 **D2. 렌더러 무관 API**
 - 엔진은 "바뀐 줄 목록 + 셀 배열"만 내준다. 웹 프런트와 미래의 네이티브 렌더러가 같은 API를 쓴다.
@@ -170,9 +182,9 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 
 | 요구사항 | 수용 기준 |
 | --- | --- |
-| 이름 선점: npm `oxty`·`@oxty` 스코프, crates.io `oxty`·`oxty-vt` | 각 레지스트리에 등록됨 |
-| Alacritty 포크를 `oxty-vt`로 분리·배포 | `cargo publish -p oxty` 검증 통과, crates.io에 `oxty` 등록 |
-| **wmux-term이 vendor 포크 대신 `oxty-vt`에 의존** (D8) | wmux의 기존 Rust 테스트·픽스처 84건 통과, wmux 쪽 vendor 사본 제거 |
+| 이름 선점: npm `oxty`, crates.io `oxty` | 각 레지스트리에 등록됨 |
+| Alacritty 포크를 `oxty` 크레이트 안 `vt` 모듈로 내장 (D1) | 경로 변환 스크립트로 재현 가능, `cargo test`·wasm 빌드·`cargo publish --dry-run -p oxty` 통과 |
+| **wmux-term이 vendor 포크 대신 `oxty`에 의존** (D8) | wmux의 기존 Rust 테스트·픽스처 84건 통과, wmux 쪽 vendor 사본 제거 |
 | wmux 정책 패치(커서 문단 reflow 보존)를 엔진 옵션으로 | 기본값은 업스트림 동작, wmux가 옵션을 켜면 기존 픽스처와 일치 |
 | ANSI serialize (wmux-term `native_serialize` 이식) | 직렬화→복원 후 화면 지문이 원본과 일치 |
 | 차분 테스트 장치: 같은 입력을 oxty와 `@xterm/headless`에 넣고 비교 | wmux 픽스처 84건 이식, 전부 일치 또는 차이를 문서화 |
@@ -186,7 +198,7 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 
 | 요구사항 | 수용 기준 |
 | --- | --- |
-| `@oxty/xterm`: 차용한 WebGL 렌더러가 oxty 행을 그림 (D3) | 바뀐 줄만 갱신, WebGL 컨텍스트 손실 시 복구 |
+| `oxty/xterm`: 차용한 WebGL 렌더러가 oxty 행을 그림 (D3) | 바뀐 줄만 갱신, WebGL 컨텍스트 손실 시 복구 |
 | API 체크리스트: `new Terminal(opts)`, `open`, `write`, `onData`, `onBinary`, `onResize`, `onTitleChange`, `onBell`, `resize`, `buffer.active.getLine().translateToString()`, `loadAddon`, `dispose` | 체크리스트 100% + 지원 범위 표를 README에 공개 |
 | 키 입력: xterm.js에서 차용한 `Keyboard.ts`가 oxty 모드 값을 읽음 | 기존 xterm.js와 키 입력 바이트 일치 |
 | wmux 애드온 대체: fit·webgl은 내장, unicode11은 엔진 표, search·serialize는 oxty를 직접 호출, web-links는 OSC 8 + 정규식 감지 | wmux에서 쓰는 기능 전부 동작 (image는 §10 열린 질문) |
@@ -240,7 +252,7 @@ M2는 xterm.js에서 차용한 키 입력 코드로 동작한다. M3에서 인�
 | 성능 | `write`→프레임 end-to-end 처리량이 같은 코퍼스에서 xterm.js 이상. 목표값은 M1 기준선 측정 후 확정 |
 | 메모리 | 셀 크기(24B)로 인한 스크롤백 메모리를 README에 공개, 압축 저장은 1.0 전 검토(D6) |
 | 플랫폼 | Windows·macOS·Linux 네이티브, 최신 브라우저, Node 18 이상 |
-| 라이선스 | oxty 코드는 MIT OR Apache-2.0. `oxty-vt` 포크는 Apache-2.0 + `LICENSE-XTERM`(Unicode 11 표)으로 MIT 재라이선스 불가. xterm.js 차용 모듈은 출처·커밋을 `THIRD_PARTY_NOTICES.md`에 기록. GPL 코드는 참고만 하고 복사하지 않음 |
+| 라이선스 | oxty 코드는 MIT OR Apache-2.0. 내장한 `vt` 모듈(Alacritty 포크)은 Apache-2.0 + `LICENSE-XTERM`(Unicode 11 표)으로 MIT 재라이선스 불가 — 크레이트 라이선스 표기와 NOTICE에 반영. xterm.js 차용 모듈은 출처·커밋을 `THIRD_PARTY_NOTICES.md`에 기록. GPL 코드는 참고만 하고 복사하지 않음 |
 
 ---
 
@@ -262,13 +274,13 @@ M2는 xterm.js에서 차용한 키 입력 코드로 동작한다. M3에서 인�
 | --- | --- | --- |
 | 자체 프런트 범위 과다 (선택 UI·접근성 직접 구현) | M2 지연 | M1 스파이크로 차용 비용을 먼저 확인, 실패 시 포크로 전환(D3) |
 | xterm.js 차용 모듈이 업스트림 수정을 못 받음 | IME·렌더링 버그 잔존 | 차용 모듈 목록과 출처 커밋을 기록하고, 업스트림 릴리스 노트를 분기마다 확인 |
-| Alacritty 포크가 wmux와 oxty로 갈라짐 | "엔진 하나"가 "포크 둘"로 바뀔 뿐 | M1에서 wmux-term을 `oxty-vt`로 통합(D8) |
-| Alacritty 업스트림과의 거리 | 버그 수정을 못 받음 | 패치를 `WMUX-PATCH.md`처럼 목록화, 버전 올릴 때 차분 테스트로 검증 |
+| Alacritty 포크가 wmux와 oxty로 갈라짐 | "엔진 하나"가 "포크 둘"로 바뀔 뿐 | M1에서 wmux-term을 `oxty`로 통합(D8) |
+| Alacritty 업스트림과의 거리 | 버그 수정을 못 받음 | 패치를 `WMUX-PATCH.md`처럼 목록화, 버전 올릴 때 차분 테스트로 검증. M1 이후 wasm 빌드용 feature(`tty`·`event_loop` 끄기)를 업스트림에 제안 |
 | wmux 정책이 엔진에 섞임 | 외부 사용자에게 wmux 동작이 강제됨 | wmux 전용 동작은 엔진 옵션, 기본값은 업스트림(D8) |
 | 동작 차이 (리플로우, IME, 폭) | wmux 화면 깨짐 | 교체 전 차분 테스트, 교체 후 wmux e2e·IME 회귀를 출시 관문으로 |
 | wasm 경계 비용 (프레임마다 행 복사) | 바쁜 패인에서 프레임 저하 | 스크롤 줄 수 damage(M1)로 새 줄만 복사, Worker 옵션(M4), 측정으로 판단 |
 | 스크롤백 메모리 (셀 24B) | 단독 웹 사용에서 xterm.js보다 무거움 | 수치 공개, 압축 저장 검토(D6) |
-| 경쟁 (ghostty-web이 앞서 있음) | 채택 어려움 | 차별점 명확히: Rust, 데몬·웹·네이티브 한 엔진, wmux 실사용. 이름 선점(M1) |
+| 경쟁 (libghostty-vt 기반: ghostty-web·herdr·t3code) | 채택 어려움 | 차별점 명확히: Rust, 데몬·웹·네이티브 한 엔진, wmux 실사용. 이름 선점(M1) |
 | 라이선스 오염 | 배포 불가 | Zed·COSMIC Terminal(GPL 계열)과 esctest(GPL-2.0)는 코드 복사 금지, 외부 도구로만 실행 |
 | 1인 개발 | 진행 정체 | 마일스톤을 작게, wmux 실사용으로 검증 |
 
@@ -280,10 +292,10 @@ M2는 xterm.js에서 차용한 키 입력 코드로 동작한다. M3에서 인�
 
 | v0.1 질문 | 결정 | 이유 |
 | --- | --- | --- |
-| 1. 호환층 패키지 이름 | `@oxty/xterm` 스코프 | 엔진 패키지 `oxty`에 프런트 의존성이 섞이지 않음 |
+| 1. 호환층 패키지 이름 | `oxty/xterm` 하위 경로 (v0.3에서 변경) | 공개 이름을 `oxty` 하나로. 부품 차용(D3)이라 xterm.js 패키지 의존성이 없어 엔진 패키지가 무거워지지 않음 |
 | 2. xterm.js 포크 vs 자체 프런트 | 자체 프런트 + 부품 차용, M1 스파이크로 확정 | D3 |
 | 3. PTY를 oxty가 가질지 | 엔진에는 넣지 않음. 필요해지면 별도 크레이트 `oxty-pty` | "엔진은 바이트만" 원칙 유지 |
-| 4. wmux-term과의 관계 | M1에서 wmux-term이 `oxty-vt`에 의존 | G1의 전제. D8 |
+| 4. wmux-term과의 관계 | M1에서 wmux-term이 `oxty`에 의존 | G1의 전제. D8 |
 | 5. 공개 시점 | M1(crates.io 배포) 후 공개 | Rust TUI 테스트 용도로는 그 시점에도 쓸 만하고, 경쟁 공간이라 일찍 자리 잡음 |
 
 ### 10.2 열린 질문
@@ -319,7 +331,7 @@ M2는 xterm.js에서 차용한 키 입력 코드로 동작한다. M3에서 인�
 
 | 프로젝트 | 언어 · 라이선스 | 상태 | 참고할 점 |
 | --- | --- | --- | --- |
-| [libghostty-vt](https://mitchellh.com/writing/libghostty-is-coming) | Zig + C API · MIT(Ghostty 저장소) | 알파, API 미안정 | 의존성 없는 VT 라이브러리 API 설계, kitty 키보드, 리플로우. 동작 기준점(D1) |
+| [libghostty-vt](https://mitchellh.com/writing/libghostty-is-coming) | Zig + C API · MIT(Ghostty 저장소) | 알파, API 미안정. 그래도 herdr가 vendor로, t3code가 wasm으로 실사용 | **실제 경쟁자.** 의존성 없는 VT 라이브러리 API 설계, kitty 키보드, 리플로우. 동작 기준점(D1) |
 | [termwiz](https://github.com/wezterm/wezterm) (WezTerm) | Rust · MIT | 0.23.3 | 키 입력 인코딩, 화면 diff 모델, 하이퍼링크·이미지 모델 |
 | [rio-backend](https://github.com/raphamorim/rio) | Rust · MIT | 0.5.28 | Alacritty 계열 그리드를 자체 발전시킨 사례 |
 
