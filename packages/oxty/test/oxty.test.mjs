@@ -17,7 +17,7 @@ test('korean and ascii in one row, wide cells flagged', () => {
   assert.equal(String.fromCodePoint(cells[0]), '안');
   assert.ok(cells[3] & Attr.WIDE);
   assert.ok(cells[4 + 3] & Attr.WIDE_SPACER);
-  assert.deepEqual(t.cursor(), { line: 1, col: 0, visible: true });
+  assert.deepEqual(t.cursor(), { line: 1, col: 0, visible: true, shape: 'block', blink: false });
   t.dispose();
 });
 
@@ -58,7 +58,7 @@ test('scrollback with negative lines', () => {
 
 test('damage lists changed rows', () => {
   const t = make();
-  assert.deepEqual(t.takeDamage(), { full: true, lines: [] });
+  assert.deepEqual(t.takeDamage(), { full: true, scroll: 0, lines: [] });
   t.write('\x1b[3;1Hhello');
   const d = t.takeDamage();
   assert.equal(d.full, false);
@@ -120,4 +120,35 @@ test('large write grows the input buffer', () => {
   t.write(chunk.repeat(5000));
   assert.equal(t.historyLength, 5000 - 23);
   assert.equal(t.rowText(0), 'x'.repeat(79));
+});
+
+test('row extras: combining, underline colour, shared hyperlink', () => {
+  const t = make();
+  t.write('é\x1b[4:3;58;2;255;0;0mX\x1b[0m\x1b]8;id=a;https://oxty.dev\x1b\\LN\x1b]8;;\x1b\\Z');
+  const cells = t.rowCells(0);
+  assert.ok(cells[1 * 4 + 3] & Attr.UNDERLINE_COLOR);
+  assert.ok(cells[2 * 4 + 3] & Attr.HYPERLINK);
+  const extras = t.rowExtras(0);
+  assert.deepEqual(extras.map((e) => e.col), [0, 1, 2, 3]);
+  assert.equal(extras[0].text, 'é');
+  assert.deepEqual(decodeColor(extras[1].underlineColor), { kind: 'rgb', value: 0xff0000 });
+  assert.deepEqual(extras[2].hyperlink, { id: 'a', uri: 'https://oxty.dev' });
+  assert.equal(extras[2].hyperlink, extras[3].hyperlink);
+  assert.deepEqual(t.rowExtras(1), []);
+  assert.equal(t.rowExtras(99), null);
+});
+
+test('cursor shape, view scrolling, scroll damage', () => {
+  const t = make({ cols: 20, rows: 5 });
+  t.write('\x1b[5 q');
+  assert.deepEqual([t.cursor().shape, t.cursor().blink], ['bar', true]);
+  t.write('a\r\nb\r\nc\r\nd\r\ne');
+  t.takeDamage();
+  t.write('\r\nf');
+  assert.deepEqual(t.takeDamage(), { full: false, scroll: 1, lines: [3, 4] });
+  t.scrollDisplay(1);
+  assert.equal(t.displayOffset, 1);
+  assert.equal(t.takeDamage().full, true);
+  t.scrollToBottom();
+  assert.equal(t.displayOffset, 0);
 });

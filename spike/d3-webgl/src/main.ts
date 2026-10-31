@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   renderer.render();
 
   // 2차 write: takeDamage()의 바뀐 줄만 다시 그리는 경로를 확인한다(이전 커서 줄도 지워져야 한다)
-  term.write(`${ESC}16;1H${ESC}32m2차 write:${reset} damage 줄만 갱신 → `);
+  term.write(`${ESC}16;1H${ESC}32m2차 write:${reset} damage 줄만 갱신, 막대 커서 → ${ESC}6 q`);
   renderer.render();
 
   const c = term.cursor();

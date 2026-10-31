@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 
-use oxty::{Damage, Engine};
+use oxty::{CursorShape, Damage, Engine};
 
 thread_local! {
     static TERMS: RefCell<Vec<Option<Box<Engine>>>> = const { RefCell::new(Vec::new()) };
@@ -38,7 +38,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxty_abi() -> u32 {
-    1
+    2
 }
 
 #[no_mangle]
@@ -61,6 +61,12 @@ pub unsafe extern "C" fn oxty_free(ptr: *mut u8, len: u32) {
 #[no_mangle]
 pub extern "C" fn oxty_out_ptr() -> *const u8 {
     OUT.with_borrow(|out| out.as_ptr())
+}
+
+/// Byte length of OUT, for results that return a count instead.
+#[no_mangle]
+pub extern "C" fn oxty_out_len() -> u32 {
+    OUT.with_borrow(|out| out.len() as u32)
 }
 
 #[no_mangle]
@@ -174,20 +180,98 @@ pub extern "C" fn oxty_cursor(h: u32) -> u32 {
     })
 }
 
+/// Cursor shape (0 block, 1 underline, 2 bar), with bit 8 set when blinking.
+#[no_mangle]
+pub extern "C" fn oxty_cursor_style(h: u32) -> u32 {
+    with(h, 0, |t| {
+        let c = t.cursor();
+        let shape = match c.shape {
+            CursorShape::Block => 0,
+            CursorShape::Underline => 1,
+            CursorShape::Bar => 2,
+        };
+        (c.blinking as u32) << 8 | shape
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn oxty_display_offset(h: u32) -> u32 {
+    with(h, 0, |t| t.display_offset() as u32)
+}
+
+#[no_mangle]
+pub extern "C" fn oxty_scroll_display(h: u32, delta: i32) {
+    with(h, (), |t| t.scroll_display(delta));
+}
+
+#[no_mangle]
+pub extern "C" fn oxty_scroll_to_bottom(h: u32) {
+    with(h, (), |t| t.scroll_to_bottom());
+}
+
+/// Cells with combining marks, an underline colour or a hyperlink; returns
+/// their count, or -1 if out of range. OUT32 holds `[col, underline colour
+/// (0 = none), text byte length (0 = none), link (0 = none, else 1-based
+/// index)]` per cell. OUT holds the texts in order, then each link of the row
+/// as `id \0 uri \0`.
+#[no_mangle]
+pub extern "C" fn oxty_row_extras(h: u32, line: i32) -> i32 {
+    with(h, -1, |t| {
+        let mut extras = Vec::new();
+        if !t.row_extras(line, &mut extras) {
+            return -1;
+        }
+        let mut bytes = Vec::new();
+        let mut links: Vec<&oxty::Hyperlink> = Vec::new();
+        let mut words = Vec::with_capacity(extras.len() * 4);
+        for e in &extras {
+            let text = e.text.as_deref().unwrap_or("");
+            bytes.extend_from_slice(text.as_bytes());
+            let link =
+                e.hyperlink
+                    .as_ref()
+                    .map_or(0, |l| match links.iter().position(|x| *x == l) {
+                        Some(i) => i + 1,
+                        None => {
+                            links.push(l);
+                            links.len()
+                        }
+                    });
+            words.extend([
+                e.col as u32,
+                e.underline_color.unwrap_or(0),
+                text.len() as u32,
+                link as u32,
+            ]);
+        }
+        for l in links {
+            bytes.extend_from_slice(l.id.as_bytes());
+            bytes.push(0);
+            bytes.extend_from_slice(l.uri.as_bytes());
+            bytes.push(0);
+        }
+        set_out(bytes);
+        OUT32.with_borrow_mut(|out| *out = words);
+        extras.len() as i32
+    })
+}
+
 #[no_mangle]
 pub extern "C" fn oxty_modes(h: u32) -> u32 {
     with(h, 0, |t| t.modes())
 }
 
-/// -1 = full redraw; otherwise the number of changed lines, listed in OUT32.
+/// -1 = full redraw; otherwise the number of changed lines. OUT32 holds the
+/// rows to scroll up first, then the changed lines.
 #[no_mangle]
 pub extern "C" fn oxty_take_damage(h: u32) -> i32 {
     with(h, -1, |t| match t.take_damage() {
         Damage::Full => -1,
-        Damage::Lines(lines) => OUT32.with_borrow_mut(|out| {
+        Damage::Lines { scroll, lines } => OUT32.with_borrow_mut(|out| {
             out.clear();
+            out.push(scroll.into());
             out.extend(lines.into_iter().map(u32::from));
-            out.len() as i32
+            out.len() as i32 - 1
         }),
     })
 }

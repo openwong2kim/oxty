@@ -46,9 +46,10 @@ export class OxtyCellData extends AttributeData implements ICellData {
   private _width = 1;
 
   /**
-   * @param chars COMBINING 셀이면 엔진의 cellText()로 받은 전체 문자열, 아니면 빈 문자열
+   * @param chars COMBINING 셀이면 엔진의 rowExtras()로 받은 전체 문자열, 아니면 빈 문자열
+   * @param underlineColor rowExtras()의 밑줄 색(oxty 패킹), 없으면 0
    */
-  public load(codepoint: number, oxFg: number, oxBg: number, attrs: number, chars: string): void {
+  public load(codepoint: number, oxFg: number, oxBg: number, attrs: number, chars: string, underlineColor = 0): void {
     if (attrs & OxAttr.WIDE_SPACER) {
       // 넓은 글자의 뒤 칸: xterm.js처럼 코드 0·폭 0, 색은 유지해 배경 사각형이 이어지게 한다
       this._code = 0;
@@ -76,6 +77,10 @@ export class OxtyCellData extends AttributeData implements ICellData {
         bg |= BgFlags.HAS_EXTENDED;
         this.extended.underlineStyle = style;
       }
+    }
+    if (underlineColor) {
+      bg |= BgFlags.HAS_EXTENDED;
+      this.extended.underlineColor = toXtermColor(underlineColor);
     }
     this.fg = fg;
     this.bg = bg;

@@ -1,7 +1,7 @@
 // oxty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 1;
+const ABI = 2;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -50,7 +50,9 @@ async function fetchWasm(source) {
   const base = globalThis.location?.href ?? import.meta.url;
   const url = source instanceof URL ? source : new URL(String(source), base);
   if (url.protocol === 'file:') {
-    const { readFile } = await import('node:fs/promises');
+    // 이름을 변수로 둬서 브라우저 번들러가 node: 모듈을 따라가지 않게 한다.
+    const fsModule = 'node:fs/promises';
+    const { readFile } = await import(/* @vite-ignore */ /* webpackIgnore: true */ fsModule);
     return new Uint8Array(await readFile(url));
   }
   const response = await fetch(url);
@@ -76,7 +78,7 @@ export const Attr = Object.freeze({
   BOLD: 1 << 0, DIM: 1 << 1, ITALIC: 1 << 2, UNDERLINE: 1 << 3,
   DOUBLE_UNDERLINE: 1 << 4, CURLY_UNDERLINE: 1 << 5, DOTTED_UNDERLINE: 1 << 6, DASHED_UNDERLINE: 1 << 7,
   INVERSE: 1 << 8, HIDDEN: 1 << 9, STRIKEOUT: 1 << 10, BLINK: 1 << 11,
-  WIDE: 1 << 12, WIDE_SPACER: 1 << 13, COMBINING: 1 << 14,
+  WIDE: 1 << 12, WIDE_SPACER: 1 << 13, COMBINING: 1 << 14, UNDERLINE_COLOR: 1 << 15, HYPERLINK: 1 << 16,
 });
 
 /** Terminal mode bits (`modes()`). */
@@ -86,6 +88,8 @@ export const Mode = Object.freeze({
   FOCUS_EVENTS: 1 << 8, ALT_SCREEN: 1 << 9, ALTERNATE_SCROLL: 1 << 10, LINE_WRAP: 1 << 11,
   INSERT: 1 << 12, ORIGIN: 1 << 13, KITTY_KEYBOARD: 1 << 14,
 });
+
+const CURSOR_SHAPES = ['block', 'underline', 'bar'];
 
 /** Packed colour kinds (`rowCells` words 1 and 2). */
 export const ColorKind = Object.freeze({ NAMED: 1, INDEXED: 2, RGB: 3 });
@@ -188,19 +192,70 @@ export class Terminal {
     return n < 0 ? null : textOut(n);
   }
 
+  /** Cells with combining marks, an underline colour or a hyperlink. */
+  rowExtras(line) {
+    const n = wasm.oxty_row_extras(this.#handle(), line);
+    if (n < 0) return null;
+    if (n === 0) return [];
+    const words = wordsOut(n * 4);
+    const bytes = new Uint8Array(wasm.memory.buffer, wasm.oxty_out_ptr(), wasm.oxty_out_len()).slice();
+    let at = 0;
+    const texts = [];
+    for (let i = 0; i < n; i++) {
+      const len = words[i * 4 + 2];
+      texts.push(len ? decoder.decode(bytes.subarray(at, at + len)) : undefined);
+      at += len;
+    }
+    // 텍스트 뒤에는 이 줄의 링크가 `id \0 uri \0` 순서로 온다.
+    const parts = decoder.decode(bytes.subarray(at)).split('\0');
+    const links = [];
+    for (let i = 0; i + 1 < parts.length; i += 2) links.push(Object.freeze({ id: parts[i], uri: parts[i + 1] }));
+    const extras = [];
+    for (let i = 0; i < n; i++) {
+      const e = { col: words[i * 4] };
+      if (texts[i] !== undefined) e.text = texts[i];
+      if (words[i * 4 + 1]) e.underlineColor = words[i * 4 + 1];
+      if (words[i * 4 + 3]) e.hyperlink = links[words[i * 4 + 3] - 1];
+      extras.push(e);
+    }
+    return extras;
+  }
+
   cursor() {
-    const c = wasm.oxty_cursor(this.#handle());
-    return { line: (c >>> 16) & 0x7fff, col: c & 0xffff, visible: c >>> 31 === 1 };
+    const h = this.#handle();
+    const c = wasm.oxty_cursor(h);
+    const style = wasm.oxty_cursor_style(h);
+    return {
+      line: (c >>> 16) & 0x7fff,
+      col: c & 0xffff,
+      visible: c >>> 31 === 1,
+      shape: CURSOR_SHAPES[style & 0xff] ?? 'block',
+      blink: (style >>> 8) === 1,
+    };
+  }
+
+  /** Rows the view is scrolled back into history (0 = following output). */
+  get displayOffset() { return wasm.oxty_display_offset(this.#handle()); }
+
+  /** Positive `delta` scrolls back into history; clamped. Damage becomes full when the view moves. */
+  scrollDisplay(delta) {
+    wasm.oxty_scroll_display(this.#handle(), delta);
+  }
+
+  scrollToBottom() {
+    wasm.oxty_scroll_to_bottom(this.#handle());
   }
 
   modes() {
     return wasm.oxty_modes(this.#handle());
   }
 
-  /** Rows changed since the last call. */
+  /** Viewport changes since the last call: move drawn rows up by `scroll`, then redraw `lines`. */
   takeDamage() {
     const n = wasm.oxty_take_damage(this.#handle());
-    return n < 0 ? { full: true, lines: [] } : { full: false, lines: Array.from(wordsOut(n)) };
+    if (n < 0) return { full: true, scroll: 0, lines: [] };
+    const words = wordsOut(n + 1);
+    return { full: false, scroll: words[0], lines: Array.from(words.subarray(1)) };
   }
 
   /** Bytes to write back to the PTY (status reports, …). */

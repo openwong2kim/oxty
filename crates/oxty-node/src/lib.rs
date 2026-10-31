@@ -9,13 +9,32 @@ pub struct Cursor {
     pub line: u32,
     pub col: u32,
     pub visible: bool,
+    /// `"block"`, `"underline"` or `"bar"`.
+    pub shape: String,
+    pub blink: bool,
 }
 
 #[napi(object)]
 pub struct Damage {
-    /// Redraw everything; `lines` is empty.
+    /// Redraw everything; `scroll` is 0 and `lines` is empty.
     pub full: bool,
+    /// Move drawn rows up by this many first.
+    pub scroll: u32,
     pub lines: Vec<u32>,
+}
+
+#[napi(object)]
+pub struct Hyperlink {
+    pub id: String,
+    pub uri: String,
+}
+
+#[napi(object)]
+pub struct CellExtra {
+    pub col: u32,
+    pub text: Option<String>,
+    pub underline_color: Option<u32>,
+    pub hyperlink: Option<Hyperlink>,
 }
 
 #[napi]
@@ -92,14 +111,59 @@ impl Terminal {
         self.inner.cell_text(line, col.min(u16::MAX as u32) as u16)
     }
 
+    /// Cells with combining marks, an underline colour or a hyperlink, or
+    /// `null` if out of range.
+    #[napi]
+    pub fn row_extras(&self, line: i32) -> Option<Vec<CellExtra>> {
+        let mut extras = Vec::new();
+        self.inner.row_extras(line, &mut extras).then(|| {
+            extras
+                .into_iter()
+                .map(|e| CellExtra {
+                    col: e.col as u32,
+                    text: e.text,
+                    underline_color: e.underline_color,
+                    hyperlink: e.hyperlink.map(|l| Hyperlink {
+                        id: l.id,
+                        uri: l.uri,
+                    }),
+                })
+                .collect()
+        })
+    }
+
     #[napi]
     pub fn cursor(&self) -> Cursor {
         let c = self.inner.cursor();
+        let shape = match c.shape {
+            oxty::CursorShape::Block => "block",
+            oxty::CursorShape::Underline => "underline",
+            oxty::CursorShape::Bar => "bar",
+        };
         Cursor {
             line: c.line as u32,
             col: c.col as u32,
             visible: c.visible,
+            shape: shape.into(),
+            blink: c.blinking,
         }
+    }
+
+    /// Rows the view is scrolled back into history (0 = following output).
+    #[napi(getter)]
+    pub fn display_offset(&self) -> u32 {
+        self.inner.display_offset() as u32
+    }
+
+    /// Positive `delta` scrolls back into history.
+    #[napi]
+    pub fn scroll_display(&mut self, delta: i32) {
+        self.inner.scroll_display(delta);
+    }
+
+    #[napi]
+    pub fn scroll_to_bottom(&mut self) {
+        self.inner.scroll_to_bottom();
     }
 
     #[napi]
@@ -112,10 +176,12 @@ impl Terminal {
         match self.inner.take_damage() {
             oxty::Damage::Full => Damage {
                 full: true,
+                scroll: 0,
                 lines: Vec::new(),
             },
-            oxty::Damage::Lines(lines) => Damage {
+            oxty::Damage::Lines { scroll, lines } => Damage {
                 full: false,
+                scroll: scroll.into(),
                 lines: lines.into_iter().map(u32::from).collect(),
             },
         }

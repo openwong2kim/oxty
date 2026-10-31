@@ -2,7 +2,7 @@
 // 복사한 GlyphRenderer·RectangleRenderer·TextureAtlas·RenderModel·CellColorResolver를 묶고,
 // 버퍼(IBufferLine.loadCell) 대신 oxty rowCells()로 렌더 모델을 채운다.
 // 범위 밖: 문자 결합(ligature)·링크 레이어·커서 깜빡임·컨텍스트 손실 복구·DPR 변화 감지.
-import type { Terminal as OxtyTerminal } from '../../../packages/oxty/dist/index.js';
+import type { CellExtra, Terminal as OxtyTerminal } from '../../../packages/oxty/dist/index.js';
 import type { Terminal as XtermTerminalLike } from '@xterm/xterm';
 import { createRenderDimensions } from 'browser/renderer/shared/RendererUtils';
 import { IRenderDimensions } from 'browser/renderer/shared/Types';
@@ -19,6 +19,7 @@ import { CoreBrowserServiceStub, createColorSet, DecorationServiceStub, OptionsS
 
 const ATTR_WIDE = 1 << 12;
 const ATTR_COMBINING = 1 << 14;
+const ATTR_UNDERLINE_COLOR = 1 << 15;
 
 export class OxtyWebglRenderer {
   public readonly canvas: HTMLCanvasElement;
@@ -103,7 +104,8 @@ export class OxtyWebglRenderer {
   /** 엔진 damage를 읽어 바뀐 줄만 모델에 반영하고 그린다. */
   public render(): void {
     const damage = this._term.takeDamage();
-    if (this._glyphs.beginFrame() || damage.full) {
+    // 스크롤 이동(damage.scroll)은 글리프 버퍼를 옮겨야 해서 스파이크에서는 전체 다시 그리기로 처리한다
+    if (this._glyphs.beginFrame() || damage.full || damage.scroll > 0) {
       this._model.clear();
       this._glyphs.clear();
       this._updateRows(Array.from({ length: this._term.rows }, (_, i) => i));
@@ -130,6 +132,14 @@ export class OxtyWebglRenderer {
     for (const y of lines) {
       const cells = term.rowCells(y);
       if (!cells) continue;
+      // 결합 문자·밑줄 색이 있는 줄만 rowExtras()를 한 번 부른다
+      let extras: Map<number, CellExtra> | undefined;
+      for (let x = 0; x < cols; x++) {
+        if (cells[x * 4 + 3] & (ATTR_COMBINING | ATTR_UNDERLINE_COLOR)) {
+          extras = new Map((term.rowExtras(y) ?? []).map(e => [e.col, e]));
+          break;
+        }
+      }
       this._model.lineLengths[y] = 0;
       for (let x = 0; x < cols; x++) {
         // 앞 칸의 해석된 배경색(GlyphRenderer가 글리프 왼쪽 잘림을 정할 때 쓴다)
@@ -137,7 +147,8 @@ export class OxtyWebglRenderer {
         const o = x * 4;
         const attrs = cells[o + 3];
         if (attrs & ATTR_WIDE) this._unicode.recordWide(cells[o]);
-        cell.load(cells[o], cells[o + 1], cells[o + 2], attrs, attrs & ATTR_COMBINING ? term.cellText(y, x) ?? '' : '');
+        const extra = extras?.get(x);
+        cell.load(cells[o], cells[o + 1], cells[o + 2], attrs, extra?.text ?? '', extra?.underlineColor ?? 0);
 
         const chars = cell.getChars();
         let code = cell.getCode();
@@ -147,10 +158,10 @@ export class OxtyWebglRenderer {
         // 커서 칸 색 덮어쓰기(블록 커서)
         if (cursor.visible && y === cursor.line) {
           if (x === cursorX) {
-            this._model.cursor = { x: cursorX, y, width: cell.getWidth(), style: 'block', cursorWidth: 1, dpr: this._coreBrowser.dpr };
+            this._model.cursor = { x: cursorX, y, width: cell.getWidth(), style: cursor.shape, cursorWidth: 1, dpr: this._coreBrowser.dpr };
             lastCursorX = cursorX + cell.getWidth() - 1;
           }
-          if (x >= cursorX && x <= lastCursorX) {
+          if (cursor.shape === 'block' && x >= cursorX && x <= lastCursorX) {
             result.fg = Attributes.CM_RGB | (this._theme.colors.cursorAccent.rgba >> 8 & Attributes.RGB_MASK);
             result.bg = Attributes.CM_RGB | (this._theme.colors.cursor.rgba >> 8 & Attributes.RGB_MASK);
           }

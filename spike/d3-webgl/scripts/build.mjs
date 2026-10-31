@@ -25,8 +25,6 @@ await build({
   target: 'es2022',
   outfile: join(dist, 'main.js'),
   tsconfig: join(here, 'tsconfig.json'),
-  // oxty index.js의 Node 전용 분기(import('node:fs/promises'))는 브라우저 번들에서 제외한다
-  external: ['node:*'],
   sourcemap: true,
   logLevel: 'info'
 });

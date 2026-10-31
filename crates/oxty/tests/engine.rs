@@ -1,4 +1,4 @@
-use oxty::{Cell, Damage, Engine, attr, color, mode};
+use oxty::{Cell, CellExtra, CursorShape, Damage, Engine, Hyperlink, attr, color, mode};
 
 fn term() -> Engine {
     Engine::new(80, 24, 1000)
@@ -104,11 +104,11 @@ fn damage_reports_only_changed_lines() {
     assert_eq!(t.take_damage(), Damage::Full);
     t.feed(b"\x1b[3;1Hhello");
     match t.take_damage() {
-        Damage::Lines(lines) => assert!(lines.contains(&2) && lines.len() <= 2, "{lines:?}"),
+        Damage::Lines { lines, .. } => assert!(lines.contains(&2) && lines.len() <= 2, "{lines:?}"),
         Damage::Full => panic!("expected partial damage"),
     }
     match t.take_damage() {
-        Damage::Lines(lines) => assert!(
+        Damage::Lines { lines, .. } => assert!(
             lines.iter().all(|&l| l == 2),
             "only the cursor line: {lines:?}"
         ),
@@ -225,4 +225,125 @@ fn packed_rows_match_cells() {
             &[c.ch as u32, c.fg, c.bg, c.attrs]
         );
     }
+}
+
+#[test]
+fn cursor_shape_follows_decscusr() {
+    let mut t = term();
+    assert_eq!(
+        (t.cursor().shape, t.cursor().blinking),
+        (CursorShape::Block, false)
+    );
+    t.feed(b"\x1b[5 q");
+    assert_eq!(
+        (t.cursor().shape, t.cursor().blinking),
+        (CursorShape::Bar, true)
+    );
+    t.feed(b"\x1b[4 q");
+    assert_eq!(
+        (t.cursor().shape, t.cursor().blinking),
+        (CursorShape::Underline, false)
+    );
+    t.feed(b"\x1b[0 q");
+    assert_eq!(t.cursor().shape, CursorShape::Block);
+}
+
+#[test]
+fn row_extras_carry_combining_underline_colour_and_links() {
+    let mut t = term();
+    t.feed("e\u{301}\x1b[4:3;58;2;255;0;0mX\x1b[0m".as_bytes());
+    t.feed(b"\x1b]8;id=a;https://oxty.dev\x1b\\LN\x1b]8;;\x1b\\Z");
+    let mut cells = Vec::new();
+    t.row_cells(0, &mut cells);
+    assert_ne!(cells[1].attrs & attr::UNDERLINE_COLOR, 0);
+    assert_ne!(cells[2].attrs & attr::HYPERLINK, 0);
+    assert_eq!(
+        cells[4].attrs & (attr::HYPERLINK | attr::UNDERLINE_COLOR),
+        0
+    );
+
+    let mut extras = Vec::new();
+    assert!(t.row_extras(0, &mut extras));
+    let link = Some(Hyperlink {
+        id: "a".into(),
+        uri: "https://oxty.dev".into(),
+    });
+    assert_eq!(
+        extras,
+        [
+            CellExtra {
+                col: 0,
+                text: Some("e\u{301}".into()),
+                underline_color: None,
+                hyperlink: None
+            },
+            CellExtra {
+                col: 1,
+                text: None,
+                underline_color: Some(color::RGB | 0xff0000),
+                hyperlink: None
+            },
+            CellExtra {
+                col: 2,
+                text: None,
+                underline_color: None,
+                hyperlink: link.clone()
+            },
+            CellExtra {
+                col: 3,
+                text: None,
+                underline_color: None,
+                hyperlink: link
+            },
+        ]
+    );
+    assert!(!t.row_extras(24, &mut extras));
+}
+
+#[test]
+fn view_scrolls_into_history_and_back() {
+    let mut t = Engine::new(20, 3, 100);
+    for i in 0..10 {
+        t.feed(format!("line{i}\r\n").as_bytes());
+    }
+    t.take_damage();
+    t.scroll_display(2);
+    assert_eq!(t.display_offset(), 2);
+    assert_eq!(t.take_damage(), Damage::Full);
+    // 뷰포트 0번 줄 = line(0 - 2)
+    assert_eq!(t.row_text(-2).unwrap(), "line6");
+    t.scroll_display(1000);
+    assert_eq!(t.display_offset(), t.history_len());
+    t.scroll_to_bottom();
+    assert_eq!(t.display_offset(), 0);
+}
+
+#[test]
+fn scrolling_output_reports_scroll_and_new_lines() {
+    let mut t = Engine::new(20, 5, 100);
+    t.feed(b"a\r\nb\r\nc\r\nd\r\ne");
+    t.take_damage();
+    t.feed(b"\r\nf");
+    // 화면이 한 줄 올라갔다: 옛 커서 줄(3으로 이동)과 새 줄 4만 다시 그린다.
+    assert_eq!(
+        t.take_damage(),
+        Damage::Lines {
+            scroll: 1,
+            lines: vec![3, 4]
+        }
+    );
+    t.feed(b"\r\ng\r\nh");
+    assert_eq!(
+        t.take_damage(),
+        Damage::Lines {
+            scroll: 2,
+            lines: vec![2, 3, 4]
+        }
+    );
+    // 화면 높이 이상 스크롤되면 전체를 다시 그린다.
+    t.feed(b"\r\n1\r\n2\r\n3\r\n4\r\n5");
+    assert_eq!(t.take_damage(), Damage::Full);
+    // 스크롤 영역(vim 등)이 화면 일부면 전체로 처리한다.
+    t.feed(b"\x1b[2;4r\x1b[4;1H\n");
+    assert_eq!(t.take_damage(), Damage::Full);
 }

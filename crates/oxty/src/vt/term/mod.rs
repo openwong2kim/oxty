@@ -223,6 +223,9 @@ struct TermDamageState {
 
     /// Old terminal cursor point.
     last_cursor: Point,
+
+    /// oxty: 마지막 reset 이후 화면 전체가 위로 스크롤된 줄 수(`Config::scroll_damage`).
+    scrolled: usize,
 }
 
 impl TermDamageState {
@@ -230,7 +233,7 @@ impl TermDamageState {
         let lines =
             (0..num_lines).map(|line| LineDamageBounds::undamaged(line, num_cols)).collect();
 
-        Self { full: true, lines, last_cursor: Default::default() }
+        Self { full: true, lines, last_cursor: Default::default(), scrolled: 0 }
     }
 
     #[inline]
@@ -238,6 +241,7 @@ impl TermDamageState {
         // Reset point, so old cursor won't end up outside of the viewport.
         self.last_cursor = Default::default();
         self.full = true;
+        self.scrolled = 0;
 
         self.lines.clear();
         self.lines.reserve(num_lines);
@@ -261,7 +265,25 @@ impl TermDamageState {
     /// Reset information about terminal damage.
     fn reset(&mut self, num_cols: usize) {
         self.full = false;
+        self.scrolled = 0;
         self.lines.iter_mut().for_each(|line| line.reset(num_cols));
+    }
+
+    /// oxty: 화면 전체 스크롤을 전체 damage 대신 기록한다. 줄 damage는 내용과 함께 위로 옮기고,
+    /// 새로 생긴 아래 줄은 damage로 표시한다. 이전 커서 자리도 내용을 따라 옮겨,
+    /// 렌더러가 옮겨진 자리에서 지우게 한다.
+    fn scroll_up(&mut self, lines: usize, num_cols: usize) {
+        let len = self.lines.len();
+        self.lines.rotate_left(lines);
+        for (i, line) in self.lines.iter_mut().enumerate() {
+            if i >= len - lines {
+                *line = LineDamageBounds::new(i, 0, num_cols - 1);
+            } else {
+                line.line = i;
+            }
+        }
+        self.last_cursor.line = cmp::max(self.last_cursor.line - lines, Line(0));
+        self.scrolled += lines;
     }
 }
 
@@ -355,6 +377,11 @@ pub struct Config {
     /// oxty: 리사이즈 때 커서가 있는 문단도 reflow할지(xterm.js `reflowCursorLine`).
     /// 기본값 `true`는 Alacritty 원래 동작이다.
     pub reflow_cursor_line: bool,
+
+    /// oxty: 화면 전체 스크롤을 전체 damage 대신 줄 이동으로 기록할지.
+    /// 켜면 [`Term::damage_scrolled`]만큼 렌더러가 기존 줄을 위로 옮긴 뒤 damage 줄만 다시 그린다.
+    /// 기본값 `false`는 Alacritty 원래 동작(스크롤마다 전체 damage)이다.
+    pub scroll_damage: bool,
 }
 
 impl Default for Config {
@@ -367,6 +394,7 @@ impl Default for Config {
             kitty_keyboard: Default::default(),
             osc52: Default::default(),
             reflow_cursor_line: true,
+            scroll_damage: false,
         }
     }
 }
@@ -490,6 +518,13 @@ impl<T> Term<T> {
         // scrolling) is handled via full damage.
         let display_offset = self.grid().display_offset();
         TermDamage::Partial(TermDamageIterator::new(&self.damage.lines, display_offset))
+    }
+
+    /// oxty: 마지막 [`Term::reset_damage`] 이후 화면 전체가 위로 스크롤된 줄 수.
+    /// [`Config::scroll_damage`]가 켜져 있고 damage가 부분일 때만 의미가 있다.
+    /// 렌더러는 그린 줄을 이만큼 위로 옮긴 뒤 damage 줄만 다시 그린다.
+    pub fn damage_scrolled(&self) -> usize {
+        self.damage.scrolled
     }
 
     /// Resets the terminal damage information.
@@ -801,7 +836,20 @@ impl<T> Term<T> {
         if (top <= *line) && region.end > *line {
             *line = cmp::max(*line - lines, top);
         }
-        self.mark_fully_damaged();
+
+        // oxty: 맨 아래를 보고 있을 때 화면 전체가 스크롤되면 damage를 내용과 함께 옮긴다.
+        let whole_screen =
+            region.start == Line(0) && region.end == Line(self.screen_lines() as i32);
+        if self.config.scroll_damage
+            && !self.damage.full
+            && whole_screen
+            && self.grid.display_offset() == 0
+            && self.damage.scrolled + lines < self.screen_lines()
+        {
+            self.damage.scroll_up(lines, self.columns());
+        } else {
+            self.mark_fully_damaged();
+        }
     }
 
     fn deccolm(&mut self)

@@ -28,11 +28,11 @@ use std::time::Duration;
 pub mod vt;
 
 use crate::vt::event::{Event, EventListener};
-use crate::vt::grid::Dimensions;
+use crate::vt::grid::{Dimensions, Scroll};
 use crate::vt::index::{Column, Line};
 use crate::vt::term::cell::{Cell as AlacCell, Flags};
 use crate::vt::term::{Config, Term, TermDamage, TermMode};
-use crate::vt::vte::ansi::{Color, Processor, Timeout};
+use crate::vt::vte::ansi::{Color, CursorShape as AlacCursorShape, Processor, Timeout};
 
 /// Smallest and largest accepted dimensions.
 pub const MIN_COLS: u16 = 2;
@@ -64,8 +64,12 @@ pub mod attr {
     pub const WIDE: u32 = 1 << 12;
     /// Second half of a double-width character; renderers skip it.
     pub const WIDE_SPACER: u32 = 1 << 13;
-    /// The cell carries combining marks; read them with [`crate::Engine::cell_text`].
+    /// The cell carries combining marks; read them with [`crate::Engine::row_extras`].
     pub const COMBINING: u32 = 1 << 14;
+    /// The cell has an underline colour (SGR 58); see [`crate::Engine::row_extras`].
+    pub const UNDERLINE_COLOR: u32 = 1 << 15;
+    /// The cell is part of an OSC 8 hyperlink; see [`crate::Engine::row_extras`].
+    pub const HYPERLINK: u32 = 1 << 16;
 }
 
 /// Terminal mode bits returned by [`Engine::modes`]. Stable across versions.
@@ -120,21 +124,55 @@ impl Cell {
     pub const PACKED_WORDS: usize = 4;
 }
 
-/// Cursor position on the visible screen (0-based).
+/// Cursor shape set by the program (DECSCUSR, `CSI Ps SP q`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorShape {
+    Block,
+    Underline,
+    Bar,
+}
+
+/// Cursor position on the screen (0-based) and its style. While the view is
+/// scrolled back ([`Engine::display_offset`]), it is drawn on viewport row
+/// `line + display_offset`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cursor {
     pub line: u16,
     pub col: u16,
     pub visible: bool,
+    pub shape: CursorShape,
+    pub blinking: bool,
 }
 
-/// What changed on the visible screen since the last [`Engine::take_damage`].
+/// What changed in the viewport since the last [`Engine::take_damage`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Damage {
-    /// Redraw everything (first frame, resize, scroll, alternate screen …).
+    /// Redraw everything (first frame, resize, view scroll, alternate screen …).
     Full,
-    /// Redraw these visible lines, top to bottom.
-    Lines(Vec<u16>),
+    /// First move every drawn row up by `scroll` rows (the top `scroll` rows
+    /// fall off), then redraw `lines`, top to bottom.
+    Lines { scroll: u16, lines: Vec<u16> },
+}
+
+/// What a cell carries beyond [`Cell`]. Only cells with at least one of
+/// these are listed by [`Engine::row_extras`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CellExtra {
+    pub col: u16,
+    /// Full cell text when it has combining marks ([`attr::COMBINING`]).
+    pub text: Option<String>,
+    /// Underline colour (SGR 58) in the [`color`] format ([`attr::UNDERLINE_COLOR`]).
+    pub underline_color: Option<u32>,
+    /// OSC 8 hyperlink ([`attr::HYPERLINK`]).
+    pub hyperlink: Option<Hyperlink>,
+}
+
+/// An OSC 8 hyperlink. Cells of one link share its `id` (generated when the
+/// program gave none).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hyperlink {
+    pub id: String,
+    pub uri: String,
 }
 
 #[derive(Default)]
@@ -225,6 +263,8 @@ impl Engine {
             scrolling_history: scrollback.min(MAX_SCROLLBACK),
             // xterm.js 기본값(reflowCursorLine: false)과 같게 커서 문단은 reflow하지 않는다.
             reflow_cursor_line: false,
+            // 스크롤 때 화면 전체 대신 스크롤 줄 수와 새 줄만 damage로 낸다.
+            scroll_damage: true,
             ..Config::default()
         };
         let inbox = Listener::default();
@@ -324,6 +364,45 @@ impl Engine {
         true
     }
 
+    /// Cells of one row that carry combining marks, an underline colour or a
+    /// hyperlink, appended to `out` (cleared first). Wide-character spacers
+    /// are skipped. Returns `false` if `line` is out of range.
+    pub fn row_extras(&self, line: i32, out: &mut Vec<CellExtra>) -> bool {
+        out.clear();
+        let Some(line) = self.line(line) else {
+            return false;
+        };
+        let row = &self.term.grid()[line];
+        for col in 0..self.term.columns() {
+            let cell = &row[Column(col)];
+            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                continue;
+            }
+            let text = cell
+                .zerowidth()
+                .filter(|marks| !marks.is_empty())
+                .map(|marks| {
+                    std::iter::once(cell.c)
+                        .chain(marks.iter().copied())
+                        .collect()
+                });
+            let underline_color = cell.underline_color().map(pack_color);
+            let hyperlink = cell.hyperlink().map(|link| Hyperlink {
+                id: link.id().to_owned(),
+                uri: link.uri().to_owned(),
+            });
+            if text.is_some() || underline_color.is_some() || hyperlink.is_some() {
+                out.push(CellExtra {
+                    col: col as u16,
+                    text,
+                    underline_color,
+                    hyperlink,
+                });
+            }
+        }
+        true
+    }
+
     /// Full text of one cell including combining marks.
     pub fn cell_text(&self, line: i32, col: u16) -> Option<String> {
         let line = self.line(line)?;
@@ -340,11 +419,39 @@ impl Engine {
 
     pub fn cursor(&self) -> Cursor {
         let point = self.term.grid().cursor.point;
+        let style = self.term.cursor_style();
+        let shape = match style.shape {
+            AlacCursorShape::Underline => CursorShape::Underline,
+            AlacCursorShape::Beam => CursorShape::Bar,
+            AlacCursorShape::Block | AlacCursorShape::HollowBlock | AlacCursorShape::Hidden => {
+                CursorShape::Block
+            }
+        };
         Cursor {
             line: point.line.0.max(0) as u16,
             col: point.column.0 as u16,
-            visible: self.term.mode().contains(TermMode::SHOW_CURSOR),
+            visible: self.term.mode().contains(TermMode::SHOW_CURSOR)
+                && style.shape != AlacCursorShape::Hidden,
+            shape,
+            blinking: style.blinking,
         }
+    }
+
+    /// Rows the view is scrolled back into history (0 = following output).
+    /// Viewport row `y` shows line `y - display_offset` (see [`Engine::row_cells`]).
+    pub fn display_offset(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+
+    /// Scrolls the view; positive `delta` goes back into history. Clamped to
+    /// the history. Damage becomes [`Damage::Full`] when the view moves.
+    pub fn scroll_display(&mut self, delta: i32) {
+        self.term.scroll_display(Scroll::Delta(delta));
+    }
+
+    /// Returns the view to the newest output.
+    pub fn scroll_to_bottom(&mut self) {
+        self.term.scroll_display(Scroll::Bottom);
     }
 
     /// Active modes as [`mode`] bits.
@@ -376,11 +483,21 @@ impl Engine {
         bits
     }
 
-    /// Visible lines changed since the previous call, then resets tracking.
+    /// Viewport changes since the previous call, then resets tracking.
     pub fn take_damage(&mut self) -> Damage {
+        let rows = self.term.screen_lines();
+        let scroll = self.term.damage_scrolled() as u16;
         let damage = match self.term.damage() {
             TermDamage::Full => Damage::Full,
-            TermDamage::Partial(lines) => Damage::Lines(lines.map(|b| b.line as u16).collect()),
+            TermDamage::Partial(lines) => Damage::Lines {
+                scroll,
+                // 뷰가 히스토리로 올라가 있으면 화면 밖으로 밀린 줄은 뺀다.
+                lines: lines
+                    .map(|b| b.line)
+                    .filter(|&l| l < rows)
+                    .map(|l| l as u16)
+                    .collect(),
+            },
         };
         self.term.reset_damage();
         damage
@@ -448,6 +565,12 @@ fn flatten(cell: &AlacCell) -> Cell {
         .fold(0, |acc, (_, b)| acc | b);
     if cell.zerowidth().is_some_and(|z| !z.is_empty()) {
         attrs |= attr::COMBINING;
+    }
+    if cell.underline_color().is_some() {
+        attrs |= attr::UNDERLINE_COLOR;
+    }
+    if cell.hyperlink().is_some() {
+        attrs |= attr::HYPERLINK;
     }
     Cell {
         ch: cell.c,

@@ -11,7 +11,7 @@ test('native binding mirrors the wasm API', () => {
   assert.equal(t.rowText(0), '안녕 red');
   assert.equal(t.cols, 80);
   assert.equal(t.rows, 24);
-  assert.deepEqual(t.cursor(), { line: 2, col: 6, visible: true });
+  assert.deepEqual(t.cursor(), { line: 2, col: 6, visible: true, shape: 'block', blink: false });
   assert.equal(t.takeReplies().toString(), '\x1b[3;7R');
   assert.equal(t.takeTitle(), 'native');
   const cells = t.rowCells(0);
@@ -36,4 +36,22 @@ test('native sync flush and scrollback', () => {
   for (let i = 0; i < 10; i++) t.write(`\r\nline ${i}`);
   assert.ok(t.historyLength > 0);
   assert.equal(t.rowText(-t.historyLength), 'HELD');
+});
+
+test('native extras, cursor shape, view scroll', () => {
+  const t = new Terminal(20, 5, 100);
+  t.write('é\x1b[58;5;196mU\x1b[0m\x1b]8;;https://oxty.dev\x1b\\L\x1b]8;;\x1b\\\x1b[3 q');
+  const extras = t.rowExtras(0);
+  assert.equal(extras[0].text, 'é');
+  assert.equal(extras[1].underlineColor, (2 << 24) | 196);
+  assert.equal(extras[2].hyperlink.uri, 'https://oxty.dev');
+  assert.deepEqual([t.cursor().shape, t.cursor().blink], ['underline', true]);
+  for (let i = 0; i < 10; i++) t.write('\r\nline');
+  t.scrollDisplay(2);
+  assert.equal(t.displayOffset, 2);
+  t.scrollToBottom();
+  assert.equal(t.displayOffset, 0);
+  t.takeDamage();
+  t.write('\r\nx');
+  assert.deepEqual(t.takeDamage(), { full: false, scroll: 1, lines: [3, 4] });
 });

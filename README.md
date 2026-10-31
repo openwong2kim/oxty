@@ -39,7 +39,8 @@ pty.onData((data) => {                          // string or Uint8Array
 });
 
 function draw() {
-  const { full, lines } = term.takeDamage();
+  const { full, scroll, lines } = term.takeDamage();
+  if (scroll) moveDrawnRowsUp(scroll);          // output scrolled; only new rows follow
   for (const y of full ? [...Array(term.rows).keys()] : lines) {
     const cells = term.rowCells(y);             // [codepoint, fg, bg, attrs] per cell
     for (let x = 0; x < term.cols; x++) {
@@ -69,13 +70,21 @@ match term.take_damage() {
 - **Rows.** Visible rows are `0..rows`. Scrollback is addressed with negative
   numbers: `-1` is the newest history line, `-historyLength` the oldest. A
   renderer can keep only what is on screen and fetch history on demand.
+  `scrollDisplay(delta)` / `scrollToBottom()` move the view; viewport row `y`
+  then shows line `y - displayOffset`.
 - **Cells.** Four `u32` words: Unicode scalar, foreground, background,
   attributes. Colours carry their kind in the top byte (named, 256-palette,
   RGB) so themes stay in the renderer. Wide characters occupy a `WIDE` cell
-  and a `WIDE_SPACER` cell; combining marks set `COMBINING` and are read with
-  `cellText`.
-- **Damage.** `takeDamage()` returns the visible rows changed since the last
-  call, or `full` after a resize, scroll or screen switch.
+  and a `WIDE_SPACER` cell. Cells flagged `COMBINING`, `UNDERLINE_COLOR`
+  (SGR 58) or `HYPERLINK` (OSC 8) have the rest in `rowExtras(y)`, one call
+  per row.
+- **Cursor.** `cursor()` gives position, visibility and the DECSCUSR shape
+  (`block`, `underline`, `bar`) with blinking.
+- **Damage.** `takeDamage()` returns the viewport rows changed since the last
+  call. When output scrolled the whole screen, `scroll` says how many rows to
+  move the drawn picture up first, so only the new rows are read. It is
+  `full` after a resize, a view scroll, a scroll region change or a screen
+  switch.
 - **Things for the host to act on.** `takeReplies()` (bytes to send back to
   the program), `takeTitle()`, `takeBells()`, `modes()` (cursor visibility,
   bracketed paste, mouse reporting, alternate screen, …).

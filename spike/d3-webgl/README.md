@@ -98,6 +98,8 @@ xterm.js는 `BufferLine.loadCell(x, CellData)`로 셀을 읽고, `CellColorResol
 
 ## oxty 엔진 API에 부족했던 점
 
+> 1~4는 모두 반영했다(엔진 API 공백 메우기 커밋). 밑줄 색·결합 문자는 `rowExtras()`, 커서 모양은 `cursor().shape/blink`, 번들은 `external` 없이 빌드된다. 스크린샷에서 curly 밑줄이 빨강, 커서가 막대로 그려진다. 스크롤 이동(`takeDamage().scroll`)은 스파이크에서 전체 다시 그리기로 처리한다.
+
 1. **밑줄 색(SGR 58) 없음**: 셀 4워드에 자리가 없어 curly 밑줄이 전경색으로 그려진다. PRD D2의 행별 확장 테이블이 필요하다. xterm 쪽은 `ext` 하위 26비트(`underlineColor`)에 바로 넣으면 된다.
 2. **결합 문자 문자열을 칸마다 따로 가져와야 함**: `rowCells`에는 `COMBINING` 플래그만 있고, 문자열은 `cellText(y, x)`를 칸마다 불러야 한다. 결합 문자가 많은 줄(데바나가리·한글 자모 조합 등)에서는 wasm 경계 호출이 칸 수만큼 늘어난다. 행 단위로 받는 API(예: 열 → 문자열 확장 테이블)가 있으면 좋다. D2 확장 테이블에 함께 넣는 것을 권한다.
 3. **커서 모양 없음**: `cursor()`는 line·col·visible만 준다. DECSCUSR(블록·밑줄·막대, 깜빡임)를 그리려면 모양과 깜빡임 여부가 필요하다. 지금은 블록으로 고정했다.

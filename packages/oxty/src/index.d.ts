@@ -15,16 +15,39 @@ export interface TerminalOptions {
 }
 
 export interface Cursor {
+  /** Screen line; while scrolled back it is drawn on viewport row `line + displayOffset`. */
   line: number;
   col: number;
   visible: boolean;
+  /** Set by the program with DECSCUSR (`CSI Ps SP q`). */
+  shape: 'block' | 'underline' | 'bar';
+  blink: boolean;
 }
 
 export interface Damage {
-  /** Redraw everything; `lines` is empty. */
+  /** Redraw everything; `scroll` is 0 and `lines` is empty. */
   full: boolean;
-  /** Visible rows that changed, top to bottom. */
+  /** Move drawn rows up by this many first (the top ones fall off). */
+  scroll: number;
+  /** Viewport rows to redraw after scrolling, top to bottom. */
   lines: number[];
+}
+
+export interface Hyperlink {
+  /** Shared by every cell of one link (generated when the program gave none). */
+  id: string;
+  uri: string;
+}
+
+/** What a cell carries beyond `rowCells`. */
+export interface CellExtra {
+  col: number;
+  /** Full cell text when it has combining marks. */
+  text?: string;
+  /** Underline colour (SGR 58), packed like `rowCells` colours. */
+  underlineColor?: number;
+  /** OSC 8 hyperlink; cells of one link share the same object. */
+  hyperlink?: Hyperlink;
 }
 
 export class Terminal {
@@ -42,7 +65,14 @@ export class Terminal {
   rowWrapped(line: number): boolean;
   /** Cell text including combining marks. */
   cellText(line: number, col: number): string | null;
+  /** Cells with combining marks, an underline colour or a hyperlink (see `Attr`). */
+  rowExtras(line: number): CellExtra[] | null;
   cursor(): Cursor;
+  /** Rows the view is scrolled back into history (0 = following output). Viewport row `y` is line `y - displayOffset`. */
+  readonly displayOffset: number;
+  /** Positive `delta` scrolls back into history; clamped. Damage becomes full when the view moves. */
+  scrollDisplay(delta: number): void;
+  scrollToBottom(): void;
   /** Bitwise OR of {@link Mode} values. */
   modes(): number;
   takeDamage(): Damage;
@@ -60,7 +90,7 @@ export declare const Attr: Readonly<{
   BOLD: number; DIM: number; ITALIC: number; UNDERLINE: number;
   DOUBLE_UNDERLINE: number; CURLY_UNDERLINE: number; DOTTED_UNDERLINE: number; DASHED_UNDERLINE: number;
   INVERSE: number; HIDDEN: number; STRIKEOUT: number; BLINK: number;
-  WIDE: number; WIDE_SPACER: number; COMBINING: number;
+  WIDE: number; WIDE_SPACER: number; COMBINING: number; UNDERLINE_COLOR: number; HYPERLINK: number;
 }>;
 
 export declare const Mode: Readonly<{

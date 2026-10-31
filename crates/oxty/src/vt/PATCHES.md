@@ -20,6 +20,12 @@ single crate.
   cursor paragraph without reflow, reflows other paragraphs as upstream, and on
   shrink clamps the cursor and clears pending wrap. Clipped fullwidth cells are
   retained to match xterm. `oxty::Engine` sets `reflow_cursor_line: false`.
+- Scroll damage is an option: `term::Config::scroll_damage` (default `false`,
+  upstream full damage on every scroll). When on, a whole-screen scroll at the
+  bottom of history moves line damage with the content, damages the new
+  bottom lines, moves the last cursor point along, and counts the rows in
+  `Term::damage_scrolled()`. Region scrolls, a scrolled-back view, or scrolling
+  a full screen height still give full damage. `oxty::Engine` turns it on.
 - `term/cell.rs` uses the remaining u16 flag bit for SGR blink; `term/mod.rs`
   retains SGR 5, ignores SGR 6 like xterm, and clears blink on SGR 25/reset.
   This keeps the 24-byte cell layout while allowing ANSI replay to preserve blink.
