@@ -152,3 +152,21 @@ test('cursor shape, view scrolling, scroll damage', () => {
   t.scrollToBottom();
   assert.equal(t.displayOffset, 0);
 });
+
+test('ansi snapshot: payload rebuilds the screen, refusal names the reason', () => {
+  const t = make({ cols: 20, rows: 5 });
+  t.write('\x1b[?2026h\x1b[31mred\x1b[3');
+  const s = t.ansiSnapshot();
+  assert.equal(s.ok, true);
+  assert.ok(s.payload instanceof Uint8Array);
+  assert.deepEqual(t.ansiSnapshot(), s);
+  assert.equal(t.syncPending(), true);
+  const copy = make({ cols: 20, rows: 5 });
+  copy.write(s.payload);
+  copy.write('4mX\x1b[?2026l');
+  t.write('4mX\x1b[?2026l');
+  assert.equal(copy.rowText(0), 'redX');
+  assert.deepEqual(copy.rowCells(0), t.rowCells(0));
+  t.write('\x1b[2;3r');
+  assert.deepEqual(t.ansiSnapshot(), { ok: false, reason: 'margins' });
+});

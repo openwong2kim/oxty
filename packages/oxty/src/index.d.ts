@@ -50,6 +50,17 @@ export interface CellExtra {
   hyperlink?: Hyperlink;
 }
 
+/**
+ * `payload` written to a fresh xterm.js of the same size and scrollback
+ * rebuilds this screen; it ends with the unfinished escape sequence or UTF-8
+ * character the output stopped in, and re-opens a held synchronized update.
+ * On refusal replay the raw output instead.
+ */
+export type AnsiSnapshot =
+  | { ok: true; payload: Uint8Array }
+  /** `"unsupported-wide-edge"`, `"margins"` or `"partial-tail-overflow"`. */
+  | { ok: false; reason: string };
+
 export class Terminal {
   constructor(options?: TerminalOptions);
   /** Feeds program output. Strings are encoded as UTF-8. */
@@ -83,6 +94,8 @@ export class Terminal {
   takeBells(): number;
   syncPending(): boolean;
   flushSync(): void;
+  /** Applies a held synchronized update first; the engine stays in it, so two calls give the same bytes. */
+  ansiSnapshot(): AnsiSnapshot;
   dispose(): void;
 }
 

@@ -1,7 +1,7 @@
 // oxty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 2;
+const ABI = 3;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -281,6 +281,12 @@ export class Terminal {
   flushSync() {
     wasm.oxty_flush_sync(this.#handle());
     this.#armSync();
+  }
+
+  /** Bytes that rebuild this screen in a fresh xterm.js, or why they cannot. */
+  ansiSnapshot() {
+    const n = wasm.oxty_ansi_snapshot(this.#handle());
+    return n > 0 ? { ok: true, payload: bytesOut(n) } : { ok: false, reason: textOut(-n) };
   }
 
   dispose() {

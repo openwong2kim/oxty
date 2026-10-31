@@ -55,3 +55,17 @@ test('native extras, cursor shape, view scroll', () => {
   t.write('\r\nx');
   assert.deepEqual(t.takeDamage(), { full: false, scroll: 1, lines: [3, 4] });
 });
+
+test('native ansi snapshot', () => {
+  const t = new Terminal(20, 5);
+  t.write('\x1b[44mblue\x1b[0m\x1b[3');
+  const s = t.ansiSnapshot();
+  assert.equal(s.ok, true);
+  assert.ok(Buffer.isBuffer(s.payload));
+  assert.ok(s.payload.toString().endsWith('\x1b[?25h\x1b[3'));
+  const copy = new Terminal(20, 5);
+  copy.write(s.payload);
+  assert.deepEqual(copy.rowCells(0), t.rowCells(0));
+  t.write('m\x1b[2;3r');
+  assert.deepEqual(t.ansiSnapshot(), { ok: false, reason: 'margins' });
+});

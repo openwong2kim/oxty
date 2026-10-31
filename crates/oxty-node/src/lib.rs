@@ -37,6 +37,15 @@ pub struct CellExtra {
     pub hyperlink: Option<Hyperlink>,
 }
 
+/// `{ ok: true, payload }` or `{ ok: false, reason }`.
+#[napi(object)]
+pub struct AnsiSnapshot {
+    pub ok: bool,
+    pub payload: Option<Buffer>,
+    /// `"unsupported-wide-edge"`, `"margins"` or `"partial-tail-overflow"`.
+    pub reason: Option<String>,
+}
+
 #[napi]
 pub struct Terminal {
     inner: oxty::Engine,
@@ -210,5 +219,22 @@ impl Terminal {
     #[napi]
     pub fn flush_sync(&mut self) {
         self.inner.flush_sync();
+    }
+
+    /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.
+    #[napi]
+    pub fn ansi_snapshot(&mut self) -> AnsiSnapshot {
+        match self.inner.ansi_snapshot() {
+            Ok(bytes) => AnsiSnapshot {
+                ok: true,
+                payload: Some(bytes.into()),
+                reason: None,
+            },
+            Err(why) => AnsiSnapshot {
+                ok: false,
+                payload: None,
+                reason: Some(why.as_str().into()),
+            },
+        }
     }
 }

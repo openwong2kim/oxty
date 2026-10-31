@@ -38,7 +38,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxty_abi() -> u32 {
-    2
+    3
 }
 
 #[no_mangle]
@@ -304,4 +304,15 @@ pub extern "C" fn oxty_sync_pending(h: u32) -> u32 {
 #[no_mangle]
 pub extern "C" fn oxty_flush_sync(h: u32) {
     with(h, (), |t| t.flush_sync());
+}
+
+/// ANSI snapshot bytes into OUT and their length; on refusal the reason
+/// (`SnapshotRefusal::as_str`) into OUT and minus its length. A payload is
+/// never empty, so 0 means a bad handle.
+#[no_mangle]
+pub extern "C" fn oxty_ansi_snapshot(h: u32) -> i32 {
+    with(h, 0, |t| match t.ansi_snapshot() {
+        Ok(bytes) => set_out(bytes) as i32,
+        Err(why) => -(set_out(why.as_str().as_bytes().to_vec()) as i32),
+    })
 }
