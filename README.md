@@ -1,25 +1,62 @@
+<div align="center">
+
 # oxty
 
 **ox**(ide) + **tty** — a terminal emulator engine in Rust.
 
-Feed it the bytes a program writes to its PTY. oxty keeps the screen —
-characters, colours, cursor, modes, scrollback — and tells your renderer which
-rows changed, so it redraws only those. It does not draw anything itself.
+Feed it PTY bytes. It keeps the screen and tells your renderer which rows changed.
 
-The same engine runs everywhere:
+[![ci](https://github.com/openwong2kim/oxty/actions/workflows/ci.yml/badge.svg)](https://github.com/openwong2kim/oxty/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE-APACHE)
+![rust](https://img.shields.io/badge/rust-1.85%2B-orange)
+![wasm](https://img.shields.io/badge/wasm-195%20KB%20%C2%B7%2070%20KB%20gzip-654ff0)
+![status](https://img.shields.io/badge/status-0.0.1%20experimental-lightgrey)
+
+</div>
+
+---
+
+oxty parses the bytes a program writes to its PTY and holds everything a
+terminal knows: characters, colours, cursor, modes and scrollback. It does not
+draw anything. Your renderer asks which rows changed and redraws only those.
+
+The same engine runs in a native daemon, in the browser and in an Electron
+renderer, so the daemon's snapshot and the screen in your browser cannot
+disagree about what a byte stream means.
+
+```mermaid
+flowchart LR
+  pty["PTY output"] --> engine
+  subgraph engine["oxty engine"]
+    direction TB
+    parser["VT parser"] --> screen["screen + scrollback"]
+  end
+  engine -- "changed rows" --> r1["WebGL / DOM renderer"]
+  engine -- "ANSI snapshot" --> r2["another terminal"]
+  engine -- "replies, title, bell" --> host["host app"]
+```
+
+## Highlights
+
+- **One engine, three hosts.** Rust crate, WebAssembly npm package with no
+  dependencies, and an N-API binding with the same API.
+- **Damage, not frames.** `takeDamage()` returns the rows that changed. When
+  output scrolls, it says how far to move the drawn picture first, so only the
+  new rows are read.
+- **Snapshots that resume.** `ansiSnapshot()` returns bytes that rebuild the
+  screen, scrollback, cursor, pen and modes in another terminal, including an
+  unfinished escape sequence, so live output can continue right after it.
+- **Built for TUIs.** Synchronized output (`CSI ? 2026 h`), used heavily by
+  coding agents, is held until the program ends the update.
+- **Checked against xterm.js.** Every fixture is fed to oxty and to
+  `@xterm/headless`, and the test fails on any difference that is not listed
+  with a reason.
 
 | Where | Package | Notes |
 | --- | --- | --- |
 | Rust | crate [`oxty`](crates/oxty) | the engine |
-| Browser, Electron renderer, Node | npm [`oxty`](packages/oxty) | WebAssembly, ~175 KB, no dependencies |
+| Browser, Electron renderer, Node | npm [`oxty`](packages/oxty) | WebAssembly, no dependencies |
 | Node / Electron main, daemons | [`crates/oxty-node`](crates/oxty-node) | N-API binding, same API |
-
-One engine on the server and the client means the daemon's snapshot and the
-screen in your browser cannot disagree about what a byte stream means.
-
-> **Status: 0.0.1, experimental.** The engine core is tested; an
-> [xterm.js](https://xtermjs.org)-compatible front end is the next milestone
-> (see [Roadmap](#roadmap)).
 
 ## Quick start
 
@@ -65,51 +102,100 @@ match term.take_damage() {
 }
 ```
 
+oxty is not on crates.io or npm yet. Until then, depend on it from git:
+
+```toml
+oxty = { git = "https://github.com/openwong2kim/oxty", rev = "<commit>" }
+```
+
 ## The model
 
-- **Rows.** Visible rows are `0..rows`. Scrollback is addressed with negative
-  numbers: `-1` is the newest history line, `-historyLength` the oldest. A
-  renderer can keep only what is on screen and fetch history on demand.
-  `scrollDisplay(delta)` / `scrollToBottom()` move the view; viewport row `y`
-  then shows line `y - displayOffset`.
-- **Cells.** Four `u32` words: Unicode scalar, foreground, background,
-  attributes. Colours carry their kind in the top byte (named, 256-palette,
-  RGB) so themes stay in the renderer. Wide characters occupy a `WIDE` cell
-  and a `WIDE_SPACER` cell. Cells flagged `COMBINING`, `UNDERLINE_COLOR`
-  (SGR 58) or `HYPERLINK` (OSC 8) have the rest in `rowExtras(y)`, one call
-  per row.
-- **Cursor.** `cursor()` gives position, visibility and the DECSCUSR shape
-  (`block`, `underline`, `bar`) with blinking.
-- **Damage.** `takeDamage()` returns the viewport rows changed since the last
-  call. When output scrolled the whole screen, `scroll` says how many rows to
-  move the drawn picture up first, so only the new rows are read. It is
-  `full` after a resize, a view scroll, a scroll region change or a screen
-  switch.
-- **Things for the host to act on.** `takeReplies()` (bytes to send back to
-  the program), `takeTitle()`, `takeBells()`, `modes()` (cursor visibility,
-  bracketed paste, mouse reporting, alternate screen, …).
-- **Synchronized output** (`CSI ? 2026 h`, used heavily by modern TUIs such as
-  coding agents) is honoured: output is held until the program ends the
-  update. The engine has no clock — vte's default timer calls
-  `Instant::now()`, which traps on `wasm32-unknown-unknown` — so the host
-  flushes stalled updates. The npm wrapper does this for you after 150 ms and
-  calls `onSyncFlush`; Rust and N-API hosts call `flush_sync()` themselves.
-- **Snapshots.** `ansiSnapshot()` returns `{ ok: true, payload }`: bytes that
-  rebuild the screen, scrollback, cursor, pen and modes in another terminal,
-  including any unfinished escape or UTF-8 tail, so live output can continue
-  right after it. It returns
-  `{ ok: false, reason }` (`unsupported-wide-edge`, `margins`,
-  `partial-tail-overflow`) when ANSI cannot express the state; replay the raw
-  bytes instead. Not carried over yet: charset designation and shift, the
-  DECSC saved cursor, custom tab stops, cursor shape and OSC 8 links. During
-  a synchronized update the payload is the screen from before it followed by
-  `CSI ? 2026 h` and the held output raw, so the receiver is inside the same
-  update. Taking a snapshot never changes the engine, so it is safe on the
-  terminal a renderer is drawing.
-- **xterm.js parity.** `cd packages/oxty && npm ci && npm test` feeds wmux's
-  91 fixtures to oxty and `@xterm/headless` and fails on any difference not
-  listed, with a reason, in `test/xterm/known-differences.json`.
-  `OXTY_SWAP_GATE=1` also fails while an entry is marked `blocksSwap`.
+<details open>
+<summary><b>Rows and scrollback</b></summary>
+
+Visible rows are `0..rows`. Scrollback is addressed with negative numbers: `-1`
+is the newest history line, `-historyLength` the oldest. A renderer can keep
+only what is on screen and fetch history on demand. `scrollDisplay(delta)` /
+`scrollToBottom()` move the view; viewport row `y` then shows line
+`y - displayOffset`.
+
+</details>
+
+<details open>
+<summary><b>Cells</b></summary>
+
+Four `u32` words: Unicode scalar, foreground, background, attributes. Colours
+carry their kind in the top byte (named, 256-palette, RGB) so themes stay in
+the renderer. Wide characters occupy a `WIDE` cell and a `WIDE_SPACER` cell.
+Cells flagged `COMBINING`, `UNDERLINE_COLOR` (SGR 58) or `HYPERLINK` (OSC 8)
+have the rest in `rowExtras(y)`, one call per row.
+
+</details>
+
+<details open>
+<summary><b>Cursor and damage</b></summary>
+
+`cursor()` gives position, visibility and the DECSCUSR shape (`block`,
+`underline`, `bar`) with blinking.
+
+`takeDamage()` returns the viewport rows changed since the last call. When
+output scrolled the whole screen, `scroll` says how many rows to move the drawn
+picture up first. It is `full` after a resize, a view scroll, a scroll region
+change or a screen switch.
+
+</details>
+
+<details>
+<summary><b>Things for the host to act on</b></summary>
+
+`takeReplies()` (bytes to send back to the program), `takeTitle()`,
+`takeBells()`, `modes()` (cursor visibility, bracketed paste, mouse reporting,
+alternate screen, …).
+
+</details>
+
+<details>
+<summary><b>Synchronized output</b></summary>
+
+`CSI ? 2026 h` is honoured: output is held until the program ends the update.
+The engine has no clock — vte's default timer calls `Instant::now()`, which
+traps on `wasm32-unknown-unknown` — so the host flushes stalled updates. The
+npm wrapper does this for you after 150 ms and calls `onSyncFlush`; Rust and
+N-API hosts call `flush_sync()` themselves.
+
+</details>
+
+<details>
+<summary><b>Snapshots</b></summary>
+
+`ansiSnapshot()` returns `{ ok: true, payload }`: bytes that rebuild the
+screen, scrollback, cursor, pen and modes in another terminal, including any
+unfinished escape or UTF-8 tail. It returns `{ ok: false, reason }`
+(`unsupported-wide-edge`, `margins`, `partial-tail-overflow`) when ANSI cannot
+express the state; replay the raw bytes instead.
+
+During a synchronized update the payload is the screen from before it,
+followed by `CSI ? 2026 h` and the held output raw, so the receiver is inside
+the same update. Taking a snapshot never changes the engine, so it is safe on
+the terminal a renderer is drawing.
+
+Not carried over yet: charset designation and shift, the DECSC saved cursor,
+custom tab stops, cursor shape and OSC 8 links.
+
+</details>
+
+## xterm.js parity
+
+```sh
+cd packages/oxty && npm ci && npm test
+```
+
+This feeds [wmux](https://github.com/openwong2kim/wmux)'s 91 fixtures to oxty
+and to `@xterm/headless`, compares the screens cell by cell, and also restores
+each oxty snapshot into xterm.js and compares again. It fails on any
+difference not listed, with a reason, in
+[`known-differences.json`](packages/oxty/test/xterm/known-differences.json).
+`OXTY_SWAP_GATE=1` also fails while an entry is marked `blocksSwap`.
 
 ## Building
 
@@ -127,17 +213,20 @@ Requires Rust ≥ 1.85 and Node ≥ 18. Format with
 
 ## Roadmap
 
-0. **Publish to crates.io and npm.** The patched Alacritty fork is built into
-   the `oxty` crate as `oxty::vt`, so `oxty` publishes as a single crate.
-1. **xterm.js-compatible facade** — `new Terminal(options)`, `open(element)`,
-   `onData`, `write`, `buffer` — over the oxty engine, keeping xterm.js's
-   WebGL/DOM renderers and addons.
-2. **Input in Rust** — keyboard (including the kitty protocol), mouse and
-   paste encoding shared by every host.
-3. **Selection, search and link detection in Rust.**
-4. **Host policy hooks** — OSC 52 clipboard, colour queries, hyperlinks.
-5. **Prebuilt N-API binaries** for Windows, macOS and Linux.
-6. **Conformance** — differential tests against xterm.js and fuzzing.
+- [x] **Engine core** — rows, cells, cursor, damage with scroll, replies,
+      synchronized output, ANSI snapshots, wasm and N-API bindings.
+- [x] **Differential tests against xterm.js** — 91 fixtures, two proofs.
+- [ ] **Publish to crates.io and npm.** The patched Alacritty fork is built
+      into the `oxty` crate as `oxty::vt`, so `oxty` publishes as a single crate.
+- [ ] **xterm.js-compatible facade** — `new Terminal(options)`, `open(element)`,
+      `onData`, `write`, `buffer` over the oxty engine, keeping xterm.js's
+      WebGL/DOM renderers and addons.
+- [ ] **Input in Rust** — keyboard (including the kitty protocol), mouse and
+      paste encoding shared by every host.
+- [ ] **Selection, search and link detection in Rust.**
+- [ ] **Host policy hooks** — OSC 52 clipboard, colour queries, hyperlinks.
+- [ ] **Prebuilt N-API binaries** for Windows, macOS and Linux.
+- [ ] **Fuzzing.**
 
 ## Credits
 
