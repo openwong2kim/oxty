@@ -429,3 +429,22 @@ fn narrowing_fills_empty_rows_before_history_like_xterm() {
     assert_eq!(rows(&t), ["top", "abc한글0", "12345678", "9"]);
     assert_eq!((t.cursor().line, t.cursor().col), (1, 3));
 }
+
+#[test]
+fn decstr_split_across_feeds_resets_modes_and_ends_a_synchronized_update() {
+    let mut t = term();
+    t.feed(b"\x1b[?25l\x1b[4h\x1b[?2004h\x1b[?2026hA");
+    assert!(t.sync_pending());
+    for chunk in [&b"\x1b"[..], b"[", b"!", b"pB"] {
+        t.feed(chunk);
+    }
+    assert!(!t.sync_pending());
+    assert!(t.cursor().visible);
+    assert_eq!(t.modes() & (mode::INSERT | mode::BRACKETED_PASTE), 0);
+    assert_eq!(t.row_text(0).unwrap(), "AB");
+    // 인자·다른 중간 문자가 붙은 시퀀스는 DECSTR이 아니다.
+    t.feed(b"\x1b[4h\x1b[?!p\x1b[!q");
+    assert_ne!(t.modes() & mode::INSERT, 0);
+    t.feed(b"\x1b[0!p");
+    assert_eq!(t.modes() & mode::INSERT, 0);
+}

@@ -265,7 +265,8 @@ and to `@xterm/headless`, compares the screens cell by cell, and also restores
 each oxtty snapshot into xterm.js and compares again. It fails on any
 difference not listed, with a reason, in
 [`known-differences.json`](packages/oxtty/test/xterm/known-differences.json).
-`OXTTY_SWAP_GATE=1` also fails while an entry is marked `blocksSwap`.
+`OXTTY_SWAP_GATE=1` also fails while an entry is marked `blocksSwap`; none
+is today.
 
 ## Building
 

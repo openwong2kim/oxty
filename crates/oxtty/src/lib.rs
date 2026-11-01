@@ -270,6 +270,8 @@ pub struct Engine {
     scrolled_seen: u64,
     // 뷰가 움직여서 다음 damage는 전체다.
     view_moved: bool,
+    // 입력 경계에 걸친 DECSTR(`CSI Ps ! p`)을 찾는 중인 상태.
+    decstr: DecstrScan,
 }
 
 impl Engine {
@@ -308,6 +310,11 @@ impl Engine {
             scroll_on_erase_in_display: false,
             // xterm.js처럼 줄바꿈과 줄·화면 지우기가 줄 이어짐을 바꾼다.
             xterm_line_wrap: true,
+            // xterm.js처럼 덮어쓴 와이드 문자의 앞칸은 현재 펜의 빈칸이 되고, 탭은 칸에 남지 않고,
+            // SGR 21은 이중 밑줄이다.
+            xterm_wide_leader: true,
+            store_tabs: false,
+            sgr21_double_underline: true,
             ..Config::default()
         };
         let inbox = Listener::default();
@@ -324,6 +331,7 @@ impl Engine {
             offset: 0,
             scrolled_seen: 0,
             view_moved: false,
+            decstr: DecstrScan::default(),
         }
     }
 
@@ -386,7 +394,20 @@ impl Engine {
 
     /// Interprets bytes written by the program (UTF-8 and escape sequences
     /// may be split across calls).
-    pub fn feed(&mut self, bytes: &[u8]) {
+    pub fn feed(&mut self, mut bytes: &[u8]) {
+        // vte는 DECSTR을 버리므로 그 끝에서 입력을 나누고 엔진이 소프트 리셋한다.
+        // xterm.js처럼 DECSTR은 동기화 업데이트도 끝낸다.
+        while let Some(end) = self.decstr.find(bytes) {
+            let (head, rest) = bytes.split_at(end);
+            self.advance(head);
+            self.flush_sync();
+            self.term.soft_reset();
+            bytes = rest;
+        }
+        self.advance(bytes);
+    }
+
+    fn advance(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
         self.follow_scroll();
         self.tail.push(bytes);
@@ -694,6 +715,42 @@ impl Engine {
         let held = self.sync_pending().then_some(self.held.as_slice());
         let history = self.history.as_ref().map(TermHistory::lock);
         snapshot::ansi(&self.term, held, &self.tail, history.as_deref())
+    }
+}
+
+/// `ESC [ Ps ! p`(DECSTR)를 바이트 단위로 찾는 상태. 호출 사이에 이어진다.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum DecstrScan {
+    #[default]
+    Ground,
+    Esc,
+    Params,
+    Bang,
+}
+
+impl DecstrScan {
+    /// DECSTR이 끝나는 위치(마지막 바이트 다음)를 돌려준다. 없으면 `bytes` 끝까지 상태만 옮긴다.
+    fn find(&mut self, bytes: &[u8]) -> Option<usize> {
+        let mut i = 0;
+        while i < bytes.len() {
+            if *self == DecstrScan::Ground {
+                i += bytes[i..].iter().position(|&b| b == 0x1b)?;
+            }
+            let b = bytes[i];
+            i += 1;
+            *self = match (*self, b) {
+                (_, 0x1b) => DecstrScan::Esc,
+                (DecstrScan::Esc, b'[') => DecstrScan::Params,
+                (DecstrScan::Params, b'0'..=b'9' | b';') => DecstrScan::Params,
+                (DecstrScan::Params, b'!') => DecstrScan::Bang,
+                (DecstrScan::Bang, b'p') => {
+                    *self = DecstrScan::Ground;
+                    return Some(i);
+                }
+                _ => DecstrScan::Ground,
+            };
+        }
+        None
     }
 }
 

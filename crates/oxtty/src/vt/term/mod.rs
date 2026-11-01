@@ -398,6 +398,18 @@ pub struct Config {
     /// (xterm은 IND·NEL에서는 끊지 않는다).
     /// 기본값 `false`는 Alacritty 원래 동작(지운 칸의 WRAPLINE이 함께 사라짐)이다.
     pub xterm_line_wrap: bool,
+
+    /// oxtty: 와이드 문자의 뒷칸을 덮어써 앞칸이 남을 때 그 칸을 현재 펜의 빈칸으로 바꿀지(xterm.js).
+    /// 기본값 `false`는 Alacritty 원래 동작(글자만 지우고 원래 색·속성을 남김)이다.
+    pub xterm_wide_leader: bool,
+
+    /// oxtty: 탭이 처음 지나간 빈칸에 `'\t'`를 남길지. xterm.js는 빈칸으로 둔다.
+    /// 기본값 `true`는 Alacritty 원래 동작이다(복사할 때 탭을 되살리려고 남긴다).
+    pub store_tabs: bool,
+
+    /// oxtty: SGR 21을 이중 밑줄로 읽을지(xterm.js). vte는 굵게 해제(`Attr::CancelBold`)로 넘긴다.
+    /// 기본값 `false`는 Alacritty 원래 동작이다. SGR 22는 vte가 따로 넘기므로 영향이 없다.
+    pub sgr21_double_underline: bool,
 }
 
 impl Default for Config {
@@ -414,6 +426,9 @@ impl Default for Config {
             ris_keeps_cursor_visibility: false,
             scroll_on_erase_in_display: true,
             xterm_line_wrap: false,
+            xterm_wide_leader: false,
+            store_tabs: true,
+            sgr21_double_underline: false,
         }
     }
 }
@@ -713,6 +728,27 @@ impl<T> Term<T> {
     /// Mutable access to the raw grid data structure.
     pub fn grid_mut(&mut self) -> &mut Grid<Cell> {
         &mut self.grid
+    }
+
+    /// oxtty: DECSTR(`CSI ! p`) 소프트 리셋. vte는 이 시퀀스를 버리므로 `oxtty::Engine`이 입력에서 찾아 부른다.
+    /// xterm.js `softReset`과 같은 항목을 되돌린다: 커서를 보이게, 삽입·원점·응용 커서·응용 키패드·
+    /// bracketed paste·포커스 보고를 끄고 자동 줄바꿈을 켠다. 스크롤 영역은 화면 전체로, 펜과 문자 집합은
+    /// 기본값으로, 저장한 커서는 왼쪽 위·기본 펜으로. 커서 위치와 화면 내용은 그대로다.
+    pub fn soft_reset(&mut self) {
+        self.mode.insert(TermMode::SHOW_CURSOR | TermMode::LINE_WRAP);
+        self.mode.remove(
+            TermMode::INSERT
+                | TermMode::ORIGIN
+                | TermMode::APP_CURSOR
+                | TermMode::APP_KEYPAD
+                | TermMode::BRACKETED_PASTE
+                | TermMode::FOCUS_IN_OUT,
+        );
+        self.scroll_region = Line(0)..Line(self.screen_lines() as i32);
+        self.grid.cursor.template = Default::default();
+        self.grid.cursor.charsets = Default::default();
+        self.active_charset = Default::default();
+        self.grid.saved_cursor = Default::default();
     }
 
     /// wmux snapshot access; does not swap grids or mutate saved cursor state.
@@ -1122,7 +1158,13 @@ impl<T> Term<T> {
             if wide && point.column < self.last_column() {
                 self.grid[point.line][point.column + 1].flags.remove(Flags::WIDE_CHAR_SPACER);
             } else if point.column > 0 {
-                self.grid[point.line][point.column - 1].clear_wide();
+                if self.config.xterm_wide_leader {
+                    let mut blank = self.grid.cursor.template.clone();
+                    blank.c = ' ';
+                    self.grid[point.line][point.column - 1] = blank;
+                } else {
+                    self.grid[point.line][point.column - 1].clear_wide();
+                }
             }
 
             // Remove leading spacers.
@@ -1503,8 +1545,9 @@ impl<T: EventListener> Handler for Term<T> {
             count -= 1;
 
             let c = self.grid.cursor.charsets[self.active_charset].map('\t');
+            let store = self.config.store_tabs;
             let cell = self.grid.cursor_cell();
-            if cell.c == ' ' {
+            if store && cell.c == ' ' {
                 cell.c = c;
             }
 
@@ -2087,6 +2130,10 @@ impl<T: EventListener> Handler for Term<T> {
             Attr::Reverse => cursor.template.flags.insert(Flags::INVERSE),
             Attr::CancelReverse => cursor.template.flags.remove(Flags::INVERSE),
             Attr::Bold => cursor.template.flags.insert(Flags::BOLD),
+            Attr::CancelBold if self.config.sgr21_double_underline => {
+                cursor.template.flags.remove(Flags::ALL_UNDERLINES);
+                cursor.template.flags.insert(Flags::DOUBLE_UNDERLINE);
+            },
             Attr::CancelBold => cursor.template.flags.remove(Flags::BOLD),
             Attr::Dim => cursor.template.flags.insert(Flags::DIM),
             Attr::CancelBoldDim => cursor.template.flags.remove(Flags::BOLD | Flags::DIM),

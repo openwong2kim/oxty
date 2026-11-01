@@ -194,7 +194,7 @@ xterm.js는 **엔진 층**(`common`: 바이트 해석 → 화면 상태)과 **�
 | ✅ **D3 검증 스파이크**: xterm.js WebGL 아틀라스·렌더 모델을 떼어 oxtty `rowPacked`로 한글·SGR·이모지 화면을 그림 | **D3 확정** — `spike/d3-webgl/`, `d3e84b7`·`afecf53`. 한글·16/256/RGB·속성·이모지·결합 문자·damage 갱신 정상, 콘솔 에러 0 |
 | 성능 기준선 측정 (vtebench류 코퍼스, wasm·네이티브·xterm.js 비교) | 처리량·메모리 표를 README에 공개. 파서 단독과 `write`→프레임 end-to-end, 스크롤 연속 출력 케이스를 따로 측정 |
 
-**G3 교체 게이트 현황** — `blocksSwap: true` 4건(목록 원본은 [known-differences.json](../packages/oxtty/test/xterm/known-differences.json), `OXTTY_SWAP_GATE=1 npm test`가 이 항목들로 실패한다): `wide-leader-keeps-fg`, `sgr-21`, `tab-stored-as-tab`, `decstr-unsupported`. 모두 엔진 동작 차이이고 직렬화기만의 차이는 없다. 0건이 되면 G3 "차분 불일치 0"을 충족한다.
+**G3 교체 게이트 현황** — ✅ `blocksSwap: true` 0건(2026-11-01). 남아 있던 4건(`wide-leader-keeps-fg`, `sgr-21`, `tab-stored-as-tab`, `decstr-unsupported`)은 `vt::term::Config`의 `xterm_wide_leader`·`store_tabs`·`sgr21_double_underline` 옵션과 `Term::soft_reset`(DECSTR, `oxtty::Engine`이 입력에서 찾아 부름)으로 xterm.js 동작에 맞췄다. `OXTTY_SWAP_GATE=1 npm test` 통과. 남은 차이 11건은 모두 `blocksSwap: false`([known-differences.json](../packages/oxtty/test/xterm/known-differences.json)).
 
 ### M2 · 0.2 웹 프런트 (wmux 렌더러 교체)
 

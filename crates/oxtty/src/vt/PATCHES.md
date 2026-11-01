@@ -52,6 +52,19 @@ single crate.
   it mid-row). IL and DL move the boundary flags as xterm's line splices do.
   vte routes IND and NEL through `linefeed` as well, so they also end a
   continuation there, unlike xterm. `oxtty::Engine` turns it on.
+- Three cell rules from xterm.js are options, each off (upstream) by default
+  and turned on by `oxtty::Engine`: `term::Config::xterm_wide_leader`
+  (overwriting the right half of a wide char leaves the left half as a blank
+  in the current pen, not a blank that keeps the old colours),
+  `term::Config::store_tabs` (`false`: a tab no longer writes `'\t'` into the
+  first blank cell it passes) and `term::Config::sgr21_double_underline`
+  (vte reports SGR 21 as `Attr::CancelBold`; read it as a double underline).
+- `Term::soft_reset` is DECSTR (`CSI ! p`), which vte drops. It resets what
+  xterm.js `softReset` does: cursor shown, IRM/DECOM/DECCKM/DECKPAM, bracketed
+  paste and focus reports off, autowrap on, full scroll region, default pen
+  and charsets, saved cursor at the origin. `oxtty::Engine` finds the
+  sequence in its input (split across feeds too), applies the bytes before
+  it, ends a pending synchronized update and calls it.
 - `term/mod.rs` handles the xterm private modes 47, 1047 and 1048, which the
   `vte` table reports as `PrivateMode::Unknown` and upstream ignores. 47/1047
   switch screens through `swap_alt` like 1049 but keep the primary saved
