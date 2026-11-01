@@ -2,6 +2,7 @@
 
 use std::cmp::{Ordering, max, min};
 use std::mem;
+use std::sync::PoisonError;
 
 use crate::vt::index::{Boundary, Column, Line};
 use crate::vt::term::cell::{Flags, ResetDiscriminant};
@@ -140,6 +141,14 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         let mut reversed: Vec<Row<T>> = Vec::with_capacity(self.raw.len());
         let mut cursor_line_delta = 0;
 
+        // oxtty: rows held above the grid are reflowed first; the newest come back, so the steps
+        // below that count rows see as many as with the whole history in the grid.
+        if let Some(above) = self.history_above.clone() {
+            let mut above = above.lock().unwrap_or_else(PoisonError::into_inner);
+            let keep = 2 * self.lines;
+            reversed.extend(above.grow_columns(reflow, columns, self.raw.len(), &mut self.display_offset, keep));
+        }
+
         // Remove the linewrap special case, by moving the cursor outside of the grid.
         if self.cursor.input_needs_wrap && reflow {
             self.cursor.input_needs_wrap = false;
@@ -273,7 +282,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         self.raw.replace_inner(new_raw);
 
         // Clamp display offset in case lines above it got merged.
-        self.display_offset = min(self.display_offset, self.history_size());
+        self.display_offset = min(self.display_offset, self.history_size() + self.rows_above());
     }
 
     /// Shrink number of columns in each row, reflowing if necessary.
@@ -291,6 +300,12 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
         let mut new_raw = Vec::with_capacity(self.raw.len());
         let mut buffered: Option<Vec<T>> = None;
+
+        // oxtty: rows held above the grid are reflowed first.
+        if let Some(above) = self.history_above.clone() {
+            let mut above = above.lock().unwrap_or_else(PoisonError::into_inner);
+            buffered = above.shrink_columns(reflow, columns, self.raw.len(), &mut self.display_offset);
+        }
 
         let mut rows = self.raw.take_all();
         for (i, mut row) in rows.drain(..).enumerate().rev() {
@@ -422,10 +437,15 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             self.cursor.point.line = old_cursor_line + kept;
         }
         reversed.truncate(self.max_scroll_limit + self.lines);
+        // oxtty: rows held above the grid are older, so they go first.
+        if let Some(above) = &self.history_above {
+            let max = self.max_scroll_limit + self.lines - reversed.len();
+            above.lock().unwrap_or_else(PoisonError::into_inner).truncate(max);
+        }
         self.raw.replace_inner(reversed);
 
         // Clamp display offset in case some lines went off.
-        self.display_offset = min(self.display_offset, self.history_size());
+        self.display_offset = min(self.display_offset, self.history_size() + self.rows_above());
 
         if self.keep_cursor_paragraph {
             // wmux: the cursor paragraph was not reflowed. xterm clamps its cursor

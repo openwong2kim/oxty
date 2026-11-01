@@ -152,6 +152,10 @@ pub struct Grid<T> {
     /// oxtty: number of lines scrolled up so far. Counted under the same conditions that raise `display_offset`.
     #[cfg_attr(feature = "serde", serde(skip))]
     scrolled_lines: u64,
+
+    /// oxtty: history rows held outside the grid, above its own, during a resize.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    history_above: Option<Arc<Mutex<dyn HistoryAbove<T>>>>,
 }
 
 /// oxtty: receives the rows a full history drops, oldest first, so they can
@@ -161,6 +165,40 @@ pub trait HistorySink<T>: fmt::Debug + Send {
 
     /// The history was cleared (`CSI 3 J`, reset).
     fn clear(&mut self);
+}
+
+/// oxtty: the oldest history rows, held outside the grid while it resizes.
+/// They count towards the history, and a column change reflows them first,
+/// as if they were the top of the grid's storage.
+pub trait HistoryAbove<T>: fmt::Debug + Send {
+    /// Rows held.
+    fn rows(&self) -> usize;
+
+    /// Reflows the rows as `grow_columns` reflows history rows, oldest first.
+    /// The newest row has storage index `base`. Returns the newest `keep`
+    /// rows (oldest first), which the grid takes back.
+    fn grow_columns(
+        &mut self,
+        reflow: bool,
+        columns: usize,
+        base: usize,
+        display_offset: &mut usize,
+        keep: usize,
+    ) -> Vec<Row<T>>;
+
+    /// Reflows the rows as `shrink_columns` reflows history rows, oldest
+    /// first. The newest row has storage index `base`. Returns the cells
+    /// carried into the next row.
+    fn shrink_columns(
+        &mut self,
+        reflow: bool,
+        columns: usize,
+        base: usize,
+        display_offset: &mut usize,
+    ) -> Option<Vec<T>>;
+
+    /// Drops the oldest rows beyond `max`.
+    fn truncate(&mut self, max: usize);
 }
 
 impl<T: GridCell + Default + PartialEq> Grid<T> {
@@ -176,7 +214,23 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             keep_cursor_paragraph: false,
             history_sink: None,
             scrolled_lines: 0,
+            history_above: None,
         }
+    }
+
+    /// oxtty: sets the history rows held above the grid; returns the previous ones.
+    pub fn set_history_above(
+        &mut self,
+        above: Option<Arc<Mutex<dyn HistoryAbove<T>>>>,
+    ) -> Option<Arc<Mutex<dyn HistoryAbove<T>>>> {
+        mem::replace(&mut self.history_above, above)
+    }
+
+    /// oxtty: history rows held above the grid.
+    fn rows_above(&self) -> usize {
+        self.history_above
+            .as_ref()
+            .map_or(0, |above| above.lock().unwrap_or_else(PoisonError::into_inner).rows())
     }
 
     /// oxtty: sets where rows dropped from a full history go; returns the previous sink.
@@ -258,7 +312,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         let count = min(count, self.history_size());
         if count != 0 {
             self.raw.shrink_lines(min(count, self.history_size()));
-            self.display_offset = min(self.display_offset, self.history_size());
+            self.display_offset = min(self.display_offset, self.history_size() + self.rows_above());
         }
     }
 

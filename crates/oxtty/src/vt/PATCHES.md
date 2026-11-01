@@ -94,6 +94,20 @@ single crate.
   screen. Without a sink the grid behaves as upstream. `oxtty::Engine` keeps
   16 recent history rows in the grid and compresses older ones
   (`src/history.rs`).
+- History held above the grid during a resize: `grid::HistoryAbove`
+  (`Grid::set_history_above`) holds the oldest history rows outside the grid,
+  so a resize does not decode the whole compressed history. They count
+  towards the history where a resize clamps `display_offset`
+  (`decrease_scroll_limit`, the end of `grow_columns` and `shrink_columns`).
+  A column change reflows them first, as the top of the storage they would
+  be: `grow_columns` takes back the newest `2 * lines` of them (enough for its
+  viewport fill and cursor pull-down counts) and `shrink_columns` takes the
+  cells they carry into the next row; both pass `display_offset` along.
+  `shrink_columns` drops the oldest of them when the history limit cuts.
+  Without them the grid behaves as upstream. oxtty reflows them one row at a
+  time, as `grow_columns`/`shrink_columns` reflow history rows
+  (`src/history.rs`, checked against the whole history in the grid by a
+  property test).
 - `Storage::initialize_up_to` caps the row cache (`MAX_CACHE_SIZE` spare rows)
   at the history limit; `Grid::increase_scroll_limit` uses it so a short
   history does not allocate 1000 spare rows.
