@@ -301,6 +301,50 @@ test('alternate screen switch, a change of rows and full resets clear the select
   assert.deepEqual(result.mismatches, [], `${result.mismatches.length} of ${result.total} cases differ`);
 });
 
+test('a right click selects the word under it with rightClickSelectsWord and puts the selection in the textarea; copy copies it; like xterm.js', { timeout: 300000 }, async () => {
+  const result = await withTerminals({ cols: COLS, rows: 16, scrollback: 20 }, async (t) => {
+    await t.write(CONTENT);
+    const textareas = [];
+    // Each textarea is read right after its own click: the next terminal's right click focuses its textarea, and
+    // the blur empties the other one (in both)
+    const rightClick = async ([col, row]) => {
+      const points = await t.page.evaluate(([c, r]) => window.points(c, r), [col, row]);
+      const values = [];
+      for (const k of [0, 1]) {
+        await Promise.all([
+          t.mouse('mousePressed', points[k], { button: 'right', buttons: 2, clickCount: 1 }),
+          t.mouse('mouseReleased', points[k], { button: 'right', clickCount: 1 }),
+        ]);
+        values.push((await t.page.evaluate(() => window.textareas()))[k]);
+      }
+      textareas.push(values);
+    };
+    for (const on of [false, true]) {
+      await t.setOption('rightClickSelectsWord', on);
+      await t.call('clearSelection');
+      await t.compare(`rightClickSelectsWord ${on}: clear`);
+      // A word, the same word again, whitespace (nothing to select), inside a selection, a wide-character word
+      for (const cell of [[14, 0], [14, 0], [11, 6], [2, 1], [22, 0]]) {
+        await rightClick(cell);
+        await t.compare(`rightClickSelectsWord ${on}: right click ${cell}`);
+      }
+      await t.drag([2, 4], [30, 4]);
+      await rightClick([10, 4]);
+      await t.compare(`rightClickSelectsWord ${on}: right click inside a drag selection`);
+    }
+    // Copy puts the selection on the clipboard; without one the event is left alone
+    const copies = [await t.page.evaluate(() => window.copied())];
+    await t.call('clearSelection');
+    copies.push(await t.page.evaluate(() => window.copied()));
+    return { mismatches: t.mismatches, total: t.count(), textareas, copies };
+  });
+  for (const [oxtty, xterm] of result.copies) assert.deepEqual(oxtty, xterm);
+  assert.ok(result.copies[0][1][0].length > 0 && result.copies[0][1][1], 'xterm.js copied the selection');
+  assert.deepEqual(result.mismatches, [], `${result.mismatches.length} of ${result.total} cases differ`);
+  for (const [oxtty, xterm] of result.textareas) assert.equal(oxtty, xterm);
+  assert.ok(result.textareas.some(([, xterm]) => xterm.length > 0), 'the textarea held a selection');
+});
+
 test('dragging past the top or bottom scrolls and extends the selection like xterm.js', { todo: TODO, timeout: 300000 }, async () => {
   const result = await withTerminals({ cols: COLS, rows: 8, scrollback: 30 }, async (t) => {
     await t.write(Array.from({ length: 30 }, (_, i) => `row ${i}`).join('\r\n'));

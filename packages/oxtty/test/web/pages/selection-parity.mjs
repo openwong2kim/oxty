@@ -54,6 +54,14 @@ async function setup({ cols: COLS, rows: ROWS, scrollback }) {
     call: (name, args) => both.forEach((t) => t[name](...args)),
     setOption: (key, value) => both.forEach((t) => { t.options[key] = value; }),
     focusTerminal: (k) => both[k].focus(),
+    /** A `copy` event on each element: the text it put on the clipboard and whether it took the event. */
+    copied: () => both.map((t) => {
+      const event = new ClipboardEvent('copy', { clipboardData: new DataTransfer(), bubbles: true, cancelable: true });
+      t.element.dispatchEvent(event);
+      return [event.clipboardData.getData('text/plain'), event.defaultPrevented];
+    }),
+    /** What each textarea holds (the context menu copies from it). */
+    textareas: () => both.map((t) => t.textarea.value),
     viewportY: () => both.map((t) => t.buffer.active.viewportY),
     takeData: () => data.map((d) => d.splice(0)),
     cells: () => screens.map((screen) => screen.getBoundingClientRect().width / COLS),
