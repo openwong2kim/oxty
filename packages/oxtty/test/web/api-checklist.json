@@ -60,20 +60,20 @@
       "reason": "Read back (xterm.js default false); no effect: there is no proposed-API gate."
     },
     "options.scrollOnUserInput": {
-      "status": "todo",
-      "reason": "Keys, IME and paste scroll a scrolled-back view to the bottom (xterm.js default true; wmux passes false)."
+      "status": "supported",
+      "reason": "Keys, IME, paste and mouse reports scroll a scrolled-back view to the bottom first (xterm.js CoreService.triggerDataEvent; default true, wmux passes false); replies never do."
     },
     "options.disableStdin": {
-      "status": "todo",
-      "reason": "Drops keys, pastes and replies to the program like xterm.js; the textarea turns read-only."
+      "status": "supported",
+      "reason": "Drops keys, IME, pastes, mouse reports and replies like xterm.js (CoreService.triggerDataEvent/triggerBinaryEvent); the textarea turns read-only."
     },
     "options.altClickMovesCursor": {
       "status": "todo",
       "reason": "Alt+click sends arrow keys to the clicked cell (xterm.js 6.1 moveToCellSequence)."
     },
     "options.vtExtensions.kittyKeyboard": {
-      "status": "todo",
-      "reason": "Turns the engine's kitty protocol on (setKittyKeyboard); keys go through the copied xterm.js 6.1 kitty encoder with the flags of the last frame. Turning it off drops the pushed flags."
+      "status": "supported",
+      "reason": "Turns the engine's kitty protocol on (setKittyKeyboard); keys go through oxtty::input's kitty encoder (ported from xterm.js 6.1) with the flags of the last frame. Turning it off drops the pushed flags."
     },
     "options.vtExtensions.colorSchemeQuery": {
       "status": "unsupported",
@@ -172,16 +172,16 @@
       "reason": "Always \"11\" (engine tables); setting another version throws."
     },
     "Terminal.focus": {
-      "status": "todo",
-      "reason": "Focuses the hidden textarea."
+      "status": "supported",
+      "reason": "Focuses the hidden textarea (preventScroll); focus and blur set the .focus class, send focus reports in focus events mode, and give the engine the focus it reports on CSI ? 1004 h in place."
     },
     "Terminal.textarea": {
-      "status": "todo",
-      "reason": "The hidden textarea in .xterm-helpers, set by open()."
+      "status": "supported",
+      "reason": "The hidden textarea in .xterm-helpers, set by open(); keydown, keypress, input, composition and paste are handled as in xterm.js 6.1 (crates/oxtty-web/src/input)."
     },
     "Terminal.attachCustomKeyEventHandler": {
-      "status": "todo",
-      "reason": "Sees every keydown, keypress and keyup first; false stops the key (the copied xterm.js arbitration)."
+      "status": "supported",
+      "reason": "Sees every keydown, keypress and keyup first; false stops the key (the ported xterm.js 6.1 arbitration)."
     },
     "Terminal.getSelection": {
       "status": "todo",
@@ -400,12 +400,14 @@
       "reason": "webglTeardown: there is no DOM renderer fallback; the WebGL renderer restores its context."
     },
     "_core.coreService.kittyKeyboard": {
-      "status": "todo",
-      "reason": "oxtty API: xtermKittyFlags(term) becomes term.kittyKeyboardFlags (the flags the encoder uses, from the last frame) and resetXtermKitty(term) becomes term.resetKittyKeyboard() (both screens, applied at once). Resetting in stream order at OSC 133;A still needs registerOscHandler (later)."
+      "status": "supported",
+      "reason": "oxtty API: xtermKittyFlags(term) becomes term.kittyKeyboardFlags (the flags the encoder uses, from the last frame) and resetXtermKitty(term) becomes term.resetKittyKeyboard() (both screens, applied at once). Resetting in stream order at OSC 133;A still needs registerOscHandler (later).",
+      "exercisedBy": "kittyKeyboardFlags[\\s\\S]*resetKittyKeyboard"
     },
     "_core.coreService.onUserInput": {
-      "status": "todo",
-      "reason": "oxtty API: term.onUserInput fires just before onData for keys, IME and paste, never for replies to the program; userInputGate subscribes to it instead."
+      "status": "supported",
+      "reason": "oxtty API: term.onUserInput fires just before onData for keys, IME, paste and mouse reports, never for replies to the program; userInputGate subscribes to it instead.",
+      "exercisedBy": "onUserInput"
     },
     "_core._compositionHelper": {
       "status": "unsupported",
@@ -432,12 +434,12 @@
       "reason": "Holds the canvas, sized to it."
     },
     "DOM .xterm-helpers": {
-      "status": "todo",
-      "reason": "Holds the textarea and the composition view."
+      "status": "supported",
+      "reason": "Built by open() inside .xterm-screen; holds the textarea and the composition view."
     },
     "DOM .xterm-helper-textarea": {
-      "status": "todo",
-      "reason": "Built like xterm.js (class, aria and autocomplete attributes, tabindex 0) and moved to the cursor cell after each frame."
+      "status": "supported",
+      "reason": "Built like xterm.js (class, aria and autocomplete attributes, tabindex 0, read-only with disableStdin); placed on the cursor cell after frames that move the cursor, once the renderer gives a cell size."
     },
     "DOM .composition-view": {
       "status": "todo",

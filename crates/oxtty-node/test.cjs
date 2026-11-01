@@ -106,6 +106,16 @@ test('native parser hooks', () => {
   assert.equal(t.takeReplies().length, 0);
 });
 
+test('native setFocus answers CSI ? 1004 h', () => {
+  const t = new Terminal(20, 5);
+  t.write('\x1b[?1004h');
+  t.setFocus(true);
+  t.write('\x1b[?1004h');
+  t.setFocus(null);
+  t.write('\x1b[?1004h');
+  assert.equal(t.takeReplies().toString(), '\x1b[I');
+});
+
 test('native windowsPty', () => {
   const t = new Terminal(10, 3);
   t.setWindowsPty('conpty', 19045);

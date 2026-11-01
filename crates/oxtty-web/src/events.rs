@@ -36,11 +36,12 @@ pub(crate) enum Event {
     WriteParsed,
     CursorMove,
     BufferChange,
+    UserInput,
 }
 
 impl Event {
     /// In discriminant order: the bound function carries the index.
-    const ALL: [Event; 10] = [
+    const ALL: [Event; 11] = [
         Event::Data,
         Event::Binary,
         Event::Resize,
@@ -51,6 +52,7 @@ impl Event {
         Event::WriteParsed,
         Event::CursorMove,
         Event::BufferChange,
+        Event::UserInput,
     ];
 
     fn emitter(self, e: &Emitters) -> &Rc<Emitter> {
@@ -65,6 +67,7 @@ impl Event {
             Event::WriteParsed => &e.write_parsed,
             Event::CursorMove => &e.cursor_move,
             Event::BufferChange => &e.buffer_change,
+            Event::UserInput => &e.user_input,
         }
     }
 }
@@ -179,5 +182,12 @@ impl Terminal {
     #[wasm_bindgen(getter = onCursorMove, unchecked_return_type = "IEvent<void>")]
     pub fn on_cursor_move(&self) -> Function {
         event(&self.shared, Event::CursorMove)
+    }
+
+    /// oxtty API: fires just before `onData` for keys, IME, paste and mouse reports, never for replies to the
+    /// program.
+    #[wasm_bindgen(getter = onUserInput, unchecked_return_type = "IEvent<void>")]
+    pub fn on_user_input(&self) -> Function {
+        event(&self.shared, Event::UserInput)
     }
 }

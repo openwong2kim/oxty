@@ -30,6 +30,7 @@ pub mod buffer;
 pub mod emitter;
 pub mod engine;
 pub mod events;
+mod input;
 pub mod options;
 pub mod render;
 pub mod state;

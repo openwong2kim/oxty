@@ -80,6 +80,7 @@ pub(crate) struct Emitters {
     pub write_parsed: Rc<Emitter>,
     pub cursor_move: Rc<Emitter>,
     pub buffer_change: Rc<Emitter>,
+    pub user_input: Rc<Emitter>,
 }
 
 /// What the engine looked like after the last change, to fire `onScroll`/`onCursorMove` on differences.
@@ -96,6 +97,7 @@ type CrashCallback = Closure<dyn FnMut(JsValue)>;
 pub(crate) struct Shared {
     pub core: RefCell<Core>,
     pub events: Emitters,
+    pub input: crate::input::Input,
     state: Cell<State>,
     /// Serialises OSC 52 reads so each answers the oldest pending read.
     clipboard_reads: RefCell<Promise>,
@@ -170,6 +172,7 @@ impl Terminal {
                 disposed_size: (0, 0),
             }),
             events: Emitters::default(),
+            input: Default::default(),
             state: Cell::new(State::default()),
             clipboard_reads: RefCell::new(Promise::resolve(&JsValue::UNDEFINED)),
             drain_timer: RefCell::new(None),
@@ -180,6 +183,7 @@ impl Terminal {
         *slot.borrow_mut() = Rc::downgrade(&shared);
         shared.apply_clipboard();
         shared.apply_windows_pty();
+        crate::input::init(&shared);
         shared.state.set(shared.read_state());
         Ok(Terminal { shared })
     }
@@ -270,6 +274,7 @@ impl Terminal {
         core.element = Some(element);
         core.screen = Some(screen);
         // Hook: renderer, input, mouse, selection and accessibility attach here.
+        crate::input::open(&self.shared, &core, &helpers)?;
         core.view.invalidate();
         core.dirty = Dirty::All;
         drop(core);
@@ -323,6 +328,7 @@ impl Terminal {
             }
             // Hook: selection drops on row changes.
         }
+        crate::input::after_resize(&self.shared);
         let size = Object::new();
         Reflect::set(&size, &"cols".into(), &self.cols().into())?;
         Reflect::set(&size, &"rows".into(), &self.rows().into())?;
@@ -361,6 +367,7 @@ impl Terminal {
         core.disposed = true;
         core.queue.clear();
         // Hook: input, mouse, selection and accessibility remove their listeners here.
+        crate::input::dispose(&self.shared);
         core.renderer = None;
         if let Some(element) = core.element.take() {
             element.remove();
@@ -383,6 +390,7 @@ impl Terminal {
             &e.write_parsed,
             &e.cursor_move,
             &e.buffer_change,
+            &e.user_input,
         ] {
             emitter.clear();
         }
@@ -460,9 +468,9 @@ impl Shared {
             (core.view.take_events(), get(&core.options, "clipboard"))
         };
         if !events.replies.is_empty() {
-            // Hook: replies go through the input module's data path (scroll-on-input rules) once it exists.
+            // Replies are not user input: `disableStdin` drops them, they do not scroll the view.
             let text = String::from_utf8_lossy(&events.replies).into_owned();
-            self.events.data.fire(&[&text.into()]);
+            crate::input::send_data(self, &text.into(), false);
         }
         if let Some(title) = events.title {
             self.events.title_change.fire(&[&title.into()]);
@@ -541,6 +549,7 @@ impl Shared {
             self.apply_windows_pty();
         }
         // Hook: theme (engine colours, renderer), renderer options, input, mouse and accessibility options.
+        crate::input::set_option(self, key);
         Ok(())
     }
 
@@ -630,11 +639,17 @@ impl Shared {
     fn render_frame(self: &Rc<Self>) {
         let rows = {
             let mut core = self.core.borrow_mut();
-            if core.disposed || core.renderer.is_none() {
+            if core.disposed || core.element.is_none() {
                 return;
             }
             let frame = core.view.take_frame();
             let changed = core.viewport.apply(frame);
+            // Without a renderer (none yet, or no WebGL2) the viewport still follows the engine: input reads it.
+            if core.renderer.is_none() {
+                drop(core);
+                crate::input::after_frame(self);
+                return;
+            }
             let dirty = std::mem::replace(&mut core.dirty, Dirty::Rows(Vec::new()));
             let Core {
                 renderer, viewport, ..
@@ -643,7 +658,7 @@ impl Shared {
                 .as_mut()
                 .unwrap()
                 .render(viewport, &changed, &dirty);
-            // Hook: input reads modes from the frame; selection and links repaint.
+            // Hook: selection and links repaint.
             match dirty {
                 Dirty::All => Some((0, viewport.rows.saturating_sub(1))),
                 Dirty::Rows(rows) => changed.iter().chain(&rows).fold(None, |range, &y| {
@@ -651,6 +666,7 @@ impl Shared {
                 }),
             }
         };
+        crate::input::after_frame(self);
         if let Some((start, end)) = rows {
             let range = Object::new();
             let _ = Reflect::set(&range, &"start".into(), &start.into());

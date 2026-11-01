@@ -227,6 +227,13 @@ impl Terminal {
         self.inner.kitty_flags() as u32
     }
 
+    /// The host's focus, for the report the engine sends when the program turns on focus events (`CSI ? 1004 h`);
+    /// `null`, the default, sends none.
+    #[napi]
+    pub fn set_focus(&mut self, focused: Option<bool>) {
+        self.inner.set_focus(focused);
+    }
+
     #[napi]
     pub fn take_damage(&mut self) -> Damage {
         match self.inner.take_damage() {

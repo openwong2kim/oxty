@@ -4,7 +4,8 @@ description = "The browser front end of oxtty: an xterm.js-compatible terminal w
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# oxtty code is Apache-2.0; the input handling ported from xterm.js (src/input) is xterm.js's MIT. See NOTICE.md.
+license = "Apache-2.0 AND MIT"
 repository.workspace = true
 publish = false
 
@@ -16,6 +17,8 @@ doctest = false
 # Pinned exactly: the wasm-bindgen CLI that generates the glue must be the same version (scripts/build-web.sh checks).
 [dependencies]
 js-sys = "=0.3.106"
+# Only its input encoders (`oxtty::input`) are used; the engine itself is the oxtty package's own wasm instance.
+oxtty = { path = "../oxtty" }
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
 
@@ -23,14 +26,29 @@ wasm-bindgen-futures = "=0.4.79"
 [dependencies.web-sys]
 version = "=0.3.106"
 features = [
+    "AddEventListenerOptions",
+    "ClipboardEvent",
+    "CompositionEvent",
     "CssStyleDeclaration",
+    "DataTransfer",
     "Document",
+    "DomRect",
     "DomTokenList",
     "Element",
+    "Event",
+    "EventTarget",
+    "FocusOptions",
     "HtmlElement",
     "HtmlHeadElement",
     "HtmlStyleElement",
+    "HtmlTextAreaElement",
+    "InputEvent",
+    "KeyboardEvent",
+    "MouseEvent",
+    "Navigator",
     "Node",
+    "UiEvent",
+    "WheelEvent",
     "Window",
     "console",
 ]

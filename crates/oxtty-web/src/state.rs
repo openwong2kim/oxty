@@ -104,6 +104,7 @@ impl Terminal {
             core.view.invalidate();
             core.dirty = Dirty::All;
         }
+        crate::input::reset(&self.shared);
         self.shared.handle_events();
         self.shared.after_change();
     }

@@ -124,6 +124,11 @@ export class Terminal {
   resetKittyKeyboard(): void;
   /** Active kitty keyboard flags: 1 disambiguate, 2 event types, 4 alternate keys, 8 all keys as escapes, 16 associated text. */
   kittyFlags(): number;
+  /**
+   * The host's focus, for the report (`CSI I` or `CSI O`) that joins the replies, in order, each time the program turns
+   * on focus events (`CSI ? 1004 h`); `null`, the default, sends none. Kept across a crash.
+   */
+  setFocus(focused: boolean | null): void;
   takeDamage(): Damage;
   /** Bytes to write back to the PTY (status reports, …). */
   takeReplies(): Uint8Array;

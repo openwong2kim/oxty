@@ -81,7 +81,16 @@ into the WebAssembly modules that use them, are a Rust port of xterm.js
 `src/common/input/Keyboard.ts`, `src/common/input/KittyKeyboard.ts`,
 `src/common/services/MouseStateService.ts` and parts of
 `src/browser/services/MouseService.ts`, `src/browser/Clipboard.ts` and
-`src/browser/CoreBrowserTerminal.ts`. Each Rust file names its source lines.
+`src/browser/CoreBrowserTerminal.ts`. The textarea, IME and mouse handling
+of the browser front end (`crates/oxtty-web/src/input`, compiled into
+`xterm_web_bg.wasm`) is a Rust port of parts of
+`src/browser/CoreBrowserTerminal.ts`, `src/browser/input/CompositionHelper.ts`,
+`src/browser/input/MoveToCell.ts`, `src/browser/input/Mouse.ts`,
+`src/browser/Clipboard.ts`, `src/browser/services/KeyboardService.ts`,
+`src/browser/services/MouseService.ts`,
+`src/browser/services/MouseCoordsService.ts` and
+`src/browser/services/SelectionService.ts` of the same version. Each Rust file
+names its source lines.
 Source: https://github.com/xtermjs/xterm.js
 
 ```

@@ -20,7 +20,7 @@ test('input matches xterm.js', async (t) => {
   await withPage('parity.mjs', async (page) => {
     await page.waitForFunction(() => window.ready);
 
-    await t.test('the textarea is built like xterm.js and takes focus', { todo: 'Terminal.textarea, Terminal.focus, DOM .xterm-helper-textarea, DOM .composition-view' }, async () => {
+    await t.test('the textarea is built like xterm.js and takes focus', async () => {
       await setup(page);
       const shape = await page.evaluate(() => ['ox', 'xt'].map((name) => {
         const terminal = window.api.terminal(name);
@@ -56,7 +56,7 @@ test('input matches xterm.js', async (t) => {
       assert.equal(placed.top, `${placed.height}px`);
     });
 
-    await t.test('paste() and the paste event send what xterm.js sends', { todo: 'Terminal.paste, Terminal.textarea (paste)' }, async () => {
+    await t.test('paste() and the paste event send what xterm.js sends', async () => {
       const texts = ['plain', 'a\r\nb\nc\rd', 'x\x1b[201~y'];
       for (const bracketed of [false, true]) {
         await setup(page);
@@ -78,7 +78,7 @@ test('input matches xterm.js', async (t) => {
       assert.deepEqual(shown.ox, ['\x1b[200~a\rb␛\x1b[201~']);
     });
 
-    await t.test('focus reports follow the focus events mode', { todo: 'Terminal.focus, Terminal.blur (focus reports)' }, async () => {
+    await t.test('focus reports follow the focus events mode', async () => {
       for (const mode of ['', '\x1b[?1004h']) {
         await setup(page);
         await write(page, mode);
@@ -92,7 +92,7 @@ test('input matches xterm.js', async (t) => {
       }
     });
 
-    await t.test('a custom key handler returning false stops the key', { todo: 'Terminal.attachCustomKeyEventHandler' }, async () => {
+    await t.test('a custom key handler returning false stops the key', async () => {
       await setup(page);
       await page.evaluate(() => {
         window.seen = { ox: [], xt: [] };
@@ -113,7 +113,7 @@ test('input matches xterm.js', async (t) => {
       assert.deepEqual(seen.ox, ['keydown:a', 'keypress:a', 'keyup:a', 'keydown:b', 'keyup:b']);
     });
 
-    await t.test('disableStdin drops keys, pastes and replies', { todo: 'options.disableStdin' }, async () => {
+    await t.test('disableStdin drops keys, pastes and replies', async () => {
       await setup(page, { disableStdin: true });
       const sent = await both(page, async (name) => {
         await press(page, 'KeyA')(name);
@@ -132,7 +132,7 @@ test('input matches xterm.js', async (t) => {
       assert.equal(await page.evaluate(() => window.api.terminal('ox').textarea.readOnly), false);
     });
 
-    await t.test('typing scrolls to the bottom unless scrollOnUserInput is false', { todo: 'options.scrollOnUserInput, buffer.active.viewportY' }, async () => {
+    await t.test('typing scrolls to the bottom unless scrollOnUserInput is false', async () => {
       for (const scrollOnUserInput of [true, false]) {
         await setup(page, { scrollOnUserInput });
         await write(page, '\r\n'.repeat(20));
@@ -149,7 +149,7 @@ test('input matches xterm.js', async (t) => {
       }
     });
 
-    await t.test('onUserInput fires before onData for input, never for replies', { todo: '_core.coreService.onUserInput' }, async () => {
+    await t.test('onUserInput fires before onData for input, never for replies', async () => {
       await setup(page);
       const order = await page.evaluate(async () => {
         const t = window.api.terminal('ox');
@@ -166,7 +166,7 @@ test('input matches xterm.js', async (t) => {
       assert.deepEqual(typed, ['\x1b[1;1R', 'p', 'a']);
     });
 
-    await t.test('kitty keyboard: vtExtensions, flags and reset (oxtty API)', { todo: 'options.vtExtensions.kittyKeyboard, _core.coreService.kittyKeyboard' }, async () => {
+    await t.test('kitty keyboard: vtExtensions, flags and reset (oxtty API)', async () => {
       const escape = async () => {
         await press(page, 'Escape')('ox');
         return (await take(page)).ox.join('');
