@@ -53,7 +53,7 @@ async function fetchWasm(source) {
   const base = globalThis.location?.href ?? import.meta.url;
   const url = source instanceof URL ? source : new URL(String(source), base);
   if (url.protocol === 'file:') {
-    // 이름을 변수로 둬서 브라우저 번들러가 node: 모듈을 따라가지 않게 한다.
+    // Keep the name in a variable so browser bundlers do not follow the node: module.
     const fsModule = 'node:fs/promises';
     const { readFile } = await import(/* @vite-ignore */ /* webpackIgnore: true */ fsModule);
     return new Uint8Array(await readFile(url));
@@ -112,7 +112,7 @@ export function decodeColor(packed) {
 
 export class Terminal {
   #h;
-  // 렌더러가 칸마다 읽으므로 wasm을 부르지 않게 크기를 들고 있다(resize 때만 바뀐다)
+  // Renderers read it per cell, so keep the size here to avoid calling wasm (it changes only on resize)
   #cols = 0;
   #rows = 0;
   #inPtr = 0;
@@ -261,7 +261,7 @@ export class Terminal {
       texts.push(len ? decoder.decode(bytes.subarray(at, at + len)) : undefined);
       at += len;
     }
-    // 텍스트 뒤에는 이 줄의 링크가 `id \0 uri \0` 순서로 온다.
+    // After the text come this line's links, in `id \0 uri \0` order.
     const parts = decoder.decode(bytes.subarray(at)).split('\0');
     const links = [];
     for (let i = 0; i + 1 < parts.length; i += 2) links.push(Object.freeze({ id: parts[i], uri: parts[i + 1] }));

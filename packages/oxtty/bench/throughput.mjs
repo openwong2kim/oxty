@@ -1,11 +1,11 @@
-// 처리량·메모리 기준선: 같은 출력을 oxtty(wasm), oxtty(네이티브 N-API), @xterm/headless에 넣고 비교한다.
+// Throughput and memory baseline: feeds the same output to oxtty (wasm), oxtty (native N-API) and @xterm/headless and compares.
 //
-//   bash scripts/build-wasm.sh && bash scripts/build-node.sh   (저장소 루트)
+//   bash scripts/build-wasm.sh && bash scripts/build-node.sh   (repository root)
 //   node --expose-gc packages/oxtty/bench/throughput.mjs [out.json]
 //
-// 출력은 vtebench 계열 시나리오를 결정적으로 생성한다(시드 고정, 각 8 MiB).
-// 터미널 120×40, 스크롤백 10,000줄, 64 KiB씩 쓴다. 처리량은 5회 중앙값(MiB/s),
-// 메모리는 시나리오·엔진마다 새 프로세스에서 GC 뒤 RSS 증가량이다.
+// Output is generated deterministically from vtebench-style scenarios (fixed seed, 8 MiB each).
+// Terminal 120×40, 10,000 lines of scrollback, written 64 KiB at a time. Throughput is the median of 5 runs (MiB/s),
+// memory is the RSS growth after GC in a fresh process per scenario and engine.
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -30,9 +30,9 @@ function rng(seed) {
 
 const ESC = '\x1b';
 const CASES = {
-  // 빌드 로그처럼 대부분 평문이고 가끔 색이 붙는 줄.
+  // Lines like a build log: mostly plain text, occasionally colored.
   'light-cells': (r) => `${r() < 0.2 ? `${ESC}[3${1 + Math.floor(r() * 6)}m` : ''}[${(r() * 1e6).toFixed(0)}] compiling module_${Math.floor(r() * 9999)}.rs ok${ESC}[0m\r\n`,
-  // 칸마다 다른 truecolor 전경·배경.
+  // A different truecolor foreground and background per cell.
   'dense-cells': (r) => {
     let line = '';
     for (let i = 0; i < COLS; i++) {
@@ -41,18 +41,18 @@ const CASES = {
     }
     return `${line}${ESC}[0m\r\n`;
   },
-  // 한글·한자·이모지 줄.
+  // Lines of Hangul, Han characters and emoji.
   unicode: (r) => {
     const pool = ['가', '나', '한', '글', '漢', '字', '😀', '🚀', 'é', 'a', ' '];
     let line = '';
     for (let i = 0; i < 50; i++) line += pool[Math.floor(r() * pool.length)];
     return `${line}\r\n`;
   },
-  // TUI 다시 그리기: 무작위 위치로 옮겨 짧은 글자를 쓴다(스크롤 없음).
+  // TUI redraw: move to random positions and write short text (no scrolling).
   'cursor-motion': (r) => `${ESC}[${1 + Math.floor(r() * ROWS)};${1 + Math.floor(r() * (COLS - 10))}H${ESC}[3${Math.floor(r() * 8)}m${'#'.repeat(1 + Math.floor(r() * 8))}`,
-  // 아래쪽 영역만 스크롤(DECSTBM).
+  // Scroll only the lower region (DECSTBM).
   'scrolling-region': (r) => `${ESC}[20;40r${ESC}[40;1Hline ${Math.floor(r() * 1e6)}\n`,
-  // 짧은 평문 줄을 계속 흘려 스크롤백을 채운다.
+  // Keep streaming short plain lines to fill the scrollback.
   'scroll-flood': (r) => `${Math.floor(r() * 1e9)}\r\n`,
 };
 
@@ -111,7 +111,7 @@ async function engine(name) {
 
 const ENGINES = ['oxtty-wasm', ...(existsSync(NATIVE) ? ['oxtty-native'] : []), 'xterm-headless'];
 
-// 자식 프로세스: 엔진 하나·시나리오 하나를 한 번 돌리고 GC 뒤 RSS 증가량을 낸다.
+// Child process: runs one engine on one scenario once and reports the RSS growth after GC.
 if (process.argv[2] === '--memory') {
   const [, , , engineName, caseName] = process.argv;
   const e = await engine(engineName);
@@ -137,7 +137,7 @@ for (const caseName of Object.keys(CASES)) {
       const start = performance.now();
       await e.feed(t, chunks);
       const ms = performance.now() - start;
-      if (run > 0) times.push(ms); // 첫 회는 워밍업
+      if (run > 0) times.push(ms); // the first run is warm-up
       lasts[engineName] = e.last(t);
       e.dispose(t);
     }
@@ -148,7 +148,7 @@ for (const caseName of Object.keys(CASES)) {
     results.push({ case: caseName, engine: engineName, ms: +ms.toFixed(1), mibPerSec: +((bytes / 1048576) / (ms / 1000)).toFixed(1), rssMiB: memory === null ? null : +(memory / 1048576).toFixed(1) });
     console.log(`${caseName.padEnd(17)} ${engineName.padEnd(15)} ${ms.toFixed(0).padStart(6)} ms ${String(results.at(-1).mibPerSec).padStart(7)} MiB/s  rss +${results.at(-1).rssMiB} MiB`);
   }
-  // 같은 출력을 받았으면 마지막 줄이 같아야 한다(공정성 확인).
+  // Given the same output, the last line must match (fairness check).
   const distinct = new Set(Object.values(lasts));
   if (distinct.size > 1) console.log(`  ! ${caseName}: last row differs between engines`, lasts);
 }

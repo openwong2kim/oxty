@@ -1,15 +1,15 @@
-// 화면 레코드: "같은 화면"의 정의. xterm 쪽과 oxtty 쪽이 각자 이 모양을 만들고 diffScreens 하나로 비교한다.
+// Screen record: the definition of "the same screen". The xterm side and the oxtty side each build this shape, compared by a single diffScreens.
 //
-// 정규화 규칙(여기 한 곳에만 있다)
-// - 줄 키는 아래(화면) 기준: 화면 "0".."rows-1", 히스토리 "-1"(최신)…. 히스토리 길이가 달라도 화면 줄끼리 비교된다.
-// - wrapped는 xterm 의미("앞줄이 이 줄로 이어졌다"). 가장 오래된 줄은 앞줄이 없으므로 양쪽 모두 false.
-// - 문자: 빈칸 ' ', 와이드 문자의 뒷칸 ''. 결합 문자는 문자열 전체로 비교한다.
-// - 커서 x는 cols-1로 자른다(xterm은 pending wrap에서 cols). pending wrap은 케이스 tail의 첫 출력 문자로 드러난다.
-//   커서 모양·깜빡임은 넣지 않는다: xterm 공개 API에 없다(oxtty는 엔진 테스트 cursor_shape_follows_decscusr가 고정).
-// - 색: 'default' 또는 (모드 | 값). xterm CM_P16/P256/RGB 비트 == oxtty NAMED/INDEXED/RGB 비트.
-// - 밑줄은 getUnderlineStyle()(isUnderline()은 OSC 8 링크에서 true). 밑줄 색은 밑줄이 있을 때만, SGR 58이 없으면 'default'.
-// - oxtty가 모델링하지 않는 필드는 상수다(OXTTY_CONSTANT). 그 필드가 xterm에서 켜지면 차이로 드러난다.
-// - oxtty 동기화 출력: 읽기 전에 flushSync()한다. xterm은 ?2026 중에도 버퍼에 바로 반영하기 때문이다.
+// Normalization rules (they live only here)
+// - Line keys are bottom (screen) based: screen "0".."rows-1", history "-1" (newest)…. Screen lines are compared with each other even when history lengths differ.
+// - wrapped has the xterm meaning ("the previous line continues into this line"). The oldest line has no previous line, so both sides use false.
+// - Characters: blank ' ', trailing cell of a wide character ''. Combining characters are compared as whole strings.
+// - Cursor x is clamped to cols-1 (xterm reports cols in pending wrap). Pending wrap is revealed by the first printed character of the case tail.
+//   Cursor shape and blink are left out: they are not in the xterm public API (for oxtty, the engine test cursor_shape_follows_decscusr pins them).
+// - Colors: 'default' or (mode | value). xterm CM_P16/P256/RGB bits == oxtty NAMED/INDEXED/RGB bits.
+// - Underline uses getUnderlineStyle() (isUnderline() is true on OSC 8 links). Underline color only when underlined, 'default' without SGR 58.
+// - Fields oxtty does not model are constants (OXTTY_CONSTANT). If such a field turns on in xterm, it shows up as a difference.
+// - oxtty synchronized output: flushSync() before reading, because xterm applies to the buffer immediately even during ?2026.
 
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -35,13 +35,13 @@ const encoder = new TextEncoder();
  *     reverseWraparound: boolean, synchronizedOutput: boolean },
  *   lines: Record<string, Line>,
  * }} Screen
- *   win32InputMode는 넣지 않는다: 이 설정의 xterm에서 ?9001h로 켜지지 않아 레버를 만들 수 없다.
+ *   win32InputMode is left out: in this xterm configuration ?9001h does not turn it on, so no lever can be built.
  * @typedef {{ path: string, field: string, xterm: unknown, subject: unknown }} Diff
- *   path 예 "lines[-3].cells[4].fg", field는 path에서 [..]를 뺀 것 "lines.cells.fg"
- * @typedef {Uint8Array | { cols: number, rows: number }} Event   write 또는 resize
+ *   path e.g. "lines[-3].cells[4].fg"; field is path without the [..] parts, "lines.cells.fg"
+ * @typedef {Uint8Array | { cols: number, rows: number }} Event   write or resize
  */
 
-/** wmux snapshotTestTerminal과 같은 설정. reflowCursorLine은 기본값(false) 그대로 둔다. */
+/** Same settings as wmux snapshotTestTerminal. reflowCursorLine stays at its default (false). */
 export function xterm(cols, rows, scrollback) {
   const t = new XTerminal({
     cols, rows, scrollback, allowProposedApi: true, logLevel: 'off',
@@ -52,7 +52,7 @@ export function xterm(cols, rows, scrollback) {
   return t;
 }
 
-/** 설치된 기준 xterm이 package.json 고정 버전과 다르면 이유를, 같으면 null. */
+/** The reason if the installed reference xterm differs from the version pinned in package.json, null if it matches. */
 export function oracleMismatch(
   pinned = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).devDependencies,
 ) {
@@ -65,8 +65,8 @@ export function oracleMismatch(
 }
 
 /**
- * 이벤트를 순서대로 모든 터미널에 적용하고 쓴 바이트 수를 돌려준다.
- * xterm에는 항상 바이트로 쓴다: 문자열로 이어 쓰면 미완 UTF-8 상태가 사라진다.
+ * Applies the events in order to every terminal and returns the number of bytes written.
+ * Always writes bytes to xterm: writing successive strings loses the incomplete UTF-8 state.
  * @param {(Event | string)[]} events
  */
 export async function play(events, ...terms) {
@@ -91,7 +91,7 @@ const DEFAULT_FG = (1 << 24) | 256;
 const DEFAULT_BG = (1 << 24) | 257;
 const ocolor = (packed, def) => (packed === def ? 'default' : packed >>> 0);
 
-/** 줄 키를 아래 기준으로 매긴다. oldest는 가장 오래된 줄의 키. */
+/** Assigns bottom-based line keys. oldest is the key of the oldest line. */
 function keyed(count, rows, line) {
   const lines = {};
   for (let i = 0; i < count; i++) lines[i - (count - rows)] = line(i - (count - rows), i === 0);
@@ -138,7 +138,7 @@ const UNDERLINES = [
 ];
 const mouse = (m) => (m & Mode.MOUSE_MOTION ? 'any' : m & Mode.MOUSE_DRAG ? 'drag' : m & Mode.MOUSE_CLICK ? 'vt200' : 'none');
 
-/** @returns {Screen} oxtty 공개 API만 쓴다. 부수 효과: 잡혀 있던 동기화 출력을 적용한다(위 규칙). */
+/** @returns {Screen} Uses only the oxtty public API. Side effect: applies held synchronized output (rule above). */
 export function oxttyScreen(t) {
   const synchronizedOutput = t.syncPending();
   t.flushSync();
@@ -177,13 +177,13 @@ export function oxttyScreen(t) {
   };
 }
 
-/** oxtty가 상수로 내는 필드. 레버 테스트가 "이것만 상수"임을 강제한다. */
+/** Fields oxtty reports as constants. The lever test enforces that "only these are constant". */
 export const OXTTY_CONSTANT = new Set([
-  'lines.cells.overline', // SGR 53: oxtty 셀에 비트가 없다
-  'modes.reverseWraparound', // ?45 미지원
+  'lines.cells.overline', // SGR 53: no bit in the oxtty cell
+  'modes.reverseWraparound', // ?45 unsupported
 ]);
 
-/** 모든 비교 필드 → 그 필드를 20x6 빈 화면에서 바꾸는 입력. 필드가 늘면 레버도 늘어야 테스트가 통과한다. */
+/** Every compared field → an input that changes that field on an empty 20x6 screen. When fields are added, levers must be added too for the test to pass. */
 export const LEVERS = {
   cols: [{ cols: 21, rows: 6 }], rows: [{ cols: 20, rows: 7 }],
   buffer: ['\x1b[?1049h'], baseY: ['\r\n'.repeat(6)],
@@ -193,7 +193,7 @@ export const LEVERS = {
   'lines.cells.chars': ['X'], 'lines.cells.width': ['한'],
   'lines.cells.fg': ['\x1b[31mX'], 'lines.cells.bg': ['\x1b[41mX'],
   'lines.cells.bold': ['\x1b[1mX'], 'lines.cells.dim': ['\x1b[2mX'], 'lines.cells.italic': ['\x1b[3mX'],
-  // 밑줄 레버에 fg를 같이 켠다: SGR 58 없는 밑줄 색이 'default'인지(fg로 대체하지 않는지)를 여기서 고정한다.
+  // The underline lever also sets fg: this pins that the underline color without SGR 58 is 'default' (not substituted with fg).
   'lines.cells.underline': ['\x1b[31;4:3mX'], 'lines.cells.underlineColor': ['\x1b[4;58;5;1mX'],
   'lines.cells.blink': ['\x1b[5mX'], 'lines.cells.inverse': ['\x1b[7mX'], 'lines.cells.invisible': ['\x1b[8mX'],
   'lines.cells.strikethrough': ['\x1b[9mX'], 'lines.cells.overline': ['\x1b[53mX'],
@@ -203,12 +203,12 @@ export const LEVERS = {
   'modes.reverseWraparound': ['\x1b[?45h'], 'modes.synchronizedOutput': ['\x1b[?2026h'],
 };
 
-// 숫자 키(줄 번호·셀 인덱스)는 데이터가 정하는 키라 path에 [k]로 쓰고 field에서는 뺀다.
+// Numeric keys (line numbers, cell indices) are data-defined, so they are written as [k] in path and dropped from field.
 const isIndex = (k) => /^-?\d+$/.test(k);
 const step = (path, k) => (isIndex(k) ? `${path}[${k}]` : path ? `${path}.${k}` : k);
 const fieldOf = (path) => path.replace(/\[-?\d+\]/g, '');
 
-/** 깊은 비교. 한쪽에만 있는 키는 그 키 자리에서 없는 쪽을 undefined로 보고한다. @returns {Diff[]} */
+/** Deep comparison. A key present on only one side is reported at that key with the missing side as undefined. @returns {Diff[]} */
 export function diffScreens(xtermSide, subjectSide, path = '', out = []) {
   if (typeof xtermSide === 'object' && xtermSide && typeof subjectSide === 'object' && subjectSide) {
     for (const k of new Set([...Object.keys(xtermSide), ...Object.keys(subjectSide)])) {
@@ -225,7 +225,7 @@ export function diffScreens(xtermSide, subjectSide, path = '', out = []) {
   return out;
 }
 
-/** diffScreens가 낼 수 있는 모든 field: 값 필드와, 키가 데이터인 컨테이너(lines, lines.cells). */
+/** Every field diffScreens can produce: value fields, and containers whose keys are data (lines, lines.cells). */
 export function fieldsOf(screen, path = '', out = new Set()) {
   if (typeof screen !== 'object' || screen === null) return out.add(path);
   const keys = Object.keys(screen);
