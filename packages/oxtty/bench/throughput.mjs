@@ -6,6 +6,10 @@
 // Output is generated deterministically from vtebench-style scenarios (fixed seed, 8 MiB each).
 // Terminal 120×40, 10,000 lines of scrollback, written 64 KiB at a time. Throughput is the median of 5 runs (MiB/s),
 // memory is the RSS growth after GC in a fresh process per scenario and engine.
+//
+// Resize: with 10,000 and 100,000 lines of scrollback filled, 20 column changes (100 and 120 in turn), in a fresh
+// process per engine. Reports the time per resize and the memory growth: WebAssembly memory for oxtty-wasm (it never
+// shrinks, so this is the peak), RSS after GC otherwise.
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -22,6 +26,17 @@ const SCROLLBACK = 10000;
 const SIZE = 8 * 1024 * 1024;
 const CHUNK = 64 * 1024;
 const RUNS = 5;
+const RESIZES = 20;
+const RESIZE_SCROLLBACKS = [10000, 100000];
+
+// oxtty's wrapper keeps the WebAssembly instance to itself; note its memory as it is instantiated.
+let wasmMemory = null;
+const instantiate = WebAssembly.instantiate;
+WebAssembly.instantiate = async (...args) => {
+  const result = await instantiate(...args);
+  wasmMemory = (result.instance ?? result).exports.memory;
+  return result;
+};
 
 function rng(seed) {
   let s = seed >>> 0;
@@ -77,26 +92,29 @@ async function engine(name) {
     const { init, Terminal } = await import('../dist/index.js');
     await init();
     return {
-      make: () => new Terminal({ cols: COLS, rows: ROWS, scrollback: SCROLLBACK }),
+      make: (scrollback = SCROLLBACK) => new Terminal({ cols: COLS, rows: ROWS, scrollback }),
       feed: async (t, chunks) => { for (const c of chunks) t.write(c); },
       last: (t) => t.rowText(ROWS - 1),
+      resize: (t, cols, rows) => t.resize(cols, rows),
+      memory: () => wasmMemory.buffer.byteLength,
       dispose: (t) => t.dispose(),
     };
   }
   if (name === 'oxtty-native') {
     const { Terminal } = require(NATIVE);
     return {
-      make: () => new Terminal(COLS, ROWS, SCROLLBACK),
+      make: (scrollback = SCROLLBACK) => new Terminal(COLS, ROWS, scrollback),
       feed: async (t, chunks) => { for (const c of chunks) t.write(c); },
       last: (t) => t.rowText(ROWS - 1),
+      resize: (t, cols, rows) => t.resize(cols, rows),
       dispose: () => {},
     };
   }
   const { Terminal } = require('@xterm/headless');
   const { Unicode11Addon } = require('@xterm/addon-unicode11');
   return {
-    make: () => {
-      const t = new Terminal({ cols: COLS, rows: ROWS, scrollback: SCROLLBACK, allowProposedApi: true });
+    make: (scrollback = SCROLLBACK) => {
+      const t = new Terminal({ cols: COLS, rows: ROWS, scrollback, allowProposedApi: true });
       t.loadAddon(new Unicode11Addon());
       t.unicode.activeVersion = '11';
       return t;
@@ -105,6 +123,7 @@ async function engine(name) {
       for (let i = 0; i < chunks.length; i++) t.write(chunks[i], i === chunks.length - 1 ? done : undefined);
     }),
     last: (t) => t.buffer.active.getLine(t.buffer.active.baseY + ROWS - 1)?.translateToString(true) ?? '',
+    resize: (t, cols, rows) => t.resize(cols, rows),
     dispose: (t) => t.dispose(),
   };
 }
@@ -122,6 +141,24 @@ if (process.argv[2] === '--memory') {
   await e.feed(t, chunks);
   for (let i = 0; i < 4; i++) globalThis.gc();
   process.stdout.write(JSON.stringify({ rss: process.memoryUsage().rss - before, last: e.last(t) }));
+  process.exit(0);
+}
+
+// Child process: fills one engine's scrollback, then resizes it and reports the time and the memory growth.
+if (process.argv[2] === '--resize') {
+  const [, , , engineName, scrollback] = process.argv;
+  const e = await engine(engineName);
+  const { chunks } = corpus('light-cells');
+  const t = e.make(Number(scrollback));
+  await e.feed(t, chunks);
+  for (let i = 0; i < 4; i++) globalThis.gc();
+  const memory = () => e.memory?.() ?? process.memoryUsage().rss;
+  const before = memory();
+  const start = performance.now();
+  for (let i = 0; i < RESIZES; i++) e.resize(t, i % 2 === 0 ? 100 : COLS, ROWS);
+  const ms = (performance.now() - start) / RESIZES;
+  for (let i = 0; i < 4; i++) globalThis.gc();
+  process.stdout.write(JSON.stringify({ ms, grew: memory() - before }));
   process.exit(0);
 }
 
@@ -153,7 +190,21 @@ for (const caseName of Object.keys(CASES)) {
   if (distinct.size > 1) console.log(`  ! ${caseName}: last row differs between engines`, lasts);
 }
 
+const resizes = [];
+for (const scrollback of RESIZE_SCROLLBACKS) {
+  for (const engineName of ENGINES) {
+    const child = spawnSync(process.execPath, ['--expose-gc', fileURLToPath(import.meta.url), '--resize', engineName, String(scrollback)], { encoding: 'utf8' });
+    if (child.status !== 0) {
+      console.log(`resize ${scrollback} ${engineName}: failed`, child.stderr);
+      continue;
+    }
+    const { ms, grew } = JSON.parse(child.stdout);
+    resizes.push({ scrollback, engine: engineName, msPerResize: +ms.toFixed(1), grewMiB: +(grew / 1048576).toFixed(1) });
+    console.log(`resize ${String(scrollback).padStart(6)}    ${engineName.padEnd(15)} ${ms.toFixed(1).padStart(6)} ms/resize  memory +${resizes.at(-1).grewMiB} MiB`);
+  }
+}
+
 const out = process.argv[2];
 if (out) {
-  writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), node: process.version, platform: platform(), arch: arch(), cpu: cpus()[0]?.model, cols: COLS, rows: ROWS, scrollback: SCROLLBACK, bytesPerCase: SIZE, chunk: CHUNK, runs: RUNS, results }, null, 2));
+  writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), node: process.version, platform: platform(), arch: arch(), cpu: cpus()[0]?.model, cols: COLS, rows: ROWS, scrollback: SCROLLBACK, bytesPerCase: SIZE, chunk: CHUNK, runs: RUNS, results, resizes }, null, 2));
 }
