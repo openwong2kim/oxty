@@ -698,6 +698,14 @@ impl Engine {
         }
     }
 
+    /// The host's focus, for the report xterm.js sends when the program turns on focus events (`CSI ? 1004 h`):
+    /// each time the mode is set, `CSI I` (focused) or `CSI O` joins [`Engine::take_replies`] right there, in order
+    /// with the other replies. `None`, the default, sends nothing, as `@xterm/headless` does. The host still sends
+    /// the reports for focus changes itself.
+    pub fn set_focus(&mut self, focused: Option<bool>) {
+        self.term.set_focus_report(focused);
+    }
+
     /// Behaves as xterm.js 6.1 does with `windowsPty` set to `pty` (the default is none): with a backend or build,
     /// more rows are added blank at the bottom instead of bringing scrollback back; with a build that is not
     /// conpty 21376 or later, resizing does not reflow; with conpty before 21376, a line feed or `CSI H` marks the

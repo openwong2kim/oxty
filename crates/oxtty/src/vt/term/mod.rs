@@ -356,6 +356,10 @@ pub struct Term<T> {
 
     /// Config directly for the terminal.
     config: Config,
+
+    /// oxtty: the host's focus, reported when the program sets focus events (`CSI ? 1004 h`), as xterm.js does.
+    /// `None` reports nothing (upstream).
+    focus_report: Option<bool>,
 }
 
 /// Configuration options for the [`Term`].
@@ -536,6 +540,7 @@ impl<T> Term<T> {
             event_proxy,
             damage,
             config,
+            focus_report: None,
             grid,
             tabs,
             inactive_keyboard_mode_stack: Default::default(),
@@ -1207,6 +1212,11 @@ impl<T> Term<T> {
         self.config.windows_wrap_heuristic = windows_wrap_heuristic;
         self.grid.set_grow_blank(!grow_from_history);
         self.inactive_grid.set_grow_blank(!grow_from_history);
+    }
+
+    /// oxtty: sets the focus reported when the program sets focus events (`None`: no report).
+    pub fn set_focus_report(&mut self, focused: Option<bool>) {
+        self.focus_report = focused;
     }
 
     /// oxtty: the modes a reset of mouse tracking mode `mode` clears (all tracking with `xterm_mouse_modes`).
@@ -2451,7 +2461,14 @@ impl<T: EventListener> Handler for Term<T> {
                 self.mode.insert(TermMode::MOUSE_MOTION);
                 self.event_proxy.send_event(Event::MouseCursorDirty);
             },
-            NamedPrivateMode::ReportFocusInOut => self.mode.insert(TermMode::FOCUS_IN_OUT),
+            NamedPrivateMode::ReportFocusInOut => {
+                self.mode.insert(TermMode::FOCUS_IN_OUT);
+                // oxtty: xterm.js reports the current focus each time the mode is set.
+                if let Some(focused) = self.focus_report {
+                    let report = if focused { "\x1b[I" } else { "\x1b[O" };
+                    self.event_proxy.send_event(Event::PtyWrite(report.into()));
+                }
+            },
             NamedPrivateMode::BracketedPaste => self.mode.insert(TermMode::BRACKETED_PASTE),
             // Mouse encodings are mutually exclusive.
             NamedPrivateMode::SgrMouse => {

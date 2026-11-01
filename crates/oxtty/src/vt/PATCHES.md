@@ -191,6 +191,9 @@ single crate.
   a row that is not reflowed keeps `WRAPLINE` on its new last cell
   (`Row::resize_keeping_wrap`), as xterm.js keeps a line's wrapped flag; this
   also applies to the alternate screen.
+- `Term::set_focus_report` gives the host's focus; with it, setting private
+  mode 1004 sends `CSI I` or `CSI O` as a `PtyWrite` each time, as xterm.js
+  reports focus when the mode is set. Unset (upstream), nothing is sent.
 
 These changes are compatibility policy, not upstream behaviour.
 
