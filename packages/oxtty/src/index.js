@@ -4,6 +4,9 @@
 const ABI = 4;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+// Input buffer: smallest allocation, and the largest one kept between writes.
+const IN_MIN = 4096;
+const IN_KEEP = 256 * 1024;
 
 /** @type {any} */
 let wasm = null;
@@ -138,21 +141,45 @@ export class Terminal {
   /** Feeds program output. Strings are encoded as UTF-8. */
   write(data) {
     const h = this.#handle();
-    const bytes = typeof data === 'string' ? encoder.encode(data) : data;
-    if (!bytes.length) return;
-    wasm.oxtty_feed(h, this.#stage(bytes), bytes.length);
+    if (typeof data === 'string') {
+      if (!data.length) return;
+      // UTF-8 is at most 3 bytes per UTF-16 unit: encode straight into linear memory.
+      const ptr = this.#reserve(data.length * 3);
+      const { written } = encoder.encodeInto(data, new Uint8Array(wasm.memory.buffer, ptr, data.length * 3));
+      wasm.oxtty_feed(h, ptr, written);
+    } else {
+      if (!data.length) return;
+      wasm.oxtty_feed(h, this.#stage(data), data.length);
+    }
+    this.#shrinkInput();
     this.#armSync();
   }
 
-  // Copies bytes into the reusable input buffer in linear memory.
-  #stage(bytes) {
-    if (bytes.length > this.#inCap) {
+  // The reusable input buffer in linear memory, grown to at least `len` bytes.
+  #reserve(len) {
+    if (len > this.#inCap) {
       if (this.#inPtr) wasm.oxtty_free(this.#inPtr, this.#inCap);
-      this.#inCap = Math.max(bytes.length, 4096);
+      this.#inCap = Math.max(len, IN_MIN);
       this.#inPtr = wasm.oxtty_alloc(this.#inCap);
     }
-    new Uint8Array(wasm.memory.buffer, this.#inPtr, bytes.length).set(bytes);
     return this.#inPtr;
+  }
+
+  // Copies bytes into the input buffer.
+  #stage(bytes) {
+    const ptr = this.#reserve(bytes.length);
+    new Uint8Array(wasm.memory.buffer, ptr, bytes.length).set(bytes);
+    return ptr;
+  }
+
+  // A buffer grown for one large write goes back, so the next small write
+  // does not keep it allocated.
+  #shrinkInput() {
+    if (this.#inCap > IN_KEEP) {
+      wasm.oxtty_free(this.#inPtr, this.#inCap);
+      this.#inPtr = 0;
+      this.#inCap = 0;
+    }
   }
 
   // Synchronized output (CSI ? 2026 h) holds the screen until the program

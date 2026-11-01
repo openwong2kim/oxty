@@ -498,3 +498,15 @@ fn clipboard_requests_wait_for_host_access_and_replies_use_the_xterm_addon_forma
         "\x1b]52;p;7ZWc6riA\x07"
     );
 }
+
+#[test]
+fn replies_stop_growing_when_the_host_never_takes_them() {
+    let mut t = term();
+    let flood = b"\x1b[6n".repeat(200_000);
+    t.feed(&flood);
+    let replies = t.take_replies();
+    assert!(replies.len() <= oxtty::MAX_REPLIES);
+    assert!(replies.ends_with(b"R"), "only whole replies are kept");
+    t.feed(b"\x1b[6n");
+    assert_eq!(t.take_replies(), b"\x1b[1;1R");
+}

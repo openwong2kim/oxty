@@ -21,7 +21,7 @@
 //! built into this crate as [`vt`] (see `src/vt/PATCHES.md`).
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 // 내장 Alacritty 포크. 원본 서식을 유지해 업그레이드 diff를 작게 한다.
@@ -203,8 +203,13 @@ impl From<ClipboardType> for Clipboard {
 /// foreground, background and cursor, as `0xRRGGBB`.
 pub const COLOR_SLOTS: usize = 259;
 
-/// 호스트가 답하지 않은 클립보드 읽기·쓰기를 이만큼만 들고 있는다(오래된 것부터 버림).
+/// Unanswered clipboard reads and untaken writes kept at most (oldest dropped first).
 const CLIPBOARD_QUEUE: usize = 16;
+
+/// Cap on reply bytes the host has not taken. Past it, new replies are dropped
+/// whole (a program sending `CSI 6n` forever to a host that never calls
+/// [`Engine::take_replies`]).
+pub const MAX_REPLIES: usize = 1 << 20;
 
 type ClipboardFormatter = Arc<dyn Fn(&str) -> String + Sync + Send>;
 type ColorFormatter = Arc<dyn Fn(Rgb) -> String + Sync + Send>;
@@ -235,11 +240,26 @@ fn push_bounded<T>(queue: &mut VecDeque<T>, item: T) {
 #[derive(Clone, Default)]
 struct Listener(Arc<Mutex<Inbox>>);
 
+impl Listener {
+    // A poisoned lock (a panic elsewhere) keeps its contents usable, as TermHistory::lock does.
+    fn inbox(&self) -> MutexGuard<'_, Inbox> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl Inbox {
+    fn reply(&mut self, bytes: &[u8]) {
+        if self.replies.len() + bytes.len() <= MAX_REPLIES {
+            self.replies.extend_from_slice(bytes);
+        }
+    }
+}
+
 impl EventListener for Listener {
     fn send_event(&self, event: Event) {
-        let Ok(mut inbox) = self.0.lock() else { return };
+        let mut inbox = self.inbox();
         match event {
-            Event::PtyWrite(text) => inbox.replies.extend_from_slice(text.as_bytes()),
+            Event::PtyWrite(text) => inbox.reply(text.as_bytes()),
             Event::Title(title) => inbox.title = Some(title),
             Event::ResetTitle => inbox.title = Some(String::new()),
             Event::Bell => inbox.bells = inbox.bells.saturating_add(1),
@@ -718,44 +738,39 @@ impl Engine {
     /// Bytes the terminal wants written back to the program (device status
     /// and attribute reports, …). Send them to the PTY.
     pub fn take_replies(&mut self) -> Vec<u8> {
-        self.inbox
-            .0
-            .lock()
-            .map(|mut i| std::mem::take(&mut i.replies))
-            .unwrap_or_default()
+        std::mem::take(&mut self.inbox.inbox().replies)
     }
 
     /// The new window title if it changed since the last call (`""` = reset).
     pub fn take_title(&mut self) -> Option<String> {
-        self.inbox.0.lock().ok().and_then(|mut i| i.title.take())
+        self.inbox.inbox().title.take()
     }
 
     /// Lets the program read and/or write the host's clipboards with OSC 52.
     /// Both are off by default; requests that arrive while off are dropped.
     pub fn set_clipboard_access(&mut self, read: bool, write: bool) {
-        if let Ok(mut inbox) = self.inbox.0.lock() {
-            inbox.clipboard_read = read;
-            inbox.clipboard_write = write;
-            if !read {
-                inbox.clipboard_reads.clear();
-                inbox.clipboard_pending.clear();
-            }
-            if !write {
-                inbox.clipboard_writes.clear();
-            }
+        let mut inbox = self.inbox.inbox();
+        inbox.clipboard_read = read;
+        inbox.clipboard_write = write;
+        if !read {
+            inbox.clipboard_reads.clear();
+            inbox.clipboard_pending.clear();
+        }
+        if !write {
+            inbox.clipboard_writes.clear();
         }
     }
 
     /// The oldest text the program asked to put on a clipboard (OSC 52) that
     /// the host has not taken yet. Invalid base64 is ignored.
     pub fn take_clipboard_write(&mut self) -> Option<(Clipboard, String)> {
-        self.inbox.0.lock().ok()?.clipboard_writes.pop_front()
+        self.inbox.inbox().clipboard_writes.pop_front()
     }
 
     /// The oldest clipboard read (OSC 52 `?`) the host has not taken yet.
     /// Answer it with [`Engine::reply_clipboard`].
     pub fn take_clipboard_read(&mut self) -> Option<Clipboard> {
-        self.inbox.0.lock().ok()?.clipboard_reads.pop_front()
+        self.inbox.inbox().clipboard_reads.pop_front()
     }
 
     /// Answers the oldest unanswered read of `clipboard` with `text`. The
@@ -763,25 +778,19 @@ impl Engine {
     /// sends it (`OSC 52 ; Pc ; base64 BEL`). Returns `false` when no read of
     /// that clipboard is waiting.
     pub fn reply_clipboard(&mut self, clipboard: Clipboard, text: &str) -> bool {
-        let Ok(mut inbox) = self.inbox.0.lock() else {
-            return false;
-        };
-        let Some(at) = inbox
+        let mut inbox = self.inbox.inbox();
+        let at = inbox
             .clipboard_pending
             .iter()
-            .position(|(c, _)| *c == clipboard)
-        else {
+            .position(|(c, _)| *c == clipboard);
+        let Some((_, format)) = at.and_then(|at| inbox.clipboard_pending.remove(at)) else {
             return false;
         };
-        let (_, format) = inbox
-            .clipboard_pending
-            .remove(at)
-            .expect("position is in range");
         let mut reply = format(text);
         if let Some(body) = reply.strip_suffix("\x1b\\") {
             reply = format!("{body}\x07");
         }
-        inbox.replies.extend_from_slice(reply.as_bytes());
+        inbox.reply(reply.as_bytes());
         true
     }
 
@@ -796,10 +805,8 @@ impl Engine {
 
     // 쌓인 색 질의에 답을 질의가 온 자리에 끼워 넣는다. 뒤에서부터 넣어 앞 위치가 밀리지 않게 한다.
     fn answer_color_queries(&mut self) {
-        let inbox = self.inbox.clone();
-        let Ok(mut inbox) = inbox.0.lock() else {
-            return;
-        };
+        let listener = self.inbox.clone();
+        let mut inbox = listener.inbox();
         let queries = std::mem::take(&mut inbox.color_queries);
         let Some(colors) = &self.colors else { return };
         for (at, index, format) in queries.into_iter().rev() {
@@ -816,17 +823,15 @@ impl Engine {
             if let Some(body) = reply.strip_suffix('\x07') {
                 reply = format!("{body}\x1b\\");
             }
-            inbox.replies.splice(at..at, reply.into_bytes());
+            if inbox.replies.len() + reply.len() <= MAX_REPLIES {
+                inbox.replies.splice(at..at, reply.into_bytes());
+            }
         }
     }
 
     /// Bells (`BEL`) received since the last call.
     pub fn take_bells(&mut self) -> u32 {
-        self.inbox
-            .0
-            .lock()
-            .map(|mut i| std::mem::take(&mut i.bells))
-            .unwrap_or(0)
+        std::mem::take(&mut self.inbox.inbox().bells)
     }
 
     /// A synchronized update is holding output back. Call
