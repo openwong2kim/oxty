@@ -217,7 +217,7 @@
     },
     "Terminal.registerMarker": {
       "status": "later",
-      "reason": "Markers need line tracking through scrollback trimming."
+      "reason": "The engine tracks markers (Terminal.addMarker/markerLine); the Rust front end does not expose them yet."
     },
     "Terminal.markers": {
       "status": "later",
@@ -373,7 +373,7 @@
     },
     "SearchAddon.findNext/findPrevious/clearDecorations": {
       "status": "later",
-      "reason": "Search moves into the engine; loadAddon throws until then."
+      "reason": "The engine searches (Terminal.searchNext/searchPrevious/searchLine); the Rust front end has no SearchAddon yet, so loadAddon throws."
     },
     "SerializeAddon.serialize": {
       "status": "unsupported",
