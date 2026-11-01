@@ -89,6 +89,21 @@ scrollback, oxtty (wasm) against `@xterm/headless`.
 | Hangul lines | 32 MiB | 143 MiB |
 | A different colour in every cell | 24 MiB | 24 MiB |
 
+**Parser throughput** — MiB/s, higher is better. Node 22 on an Apple M4,
+120×40 with 10,000 lines of scrollback, 8 MiB of generated output per row fed
+in 64 KiB chunks, median of 5 runs. All three end on the same screen.
+`node --expose-gc packages/oxtty/bench/throughput.mjs` reproduces it after
+building the wasm and N-API modules.
+
+| Output | oxtty native | oxtty wasm | xterm.js headless |
+| --- | ---: | ---: | ---: |
+| Log lines, some colour | 116 | 72 | 98 |
+| Truecolor fg and bg in every cell | 252 | 142 | 143 |
+| Hangul, CJK and emoji | 102 | 73 | 100 |
+| Cursor jumps (TUI redraw) | 194 | 128 | 113 |
+| Scrolling region (DECSTBM) | 164 | 112 | 41 |
+| Short lines into scrollback | 103 | 59 | 60 |
+
 **Compressed history outside the engine** — with
 [`TermHistory`](#compressed-history-for-your-own-term), replaying an 8 MB
 output ring into 100,000 lines of scrollback peaked at 11 MiB, against 143 MiB
