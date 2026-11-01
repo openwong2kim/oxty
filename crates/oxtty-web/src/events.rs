@@ -38,11 +38,12 @@ pub(crate) enum Event {
     BufferChange,
     UserInput,
     DimensionsChange,
+    SelectionChange,
 }
 
 impl Event {
     /// In discriminant order: the bound function carries the index.
-    const ALL: [Event; 12] = [
+    const ALL: [Event; 13] = [
         Event::Data,
         Event::Binary,
         Event::Resize,
@@ -55,6 +56,7 @@ impl Event {
         Event::BufferChange,
         Event::UserInput,
         Event::DimensionsChange,
+        Event::SelectionChange,
     ];
 
     fn emitter(self, e: &Emitters) -> &Rc<Emitter> {
@@ -71,6 +73,7 @@ impl Event {
             Event::BufferChange => &e.buffer_change,
             Event::UserInput => &e.user_input,
             Event::DimensionsChange => &e.dimensions_change,
+            Event::SelectionChange => &e.selection_change,
         }
     }
 }

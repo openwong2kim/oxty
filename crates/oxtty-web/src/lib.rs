@@ -36,6 +36,7 @@ pub mod markers;
 pub mod options;
 pub mod render;
 pub mod search;
+mod selection;
 pub mod state;
 pub mod terminal;
 pub mod timer;

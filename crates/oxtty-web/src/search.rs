@@ -13,8 +13,8 @@
 //! Memory: an addon keeps its term, its options and, with decorations, the matches (up to `highlightLimit`, 16 bytes
 //! each), in rows that stay put as the scrollback trims. Lines are read for one search and dropped.
 //!
-//! There is no selection module yet: the selected match is kept here, drawn with `Renderer::set_selection`, and is
-//! what the next search starts from (xterm.js reads `getSelectionPosition`). The selection module takes it over.
+//! The selected match is the terminal's selection (`select`), and the next search starts from the selection, whatever
+//! made it (`getSelectionPosition`), like the addon.
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -25,7 +25,7 @@ use wasm_bindgen::JsCast;
 use crate::emitter::{Disposable, Emitter};
 use crate::engine::{get, Engine};
 use crate::events;
-use crate::render::{Highlight, SelectionRange};
+use crate::render::Highlight;
 use crate::terminal::{Shared, Terminal};
 use crate::timer;
 
@@ -151,7 +151,7 @@ impl Hit {
     }
 }
 
-/// xterm.js `getSelectionPosition` of a selected match: buffer cells, end exclusive.
+/// The terminal's `getSelectionPosition()`: buffer cells, end exclusive.
 #[derive(Clone, Copy)]
 struct SelectionPosition {
     start: (u32, i32),
@@ -159,24 +159,11 @@ struct SelectionPosition {
 }
 
 impl SelectionPosition {
-    /// xterm.js `select(col, row, size)` followed by `getSelectionPosition()` (SelectionModel.finalSelectionEnd).
-    fn of(hit: Hit, trimmed: f64, cols: u32) -> Option<Self> {
-        let row = hit.row - trimmed;
-        if row < 0.0 || hit.size == 0 || cols == 0 {
-            return None;
-        }
-        let row = row as i32;
-        let sum = hit.col.saturating_add(hit.size);
-        let end = if sum <= cols {
-            (sum, row)
-        } else if sum % cols == 0 {
-            (cols, row + (sum / cols) as i32 - 1)
-        } else {
-            (sum % cols, row + (sum / cols) as i32)
-        };
+    fn of(shared: &Rc<Shared>) -> Option<Self> {
+        let (start, end) = crate::selection::selection_position(shared)?;
         Some(Self {
-            start: (hit.col, row),
-            end,
+            start: (start[0] as u32, start[1] as i32),
+            end: (end[0] as u32, end[1] as i32),
         })
     }
 }
@@ -562,8 +549,6 @@ struct Inner {
     /// The active match (the selected decoration).
     active: Option<Hit>,
     colors: Option<Decorations>,
-    /// The selected match, until there is a selection module.
-    selection: Option<Hit>,
     /// The renderer was last given something to draw.
     painted: bool,
 }
@@ -770,62 +755,56 @@ impl SearchState {
         forward: bool,
         no_scroll: bool,
     ) -> Result<(bool, Option<i32>), JsValue> {
+        let terminal = Terminal {
+            shared: shared.clone(),
+        };
         if term.length() == 0 {
-            self.inner.borrow_mut().selection = None;
+            terminal.clear_selection();
             self.clear_decorations(false);
             return Ok((false, None));
         }
-        let core = shared.core.borrow();
-        if core.disposed {
-            return Ok((false, None));
-        }
-        let engine = core.view.engine();
-        let (trimmed, cols) = (engine.trimmed_lines(), engine.cols());
-        let (selection, same_term) = {
-            let mut inner = self.inner.borrow_mut();
-            let selection = inner
-                .selection
-                .take()
-                .and_then(|hit| SelectionPosition::of(hit, trimmed, cols));
-            (selection, inner.cached_term.as_ref() == Some(term))
+        // `findNextWithSelection`/`findPreviousWithSelection` read the selection, then clear it.
+        let selection = SelectionPosition::of(shared);
+        terminal.clear_selection();
+        let (found, trimmed, rows, viewport_y) = {
+            let core = shared.core.borrow();
+            if core.disposed {
+                return Ok((false, None));
+            }
+            let engine = core.view.engine();
+            let same_term = self.inner.borrow().cached_term.as_ref() == Some(term);
+            let mut search = Search::new(engine, term, options)?;
+            let found = if forward {
+                search.find_next(selection, same_term)?
+            } else {
+                search.find_previous(selection, same_term)?
+            };
+            let viewport_y = engine.history_length() as i32 - engine.display_offset() as i32;
+            (
+                found,
+                engine.trimmed_lines(),
+                engine.rows() as i32,
+                viewport_y,
+            )
         };
-        let mut search = Search::new(engine, term, options)?;
-        let found = if forward {
-            search.find_next(selection, same_term)?
-        } else {
-            search.find_previous(selection, same_term)?
-        };
-        let mut inner = self.inner.borrow_mut();
-        inner.active = None;
+        // `_selectResult`
+        self.inner.borrow_mut().active = None;
         let Some(found) = found else {
+            terminal.clear_selection();
             return Ok((false, None));
         };
-        let hit = Hit::new(found, trimmed);
-        inner.selection = Some(hit);
+        terminal.select(found.col.into(), found.row.into(), found.size.into());
         if options.decorations.is_some() {
-            inner.active = Some(hit);
+            let mut inner = self.inner.borrow_mut();
+            inner.active = Some(Hit::new(found, trimmed));
             inner.colors = options.decorations.clone();
         }
-        let rows = engine.rows() as i32;
-        let viewport_y = engine.history_length() as i32 - engine.display_offset() as i32;
         let scroll = (!no_scroll && (found.row >= viewport_y + rows || found.row < viewport_y))
             .then(|| found.row - viewport_y - rows / 2);
         Ok((true, scroll))
     }
 
-    /// The selected match as `getSelectionPosition` reports it.
-    fn selection_position(&self) -> Option<SelectionPosition> {
-        let shared = self.terminal()?;
-        let core = shared.core.try_borrow().ok()?;
-        if core.disposed {
-            return None;
-        }
-        let engine = core.view.engine();
-        let hit = self.inner.borrow().selection?;
-        SelectionPosition::of(hit, engine.trimmed_lines(), engine.cols())
-    }
-
-    /// Hands the decorations in view and the selected match to the renderer.
+    /// Hands the decorations in view to the renderer.
     fn paint(&self) {
         let Some(shared) = self.terminal() else {
             return;
@@ -879,37 +858,13 @@ impl SearchState {
                 );
             }
         }
-        let selection = inner
-            .selection
-            .and_then(|hit| SelectionPosition::of(hit, trimmed, cols))
-            .and_then(|s| {
-                let top = viewport_y as i32;
-                let (start_y, end_y) = (s.start.1 - top, s.end.1 - top);
-                if end_y < 0 || start_y >= rows as i32 {
-                    return None;
-                }
-                Some(SelectionRange {
-                    start: if start_y < 0 {
-                        (0, 0)
-                    } else {
-                        (s.start.0, start_y as u32)
-                    },
-                    end: if end_y >= rows as i32 {
-                        (cols, rows - 1)
-                    } else {
-                        (s.end.0, end_y as u32)
-                    },
-                    column_select: false,
-                })
-            });
-        let painted = !highlights.is_empty() || selection.is_some();
+        let painted = !highlights.is_empty();
         if !painted && !inner.painted {
             return;
         }
         inner.painted = painted;
         let renderer = core.renderer.as_mut().unwrap();
         renderer.set_highlights("search", highlights);
-        renderer.set_selection(selection);
         drop(core);
         drop(inner);
         shared.schedule_frame();
@@ -1039,24 +994,6 @@ impl SearchAddon {
     #[wasm_bindgen(getter, js_name = __oxttySearchAddon, skip_typescript)]
     pub fn marker(&self) -> u32 {
         self.state.id
-    }
-
-    /// Internal, for the tests until the selection module exists: `getSelectionPosition()` of the selected match.
-    #[wasm_bindgen(getter, js_name = __selectionPosition, skip_typescript)]
-    pub fn selection_position(&self) -> JsValue {
-        let Some(s) = self.state.selection_position() else {
-            return JsValue::UNDEFINED;
-        };
-        let point = |(x, y): (u32, i32)| {
-            let o = Object::new();
-            let _ = Reflect::set(&o, &"x".into(), &x.into());
-            let _ = Reflect::set(&o, &"y".into(), &y.into());
-            o
-        };
-        let o = Object::new();
-        let _ = Reflect::set(&o, &"start".into(), &point(s.start));
-        let _ = Reflect::set(&o, &"end".into(), &point(s.end));
-        o.into()
     }
 }
 

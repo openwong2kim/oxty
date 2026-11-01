@@ -44,7 +44,7 @@ Object.assign(window, {
     } catch (e) {
       value = `throws ${e.name}`;
     }
-    const position = k === 0 ? addons[0].__selectionPosition : t.getSelectionPosition();
+    const position = t.getSelectionPosition();
     return { method, args: JSON.stringify(args), value: value ?? null, position: position ?? null, viewportY: t.buffer.active.viewportY };
   })),
   /** `onDidChangeResults` events since the last call. */

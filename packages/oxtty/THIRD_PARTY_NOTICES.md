@@ -167,3 +167,18 @@ in https://github.com/openwong2kim/oxtty) is a Rust port of `@xterm/addon-search
 `SearchResultTracker.ts`, Copyright (c) 2017 The xterm.js authors, under the MIT
 license reproduced in the input encoding section above.
 Source: https://github.com/xtermjs/xterm.js
+
+---
+
+## xterm.js 6.1.0-beta.336 — selection
+
+The selection of `dist/xterm_web_bg.wasm` (`crates/oxtty-web/src/selection` in
+https://github.com/openwong2kim/oxtty) is a Rust port of xterm.js 6.1.0-beta.336
+(commit 08829c7eb6279dda2a9e86df901353a1a89858ca):
+`src/browser/services/SelectionService.ts`,
+`src/browser/selection/SelectionModel.ts` and parts of `src/browser/Clipboard.ts`,
+`src/browser/CoreBrowserTerminal.ts`, `src/common/buffer/Buffer.ts` and
+`src/common/buffer/BufferRange.ts`, Copyright (c) 2014-2021 The xterm.js
+authors, under the MIT license reproduced in the input encoding section above.
+Each Rust file names its source lines.
+Source: https://github.com/xtermjs/xterm.js

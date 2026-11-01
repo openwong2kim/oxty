@@ -60,6 +60,17 @@ its source lines.
 and `SearchResultTracker.ts`, Copyright (c) 2017 The xterm.js authors, MIT
 license (`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
 
+## xterm.js selection
+
+`crates/oxtty-web/src/selection` is a Rust port of xterm.js 6.1.0-beta.336
+(commit 08829c7eb6279dda2a9e86df901353a1a89858ca):
+`src/browser/services/SelectionService.ts`,
+`src/browser/selection/SelectionModel.ts` and parts of `src/browser/Clipboard.ts`,
+`src/browser/CoreBrowserTerminal.ts`, `src/common/buffer/Buffer.ts` and
+`src/common/buffer/BufferRange.ts`, Copyright (c) 2014-2021 The xterm.js
+authors, MIT license (`crates/oxtty/LICENSE-XTERM`). Each file names its source
+lines.
+
 ## wmux
 
 The engine integration started in
