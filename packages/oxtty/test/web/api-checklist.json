@@ -33,7 +33,7 @@
     },
     "options.cursorStyle": {
       "status": "supported",
-      "reason": "Renderer option, get/set at runtime: block, underline or bar, drawn like @xterm/addon-webgl 6.0; cursorInactiveStyle while unfocused."
+      "reason": "Renderer option, get/set at runtime: block, underline or bar (unless the program set one with DECSCUSR), drawn like @xterm/addon-webgl 6.0; cursorInactiveStyle while unfocused."
     },
     "options.fontSize": {
       "status": "supported",
@@ -429,16 +429,19 @@
       "reason": "With the image addon."
     },
     "DOM .xterm": {
-      "status": "todo",
-      "reason": "Root element classes terminal xterm."
+      "status": "supported",
+      "reason": "Built by open().",
+      "exercisedBy": "\\.terminal\\.xterm|\\.xterm-screen"
     },
     "DOM .xterm-screen": {
-      "status": "todo",
-      "reason": "Holds the canvas, sized to it."
+      "status": "supported",
+      "reason": "Built by open(); sized to the canvas.",
+      "exercisedBy": "\\.xterm-screen"
     },
     "DOM .xterm-helpers": {
-      "status": "todo",
-      "reason": "Holds the textarea and the composition view."
+      "status": "supported",
+      "reason": "Built by open().",
+      "exercisedBy": "xterm-helpers"
     },
     "DOM .xterm-helper-textarea": {
       "status": "todo",
@@ -457,8 +460,9 @@
       "reason": "open() injects its own styles; drop the import."
     },
     "Element reparenting (park and re-append)": {
-      "status": "todo",
-      "reason": "The element can be moved; open() again also moves it."
+      "status": "supported",
+      "reason": "open() again with another parent moves the element; the renderer keeps drawing.",
+      "exercisedBy": "park and re-append"
     },
     "Synthetic mouse events on .xterm-screen": {
       "status": "todo",
