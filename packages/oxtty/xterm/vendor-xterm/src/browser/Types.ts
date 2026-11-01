@@ -6,14 +6,16 @@
  */
 
 // oxtty excerpt: only IColorSet, ReadonlyColorSet, IColorContrastCache and DEFAULT_ANSI_COLORS, cut out verbatim (lines 58-88, 180-226).
-// ITerminal is a stub holding only the members SelectionRenderModel uses, instead of the xterm.js internal terminal (dozens of members).
+// ITerminal is a stub holding only the members SelectionRenderModel and CharAtlasCache use, instead of the xterm.js internal terminal (dozens of members).
 import { IColor } from 'common/Types';
 import { channels, css } from 'common/Color';
+import { IUnicodeService } from 'common/services/Services';
 
 // [oxtty stub] The original extends InternalPassthroughApis & ICoreTerminal.
 export interface ITerminal {
   rows: number;
   buffers: { active: { ydisp: number } };
+  unicodeService: IUnicodeService;
 }
 
 export interface IColorSet {

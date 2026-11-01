@@ -56,7 +56,11 @@ single crate.
   vte routes IND and NEL through `linefeed` as well, so they also end a
   continuation there, unlike xterm. A restored cursor (DECRC, `CSI u`,
   1048, 1049) drops its pending wrap one column on, clamped to the screen,
-  as xterm.js `restoreCursor` does. `oxtty::Engine` turns it on.
+  as xterm.js `restoreCursor` does. ECH, DCH and ICH also end a pending
+  wrap (xterm.js clamps its cursor, one past the edge, back onto the last
+  column first). ED0 in a pending wrap leaves the cursor row alone, as EL0
+  does, and ED1 with the cursor on line 1 erases line 0 too (upstream only
+  resets the rows above from line 2). `oxtty::Engine` turns it on.
 - Writing over a right half blanks the cell to its left only when that cell
   is the left half, so a wide char a resize clipped in the last column (or a
   lone right half) does not take its neighbour with it.
@@ -70,6 +74,10 @@ single crate.
   `term::Config::store_tabs` (`false`: a tab no longer writes `'\t'` into the
   first blank cell it passes) and `term::Config::sgr21_double_underline`
   (vte reports SGR 21 as `Attr::CancelBold`; read it as a double underline).
+- `term::Config::xterm_device_attributes`, off (upstream) by default and
+  turned on by `oxtty::Engine`, answers DA1 with `CSI ? 1 ; 2 c` and DA2 with
+  `CSI > 0 ; 276 ; 0 c` as xterm.js does, instead of `CSI ? 6 c` and
+  Alacritty's version.
 - `Term::soft_reset` is DECSTR (`CSI ! p`), which vte drops. It resets what
   xterm.js `softReset` does: cursor shown, IRM/DECOM/DECCKM/DECKPAM, bracketed
   paste and focus reports off, autowrap on, full scroll region, default pen

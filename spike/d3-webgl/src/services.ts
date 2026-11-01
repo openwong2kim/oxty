@@ -6,7 +6,7 @@ import { ColorContrastCache } from 'browser/ColorContrastCache';
 import { css, color } from 'common/Color';
 import { IDecorationService, IOptionsService, IUnicodeService } from 'common/services/Services';
 import { Emitter } from 'vs/base/common/event';
-import type { ITerminalOptions } from '@xterm/xterm';
+import type { IDisposable, ITerminalOptions } from '@xterm/xterm';
 
 // Renderer options. Follows the xterm.js defaults, with only the font changed.
 export const terminalOptions: Required<ITerminalOptions> & { rescaleOverlappingGlyphs: boolean } = {
@@ -20,11 +20,15 @@ export const terminalOptions: Required<ITerminalOptions> & { rescaleOverlappingG
   allowTransparency: false,
   drawBoldTextInBrightColors: true,
   minimumContrastRatio: 1,
-  rescaleOverlappingGlyphs: false
+  rescaleOverlappingGlyphs: false,
+  theme: {}
 };
 
 export class OptionsServiceStub implements IOptionsService {
   public readonly rawOptions = terminalOptions;
+  // Options never change in the spike.
+  public onSpecificOptionChange(): IDisposable { return { dispose() {} }; }
+  public onMultipleOptionChange(): IDisposable { return { dispose() {} }; }
 }
 
 // The renderer decides the theme (oxtty D2). The palette is xterm.js DEFAULT_ANSI_COLORS as is.
@@ -83,5 +87,6 @@ export class DecorationServiceStub implements IDecorationService {
 
 export class CoreBrowserServiceStub implements ICoreBrowserService {
   public readonly isFocused = true;
+  public readonly window = window;
   constructor(public readonly dpr: number) {}
 }
