@@ -115,7 +115,7 @@ Hangul lines. In the browser benchmark, CPU time including rendering was
 still lower than xterm.js's.
 
 Reproduce the browser numbers with `node bench/run.mjs out.json` in
-`spike/d3-webgl` (see its [README](spike/d3-webgl/README.md#렌더러-벤치)).
+`spike/d3-webgl` (see its [README](spike/d3-webgl/README.md#renderer-bench)).
 
 ## Quick start
 

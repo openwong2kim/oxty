@@ -1,129 +1,129 @@
-# D3 검증 스파이크: xterm.js WebGL 부품으로 oxtty 행 그리기
+# D3 validation spike: drawing oxtty rows with xterm.js WebGL parts
 
-PRD §5 D3("얇은 자체 프런트 + xterm.js 부품 차용")가 실제로 되는지 판정하는 스파이크다. xterm.js의 WebGL 렌더러 부품(글리프 텍스처 아틀라스, 글리프·사각형 렌더러, 렌더 모델, 셀 색 해석기)을 떼어 와서, oxtty wasm 엔진의 `rowCells(y)` 출력으로 캔버스에 화면을 그린다.
+This spike decides whether PRD §5 D3 ("a thin in-house front end + borrowed xterm.js parts") actually works. It detaches the parts of the xterm.js WebGL renderer (glyph texture atlas, glyph and rectangle renderers, render model, cell color resolver) and draws a screen on a canvas from the `rowCells(y)` output of the oxtty wasm engine.
 
-## 판정: **D3 확정**
+## Verdict: **D3 confirmed**
 
-- 렌더러 부품 22개 파일(4,646줄)을 복사했고, **19개는 한 글자도 고치지 않았다**. 나머지 3개는 타입 선언 파일에서 필요한 인터페이스만 원문 그대로 잘라 온 발췌본이다. 복사한 코드의 로직은 하나도 고치지 않았다.
-- 딸려 나온 내부 서비스는 5개이고, 각각 실제로 쓰는 멤버가 1~2개였다. 스텁 전체가 112줄이고, 이 중 서비스 인터페이스 스텁은 35줄이다.
-- 버퍼 쪽(`IBufferService`, `BufferLine`, `CellData`, `ICoreService`)과 렌더 서비스 쪽(`IRenderService`, `ICharSizeService`, `ICharacterJoinerService`, `ILinkifier2`)은 **하나도 딸려 오지 않았다**. 경계가 "렌더 모델(`Uint32Array` 셀당 4워드)"에서 깔끔하게 끊긴다.
-- 그래서 xterm.js `WebglRenderer.ts`(679줄)를 대신하는 오케스트레이터 179줄과 셀 변환기 108줄만으로 한글·16/256/RGB 색·속성·넓은 글자 이모지·결합 문자·박스 문자·커서를 그렸다. damage를 읽어 바뀐 줄만 다시 그리는 경로도 확인했다.
+- 22 renderer part files (4,646 lines) were copied, and **19 of them were not changed by a single character**. The other 3 are excerpts of type declaration files, cutting out only the needed interfaces verbatim. None of the copied code's logic was changed.
+- 5 internal services came along, each with 1–2 members actually used. The stubs total 112 lines, of which the service interface stubs are 35 lines.
+- **Nothing came along** from the buffer side (`IBufferService`, `BufferLine`, `CellData`, `ICoreService`) or the render service side (`IRenderService`, `ICharSizeService`, `ICharacterJoinerService`, `ILinkifier2`). The boundary cuts cleanly at "the render model (`Uint32Array`, 4 words per cell)".
+- So with just a 179-line orchestrator replacing xterm.js `WebglRenderer.ts` (679 lines) and a 108-line cell converter, it drew Hangul, 16/256/RGB colors, attributes, wide emoji, combining characters, box characters and the cursor. The path that reads damage and redraws only the changed lines was also confirmed.
 
-## 실행
+## Running
 
 ```sh
 cd spike/d3-webgl
 npm install
-npm run build        # tsc --noEmit → esbuild 번들 → dist/ (oxtty.wasm이 없으면 scripts/build-wasm.sh 실행)
-npm run screenshot   # 로컬 서버 + 시스템 Chrome(headless) → screenshot.png, 콘솔 에러가 있으면 exit 1
+npm run build        # tsc --noEmit → esbuild bundle → dist/ (runs scripts/build-wasm.sh if oxtty.wasm is missing)
+npm run screenshot   # local server + system Chrome (headless) → screenshot.png, exit 1 on any console error
 ```
 
 ![screenshot](screenshot.png)
 
-육안 확인 결과:
-- 한글은 2칸에 맞춰 그려지고, 16색 전경·배경, 256색(큐브·회색조), RGB 배경 그라데이션, RGB·256색 전경 모두 정상이다.
-- bold, italic, underline(한글 2칸 폭 포함), inverse, dim, strike, curly 밑줄이 정상이다. bold+파랑은 `drawBoldTextInBrightColors`에 따라 밝은 파랑으로 그려진다.
-- 😀🎉👍는 2칸에 그려지고 앞뒤 칸 경계가 깨지지 않는다. 결합 문자(é ä ñ)와 박스·블록 문자(CustomGlyphs)도 정상이다.
-- 커서는 블록으로 그려진다. 2차 write 뒤 마지막 줄로 옮겨졌고, 이전 커서 칸은 지워졌다.
-- 예상한 차이: curly 밑줄을 빨강(SGR 58)으로 지정했지만 전경색으로 그려진다. oxtty 셀 형식에 밑줄 색이 없기 때문이다(아래 "엔진 API에 부족했던 점" 1).
+Visual check results:
+- Hangul is drawn to fit 2 cells, and 16-color foreground and background, 256 colors (cube, grayscale), the RGB background gradient, and RGB and 256-color foregrounds are all correct.
+- bold, italic, underline (including the 2-cell width of Hangul), inverse, dim, strike and curly underline are correct. bold+blue is drawn as bright blue per `drawBoldTextInBrightColors`.
+- 😀🎉👍 are drawn in 2 cells without breaking the boundaries with neighboring cells. Combining characters (é ä ñ) and box and block characters (CustomGlyphs) are also correct.
+- The cursor is drawn as a block. After the 2nd write it moved to the last line, and the previous cursor cell was cleared.
+- Expected difference: the curly underline is set to red (SGR 58) but drawn in the foreground color. This is because the oxtty cell format has no underline color (item 1 in "What the engine API lacked" below).
 
-## 렌더러 벤치
+## Renderer bench
 
-같은 바이트를 xterm.js 6.1(WebGL 애드온)과 oxtty(이 렌더러 + `src/WriteQueue.ts`) 패널 N개에 rAF마다 나눠 넣는다. 표본마다 Chrome을 새로 띄우고, 메인 스레드 CPU(CDP `TaskDuration`), 프레임 간격, 렌더러·GPU 프로세스 RSS를 잰다. 두 쪽의 화면 해시가 같아야 한다.
+The same bytes are split across rAF frames into N panels of xterm.js 6.1 (WebGL addon) and of oxtty (this renderer + `src/WriteQueue.ts`). Each sample launches a fresh Chrome and measures main thread CPU (CDP `TaskDuration`), frame intervals, and renderer and GPU process RSS. The screen hashes of both sides must match.
 
 ```sh
 cd spike/d3-webgl/bench && npm install && cd ..
-node bench/run.mjs out.json            # log·tui × 패널 8개, 3회 반복 (--quick, --align)
-node bench/summ.mjs out.json           # 중앙값 요약
-node bench/check.mjs                   # 증분 렌더와 처음부터 그린 화면의 픽셀이 같은지 검사
+node bench/run.mjs out.json            # log·tui × 8 panels, 3 repetitions (--quick, --align)
+node bench/summ.mjs out.json           # median summary
+node bench/check.mjs                   # checks that incremental rendering and a from-scratch render give identical pixels
 ```
 
-`--align`은 TUI 출력을 동기화 블록(`?2026`) 경계에서만 끊는다. 기본 설정처럼 블록 중간에서 끊으면 xterm.js는 rAF 때마다 동기화 중이어서 끝날 때까지 거의 그리지 않는다.
+`--align` cuts TUI output only at synchronized block (`?2026`) boundaries. If it cuts in the middle of a block as in the default setting, xterm.js is mid-sync on every rAF and barely draws until the end.
 
-## xterm.js 출처
+## xterm.js provenance
 
-- 저장소: https://github.com/xtermjs/xterm.js
-- 태그 `6.0.0`, 커밋 `f447274f430fd22513f6adbf9862d19524471c04`
-- 라이선스: MIT, 사본은 [`vendor-xterm/LICENSE`](vendor-xterm/LICENSE)
-- 파일마다 맨 위 2줄에 출처 경로·커밋과 "원문 그대로/발췌" 여부를 적었다. 디렉터리 구조는 원본 경로를 그대로 따른다.
+- Repository: https://github.com/xtermjs/xterm.js
+- Tag `6.0.0`, commit `f447274f430fd22513f6adbf9862d19524471c04`
+- License: MIT, copy in [`vendor-xterm/LICENSE`](vendor-xterm/LICENSE)
+- The top 2 lines of each file record the source path, the commit, and whether it is "verbatim" or an "excerpt". The directory layout follows the original paths.
 
-## 복사한 파일 (22개, 4,646줄. 머리 주석 2줄 제외)
+## Copied files (22, 4,646 lines, excluding the 2-line header comments)
 
-| 파일 | 줄 수 | 상태 | 역할 |
+| File | Lines | Status | Role |
 |---|---:|---|---|
-| `addons/addon-webgl/src/TextureAtlas.ts` | 1138 | 원문 | 글리프 래스터화·아틀라스 페이지 관리 |
-| `addons/addon-webgl/src/CustomGlyphs.ts` | 693 | 원문 | 박스·블록·파워라인 문자 직접 그리기 |
-| `addons/addon-webgl/src/GlyphRenderer.ts` | 390 | 원문 | 글리프 인스턴스 셰이더 |
-| `addons/addon-webgl/src/RectangleRenderer.ts` | 382 | 원문 | 배경·커서 사각형 셰이더 |
-| `addons/addon-webgl/src/CellColorResolver.ts` | 236 | 원문 | inverse·선택·데코레이션 색 해석 |
-| `addons/addon-webgl/src/Types.ts` | 126 | 원문 | 렌더 모델·아틀라스 타입 |
-| `addons/addon-webgl/src/CharAtlasUtils.ts` | 80 | 원문 | 아틀라스 설정 생성 |
-| `addons/addon-webgl/src/WebglUtils.ts` | 63 | 원문 | 셰이더 컴파일 유틸 |
-| `addons/addon-webgl/src/RenderModel.ts` | 41 | 원문 | 렌더 모델(셀당 code·bg·fg·ext) |
-| `addons/addon-webgl/src/Constants.ts` | 12 | 원문 | |
-| `src/common/Color.ts` | 376 | 원문 | 색 변환·대비 |
-| `src/common/buffer/AttributeData.ts` | 211 | 원문 | fg·bg·ext 비트 해석 |
-| `src/common/TaskQueue.ts` | 166 | 원문 | 아틀라스 예열용 idle 큐 |
-| `src/common/buffer/Constants.ts` | 157 | 원문 | 속성 비트 상수 |
-| `src/common/Platform.ts` | 44 | 원문 | |
-| `src/common/MultiKeyMap.ts` | 42 | 원문 | 글리프 캐시 키 |
-| `src/browser/renderer/shared/RendererUtils.ts` | 95 | 원문 | |
-| `src/browser/renderer/shared/SelectionRenderModel.ts` | 93 | 원문 | 선택 범위 렌더 모델 |
-| `src/browser/ColorContrastCache.ts` | 34 | 원문 | |
-| `src/common/Types.ts` | 119 (원본 552) | 발췌 | `IColor`·`IAttributeData`·`ICellData` 등 |
-| `src/browser/Types.ts` | 95 (원본 226) | 발췌 | `IColorSet`·`DEFAULT_ANSI_COLORS`, `ITerminal` 스텁 포함 |
-| `src/browser/renderer/shared/Types.ts` | 53 (원본 84) | 발췌 | `IRenderDimensions`·`ISelectionRenderModel` |
+| `addons/addon-webgl/src/TextureAtlas.ts` | 1138 | verbatim | Glyph rasterization, atlas page management |
+| `addons/addon-webgl/src/CustomGlyphs.ts` | 693 | verbatim | Drawing box, block and powerline characters directly |
+| `addons/addon-webgl/src/GlyphRenderer.ts` | 390 | verbatim | Glyph instance shader |
+| `addons/addon-webgl/src/RectangleRenderer.ts` | 382 | verbatim | Background and cursor rectangle shader |
+| `addons/addon-webgl/src/CellColorResolver.ts` | 236 | verbatim | Resolving inverse, selection and decoration colors |
+| `addons/addon-webgl/src/Types.ts` | 126 | verbatim | Render model and atlas types |
+| `addons/addon-webgl/src/CharAtlasUtils.ts` | 80 | verbatim | Building the atlas config |
+| `addons/addon-webgl/src/WebglUtils.ts` | 63 | verbatim | Shader compilation utilities |
+| `addons/addon-webgl/src/RenderModel.ts` | 41 | verbatim | Render model (code, bg, fg, ext per cell) |
+| `addons/addon-webgl/src/Constants.ts` | 12 | verbatim | |
+| `src/common/Color.ts` | 376 | verbatim | Color conversion, contrast |
+| `src/common/buffer/AttributeData.ts` | 211 | verbatim | Interpreting fg, bg and ext bits |
+| `src/common/TaskQueue.ts` | 166 | verbatim | Idle queue for atlas warm-up |
+| `src/common/buffer/Constants.ts` | 157 | verbatim | Attribute bit constants |
+| `src/common/Platform.ts` | 44 | verbatim | |
+| `src/common/MultiKeyMap.ts` | 42 | verbatim | Glyph cache key |
+| `src/browser/renderer/shared/RendererUtils.ts` | 95 | verbatim | |
+| `src/browser/renderer/shared/SelectionRenderModel.ts` | 93 | verbatim | Selection range render model |
+| `src/browser/ColorContrastCache.ts` | 34 | verbatim | |
+| `src/common/Types.ts` | 119 (original 552) | excerpt | `IColor`, `IAttributeData`, `ICellData`, etc. |
+| `src/browser/Types.ts` | 95 (original 226) | excerpt | `IColorSet`, `DEFAULT_ANSI_COLORS`, includes an `ITerminal` stub |
+| `src/browser/renderer/shared/Types.ts` | 53 (original 84) | excerpt | `IRenderDimensions`, `ISelectionRenderModel` |
 
-가져오지 않은 것: `WebglRenderer`·`WebglAddon`(oxtty 오케스트레이터로 대체), `CharAtlasCache`(터미널 간 아틀라스 공유), `CursorBlinkStateManager`, `DevicePixelObserver`, `renderLayer/LinkRenderLayer`, `common/buffer/CellData`·`BufferLine`, 서비스 구현 전부.
+Not taken: `WebglRenderer` and `WebglAddon` (replaced by the oxtty orchestrator), `CharAtlasCache` (atlas sharing across terminals), `CursorBlinkStateManager`, `DevicePixelObserver`, `renderLayer/LinkRenderLayer`, `common/buffer/CellData` and `BufferLine`, and all service implementations.
 
-## 스텁 목록 (인터페이스별 구현한 멤버 수)
+## Stub list (members implemented per interface)
 
-복사한 부품이 실제로 부르는 멤버만 남겼다. 인터페이스는 `stubs/`, 구현은 `src/services.ts`.
+Only the members the copied parts actually call were kept. Interfaces are in `stubs/`, implementations in `src/services.ts`.
 
-| 스텁 | 원본 | 남긴 멤버 | 구현 |
+| Stub | Original | Members kept | Implementation |
 |---|---|---|---|
-| `IOptionsService` | `common/services/Services.ts` (396줄, 서비스 22개) | 1: `rawOptions`(`rescaleOverlappingGlyphs`, `fontSize`) | 상수 객체 |
-| `IUnicodeService` | 〃 | 2: `wcwidth`, `getStringCellWidth` | oxtty `WIDE` 비트로 채운 집합 조회(유니코드 폭 표를 가져오지 않음) |
-| `IDecorationService` | 〃 | 1: `forEachDecorationAtCell` | 빈 함수 |
-| `IThemeService` | `browser/services/Services.ts` (158줄, 서비스 9개) | 2: `colors`, `onChangeColors` | `DEFAULT_ANSI_COLORS`로 만든 색 집합 |
-| `ICoreBrowserService` | 〃 | 2: `dpr`, `isFocused` | 상수 |
-| `@xterm/xterm` `Terminal` | `typings/xterm.d.ts` (1957줄) | 4: `cols`, `rows`, `element`, `buffer.active.viewportY` | oxtty `Terminal`을 감싼 객체 |
-| `@xterm/xterm` `ITerminalOptions` | 〃 | 10개 필드(타입만) | `terminalOptions` |
-| `browser/Types` `ITerminal` | `browser/Types.ts` | 2: `rows`, `buffers.active.ydisp` | 타입만. 선택 갱신(`SelectionRenderModel.update`)에서만 쓰고, 이 스파이크는 부르지 않음 |
-| `vs/base/common/lifecycle` | 801줄 (VS Code 유래) | `Disposable`(`_register`, `dispose`), `toDisposable` | 23줄 |
-| `vs/base/common/event` | 1778줄 (VS Code 유래) | `Emitter`(`event`, `fire`, `dispose`), `Event` 타입 | 22줄 |
+| `IOptionsService` | `common/services/Services.ts` (396 lines, 22 services) | 1: `rawOptions` (`rescaleOverlappingGlyphs`, `fontSize`) | Constant object |
+| `IUnicodeService` | 〃 | 2: `wcwidth`, `getStringCellWidth` | Set lookup filled from the oxtty `WIDE` bit (the Unicode width table is not taken) |
+| `IDecorationService` | 〃 | 1: `forEachDecorationAtCell` | Empty function |
+| `IThemeService` | `browser/services/Services.ts` (158 lines, 9 services) | 2: `colors`, `onChangeColors` | Color set built from `DEFAULT_ANSI_COLORS` |
+| `ICoreBrowserService` | 〃 | 2: `dpr`, `isFocused` | Constants |
+| `@xterm/xterm` `Terminal` | `typings/xterm.d.ts` (1957 lines) | 4: `cols`, `rows`, `element`, `buffer.active.viewportY` | Object wrapping the oxtty `Terminal` |
+| `@xterm/xterm` `ITerminalOptions` | 〃 | 10 fields (types only) | `terminalOptions` |
+| `browser/Types` `ITerminal` | `browser/Types.ts` | 2: `rows`, `buffers.active.ydisp` | Types only. Used only by selection updates (`SelectionRenderModel.update`), which this spike does not call |
+| `vs/base/common/lifecycle` | 801 lines (from VS Code) | `Disposable` (`_register`, `dispose`), `toDisposable` | 23 lines |
+| `vs/base/common/event` | 1778 lines (from VS Code) | `Emitter` (`event`, `fire`, `dispose`), `Event` type | 22 lines |
 
-`ICharSizeService`는 스텁하지 않았다. 대신 렌더러 안에서 xterm.js `TextMetricsMeasureStrategy`와 같은 방식으로 글자 크기를 잰다(10줄).
+`ICharSizeService` was not stubbed. Instead, the renderer measures the character size itself the same way as xterm.js `TextMetricsMeasureStrategy` (10 lines).
 
-## oxtty 셀 → xterm 렌더 모델 변환 (`src/convert.ts`, `src/OxttyWebglRenderer.ts`)
+## oxtty cell → xterm render model conversion (`src/convert.ts`, `src/OxttyWebglRenderer.ts`)
 
-xterm.js는 `BufferLine.loadCell(x, CellData)`로 셀을 읽고, `CellColorResolver.resolve()`로 색을 확정해 렌더 모델(`Uint32Array`, 셀당 `[code, bg, fg, ext]`)에 넣는다. 스파이크는 `loadCell` 자리에 `OxttyCellData.load()`를 넣고, 나머지(`CellColorResolver` → `RenderModel` → `GlyphRenderer.updateCell` → `RectangleRenderer.updateBackgrounds`)는 원본을 그대로 탄다.
+xterm.js reads cells with `BufferLine.loadCell(x, CellData)`, settles colors with `CellColorResolver.resolve()`, and puts them into the render model (`Uint32Array`, `[code, bg, fg, ext]` per cell). The spike puts `OxttyCellData.load()` in place of `loadCell`, and the rest (`CellColorResolver` → `RenderModel` → `GlyphRenderer.updateCell` → `RectangleRenderer.updateBackgrounds`) runs through the original code unchanged.
 
-- **색**: oxtty 상위 바이트 종류 → xterm `Attributes.CM_*`
+- **Colors**: oxtty high-byte kind → xterm `Attributes.CM_*`
   - RGB → `CM_RGB | 0xRRGGBB`
-  - INDEXED n → n < 16이면 `CM_P16 | n`, 아니면 `CM_P256 | n`
-  - NAMED 0~15 → `CM_P16 | n`, Dim 계열(259~266) → `CM_P16 | (n-259)`, 256·257·258·267·268(기본 전경·배경·커서 등) → `CM_DEFAULT`
-- **속성**: BOLD·INVERSE·HIDDEN·STRIKEOUT·BLINK·UNDERLINE → `fg`의 `FgFlags`, DIM·ITALIC → `bg`의 `BgFlags`. 이중·물결·점선·파선 밑줄은 `bg |= HAS_EXTENDED`, `ext`에 `UnderlineStyle`.
-- **넓은 글자**: `WIDE`면 폭 2, `WIDE_SPACER`는 xterm.js와 같이 코드 0·폭 0으로 두고 색은 유지한다(배경 사각형이 이어지게). `WIDE` 코드포인트는 `IUnicodeService` 스텁에 기록해 아틀라스가 밑줄 폭을 2칸으로 그리게 한다.
-- **결합 문자**: `COMBINING`이면 `cellText(y, x)`로 전체 문자열을 받아 xterm.js의 combined 경로(`COMBINED_CHAR_BIT_MASK`, `getRasterizedGlyphCombinedChar`)로 보낸다. 아스트랄 문자(이모지)도 xterm.js처럼 JS 문자열 길이가 2라서 같은 경로를 탄다.
-- **커서**: `cursor()`의 line·col·visible로 블록 커서 칸 색을 덮어쓴다(`WebglRenderer._updateModel`과 같은 방식).
-- **갱신**: `takeDamage()`가 `full`이면 전체를, 아니면 `lines`만 모델에 반영한다. 모델에 이미 같은 값이 있는 칸은 건너뛴다(원본 로직 그대로).
+  - INDEXED n → `CM_P16 | n` if n < 16, otherwise `CM_P256 | n`
+  - NAMED 0~15 → `CM_P16 | n`, the Dim family (259~266) → `CM_P16 | (n-259)`, 256·257·258·267·268 (default foreground, background, cursor, etc.) → `CM_DEFAULT`
+- **Attributes**: BOLD, INVERSE, HIDDEN, STRIKEOUT, BLINK and UNDERLINE → `FgFlags` in `fg`; DIM and ITALIC → `BgFlags` in `bg`. Double, curly, dotted and dashed underlines set `bg |= HAS_EXTENDED` with `UnderlineStyle` in `ext`.
+- **Wide characters**: `WIDE` means width 2; `WIDE_SPACER` is left as code 0 and width 0 like xterm.js, keeping its colors (so the background rectangle continues). `WIDE` code points are recorded in the `IUnicodeService` stub so the atlas draws the underline 2 cells wide.
+- **Combining characters**: for `COMBINING`, the full string is fetched with `cellText(y, x)` and sent down the xterm.js combined path (`COMBINED_CHAR_BIT_MASK`, `getRasterizedGlyphCombinedChar`). Astral characters (emoji) also take the same path because, as in xterm.js, their JS string length is 2.
+- **Cursor**: the block cursor cell's colors are overwritten using `cursor()`'s line, col and visible (the same approach as `WebglRenderer._updateModel`).
+- **Updates**: if `takeDamage()` is `full`, the whole model is updated, otherwise only `lines`. Cells whose model already holds the same value are skipped (original logic unchanged).
 
-## oxtty 엔진 API에 부족했던 점
+## What the oxtty engine API lacked
 
-> 1~4는 모두 반영했다(엔진 API 공백 메우기 커밋). 밑줄 색·결합 문자는 `rowExtras()`, 커서 모양은 `cursor().shape/blink`, 번들은 `external` 없이 빌드된다. 스크린샷에서 curly 밑줄이 빨강, 커서가 막대로 그려진다. 스크롤 이동(`takeDamage().scroll`)이 오면 xterm.js처럼 모든 줄을 다시 보되, 지우지 않으므로 렌더 모델과 같은 칸은 건너뛴다. 글리프 정점에 칸 위치가 들어 있어서 줄을 통째로 옮기지는 않는다.
+> 1–4 have all been addressed (the commit filling the engine API gaps). Underline color and combining characters come from `rowExtras()`, cursor shape from `cursor().shape/blink`, and the bundle builds without `external`. In the screenshot the curly underline is red and the cursor is a bar. When a scroll shift (`takeDamage().scroll`) arrives, every line is revisited as in xterm.js, but since nothing is cleared, cells equal to the render model are skipped. Glyph vertices contain the cell position, so lines are not moved wholesale.
 
-1. **밑줄 색(SGR 58) 없음**: 셀 4워드에 자리가 없어 curly 밑줄이 전경색으로 그려진다. PRD D2의 행별 확장 테이블이 필요하다. xterm 쪽은 `ext` 하위 26비트(`underlineColor`)에 바로 넣으면 된다.
-2. **결합 문자 문자열을 칸마다 따로 가져와야 함**: `rowCells`에는 `COMBINING` 플래그만 있고, 문자열은 `cellText(y, x)`를 칸마다 불러야 한다. 결합 문자가 많은 줄(데바나가리·한글 자모 조합 등)에서는 wasm 경계 호출이 칸 수만큼 늘어난다. 행 단위로 받는 API(예: 열 → 문자열 확장 테이블)가 있으면 좋다. D2 확장 테이블에 함께 넣는 것을 권한다.
-3. **커서 모양 없음**: `cursor()`는 line·col·visible만 준다. DECSCUSR(블록·밑줄·막대, 깜빡임)를 그리려면 모양과 깜빡임 여부가 필요하다. 지금은 블록으로 고정했다.
-4. **패키징**: `packages/oxtty/src/index.js`의 `await import('node:fs/promises')` 분기 때문에 esbuild로 브라우저 번들을 만들 때 `external: ['node:*']`를 지정해야 했다. 다른 번들러도 경고나 오류를 낼 수 있다.
+1. **No underline color (SGR 58)**: there is no room in the 4 cell words, so the curly underline is drawn in the foreground color. The per-row extras table from PRD D2 is needed. On the xterm side it can go straight into the low 26 bits of `ext` (`underlineColor`).
+2. **Combining character strings must be fetched cell by cell**: `rowCells` has only the `COMBINING` flag, and the string requires calling `cellText(y, x)` per cell. On lines with many combining characters (Devanagari, composed Hangul jamo, etc.) wasm boundary calls grow with the number of cells. A per-row API (for example a column → string extras table) would help. Putting it into the D2 extras table is recommended.
+3. **No cursor shape**: `cursor()` returns only line, col and visible. Drawing DECSCUSR (block, underline, bar, blinking) needs the shape and whether it blinks. For now it is fixed to a block.
+4. **Packaging**: because of the `await import('node:fs/promises')` branch in `packages/oxtty/src/index.js`, building a browser bundle with esbuild required `external: ['node:*']`. Other bundlers may warn or error too.
 
-넓은 글자 폭은 `WIDE`·`WIDE_SPACER` 비트로 충분했다. 아틀라스가 쓰던 xterm.js 유니코드 폭 판정을 엔진 결과로 바꿀 수 있었다.
+The `WIDE` and `WIDE_SPACER` bits were enough for wide character widths. The xterm.js Unicode width check the atlas used could be replaced with the engine's result.
 
-## 남은 위험
+## Remaining risks
 
-- **범위 밖이라 검증하지 않음**: 선택·IME·키 입력·스크롤·링크·접근성. 선택은 `SelectionRenderModel`과 `CellColorResolver`의 선택 색 처리를 이미 복사해 두어서, 선택 범위(Rust, D4)만 받으면 연결된다.
-- **아직 붙이지 않은 부품**: WebGL 컨텍스트 손실 복구, DPR 변화 감지(`DevicePixelObserver` 40줄), 커서 깜빡임(`CursorBlinkStateManager` 146줄. `ICoreBrowserService`에 멤버가 몇 개 더 필요), 리거처(`ICharacterJoinerService`), 테마·글꼴 변경 시 아틀라스 재생성. 모두 원본 `WebglRenderer`에 패턴이 있어서 옮길 수 있다고 보지만, 스텁 멤버가 몇 개 더 늘어난다.
-- **성능**: 아래 "렌더러 벤치"로 xterm.js(WebGL 애드온)와 비교한다. 줄마다 `slice()`로 복사하는 비용은 프로파일에서 크지 않았다. 큰 화면(200×60)은 재지 않았다.
-- **실행 환경**: macOS headless Chrome 한 곳에서만 확인했다. 한글은 Menlo에 없어 시스템 대체 글꼴(Apple SD Gothic Neo)로 그려졌다. 다른 OS의 글꼴 대체와 폭 맞춤은 확인하지 않았다.
-- **업스트림 추적**: 복사본은 6.0.0에 고정했다. 업스트림을 따라갈 의무는 없지만, 아틀라스 버그 수정을 가져오려면 손으로 비교해야 한다. 원문을 그대로 두었으므로 `diff`로 비교할 수 있다.
+- **Not validated because out of scope**: selection, IME, key input, scrolling, links, accessibility. For selection, `SelectionRenderModel` and the selection color handling in `CellColorResolver` are already copied, so it connects once it receives a selection range (Rust, D4).
+- **Parts not yet attached**: WebGL context loss recovery, DPR change detection (`DevicePixelObserver`, 40 lines), cursor blinking (`CursorBlinkStateManager`, 146 lines; needs a few more members on `ICoreBrowserService`), ligatures (`ICharacterJoinerService`), atlas regeneration on theme or font change. All have patterns in the original `WebglRenderer` and look portable, but the stub members will grow by a few.
+- **Performance**: compared against xterm.js (WebGL addon) with the "Renderer bench" section. The cost of copying each line with `slice()` was not large in the profile. Large screens (200×60) were not measured.
+- **Runtime environment**: checked only on macOS headless Chrome. Hangul is not in Menlo, so it was drawn with the system fallback font (Apple SD Gothic Neo). Font fallback and width fitting on other OSes were not checked.
+- **Upstream tracking**: the copies are pinned to 6.0.0. There is no obligation to follow upstream, but pulling in atlas bug fixes requires manual comparison. Since the originals were left as is, they can be compared with `diff`.
