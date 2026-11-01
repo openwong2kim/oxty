@@ -17,7 +17,7 @@
 //! from another file names it.
 mod composition;
 mod keyboard;
-mod mouse;
+pub(crate) mod mouse;
 mod move_to_cell;
 
 use std::cell::{Cell, RefCell};
@@ -701,6 +701,10 @@ fn sync_textarea(shared: &Rc<Shared>) {
     }
     let cursor_x = x.min(v.cols - 1);
     let cell = dimensions(&core).css_cell;
+    // Not before the renderer measured a cell: a zero line height ends IME compositions.
+    if !(cell.width > 0.0 && cell.height > 0.0) {
+        return;
+    }
     let attrs = v
         .row(line)
         .get(cursor_x as usize * 4 + 3)
