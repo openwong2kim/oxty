@@ -11,6 +11,6 @@ pub mod vi_mode;
 
 pub use crate::vt::grid::Grid;
 pub use crate::vt::term::Term;
-pub use vte;
+pub mod vte;
 
 mod wmux_unicode11;

@@ -144,6 +144,11 @@ pub struct Grid<T> {
     #[cfg_attr(feature = "serde", serde(skip))]
     keep_cursor_paragraph: bool,
 
+    /// oxtty: more rows are added blank at the bottom instead of bringing history back into view (xterm.js with
+    /// `windowsPty`). The default `false` is the original Alacritty behavior.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    grow_blank: bool,
+
     /// oxtty: receives lines that would be dropped because the history is full (oxtty keeps them compressed).
     /// If `None`, they are dropped as in the original Alacritty behavior.
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -216,6 +221,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             lines,
             columns,
             keep_cursor_paragraph: false,
+            grow_blank: false,
             history_sink: None,
             scrolled_lines: 0,
             history_entered: 0,
@@ -287,6 +293,11 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
     /// oxtty: sets whether to skip reflowing the cursor paragraph on resize (xterm.js `reflowCursorLine: false`).
     pub fn set_keep_cursor_paragraph(&mut self, keep: bool) {
         self.keep_cursor_paragraph = keep;
+    }
+
+    /// oxtty: sets whether more rows are added blank at the bottom instead of bringing history back into view.
+    pub fn set_grow_blank(&mut self, grow_blank: bool) {
+        self.grow_blank = grow_blank;
     }
 
     /// Update the size of the scrollback history.

@@ -10,7 +10,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlElement;
 
-use crate::emitter::{Disposable, Emitter};
+use crate::emitter::Emitter;
 use crate::engine::{get, mode, Engine, EngineView, LocalEngineView, Viewport};
 use crate::render::{Dirty, Renderer};
 use crate::timer;
@@ -51,8 +51,20 @@ pub(crate) struct Core {
     pub dirty: Dirty,
     queue: VecDeque<Chunk>,
     /// A high surrogate a string `write` ended with, joined to the next one.
-    high_surrogate: Option<u16>,
+    pub high_surrogate: Option<u16>,
     pub disposed: bool,
+    /// The size when disposed: xterm.js keeps answering `cols`/`rows` after `dispose`.
+    disposed_size: (u32, u32),
+}
+
+impl Core {
+    pub fn size(&self) -> (u32, u32) {
+        if self.disposed {
+            return self.disposed_size;
+        }
+        let engine = self.view.engine();
+        (engine.cols(), engine.rows())
+    }
 }
 
 /// Every xterm.js event the terminal fires. Members are added by the modules that fire them.
@@ -67,6 +79,7 @@ pub(crate) struct Emitters {
     pub render: Rc<Emitter>,
     pub write_parsed: Rc<Emitter>,
     pub cursor_move: Rc<Emitter>,
+    pub buffer_change: Rc<Emitter>,
     pub dimensions_change: Rc<Emitter>,
 }
 
@@ -155,6 +168,7 @@ impl Terminal {
                 queue: VecDeque::new(),
                 high_surrogate: None,
                 disposed: false,
+                disposed_size: (0, 0),
             }),
             events: Emitters::default(),
             state: Cell::new(State::default()),
@@ -166,6 +180,7 @@ impl Terminal {
         });
         *slot.borrow_mut() = Rc::downgrade(&shared);
         shared.apply_clipboard();
+        shared.apply_windows_pty();
         shared.apply_theme();
         shared.state.set(shared.read_state());
         Ok(Terminal { shared })
@@ -173,12 +188,12 @@ impl Terminal {
 
     #[wasm_bindgen(getter)]
     pub fn cols(&self) -> u32 {
-        self.shared.core.borrow().view.engine().cols()
+        self.shared.core.borrow().size().0
     }
 
     #[wasm_bindgen(getter)]
     pub fn rows(&self) -> u32 {
-        self.shared.core.borrow().view.engine().rows()
+        self.shared.core.borrow().size().1
     }
 
     #[wasm_bindgen(getter)]
@@ -206,6 +221,7 @@ impl Terminal {
         });
         let handler = Object::new();
         Reflect::set(&handler, &"set".into(), set.as_ref())?;
+        Reflect::set(&handler, &"get".into(), &crate::options::get_trap())?;
         let proxy = Proxy::new(&self.shared.core.borrow().options, &handler);
         *self.shared.options_proxy.borrow_mut() = Some((proxy.clone(), set));
         Ok(proxy)
@@ -339,57 +355,13 @@ impl Terminal {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = onData)]
-    pub fn on_data(&self, listener: Function) -> Disposable {
-        self.shared.events.data.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onBinary)]
-    pub fn on_binary(&self, listener: Function) -> Disposable {
-        self.shared.events.binary.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onResize)]
-    pub fn on_resize(&self, listener: Function) -> Disposable {
-        self.shared.events.resize.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onTitleChange)]
-    pub fn on_title_change(&self, listener: Function) -> Disposable {
-        self.shared.events.title_change.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onBell)]
-    pub fn on_bell(&self, listener: Function) -> Disposable {
-        self.shared.events.bell.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onScroll)]
-    pub fn on_scroll(&self, listener: Function) -> Disposable {
-        self.shared.events.scroll.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onRender)]
-    pub fn on_render(&self, listener: Function) -> Disposable {
-        self.shared.events.render.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onWriteParsed)]
-    pub fn on_write_parsed(&self, listener: Function) -> Disposable {
-        self.shared.events.write_parsed.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onCursorMove)]
-    pub fn on_cursor_move(&self, listener: Function) -> Disposable {
-        self.shared.events.cursor_move.event(listener)
-    }
-
     /// Drops pending writes without running their callbacks, like xterm.js. Safe to call from any listener.
     pub fn dispose(&self) {
         let mut core = self.shared.core.borrow_mut();
         if core.disposed {
             return;
         }
+        core.disposed_size = core.size();
         core.disposed = true;
         core.queue.clear();
         // Hook: input, mouse, selection and accessibility remove their listeners here.
@@ -414,6 +386,7 @@ impl Terminal {
             &e.render,
             &e.write_parsed,
             &e.cursor_move,
+            &e.buffer_change,
             &e.dimensions_change,
         ] {
             emitter.clear();
@@ -569,9 +542,21 @@ impl Shared {
         if key == "clipboard" {
             self.apply_clipboard();
         }
+        if key == "windowsPty" {
+            self.apply_windows_pty();
+        }
         // Hook: theme (engine colours, renderer), renderer options, input, mouse and accessibility options.
         self.apply_renderer_option(key);
         Ok(())
+    }
+
+    fn apply_windows_pty(&self) {
+        let core = self.core.borrow();
+        let mut pty = get(&core.options, "windowsPty");
+        if !pty.is_object() {
+            pty = JsValue::NULL;
+        }
+        let _ = core.view.engine().set_windows_pty(&pty);
     }
 
     fn apply_clipboard(&self) {
@@ -598,7 +583,11 @@ impl Shared {
         }
         let (old, new) = (self.state.get(), self.read_state());
         self.state.set(new);
-        // Hook: selection syncs; buffer fires onBufferChange when `alternate` changed.
+        // Hook: selection syncs.
+        if new.alternate != old.alternate && self.events.buffer_change.has_listeners() {
+            let buffer = crate::buffer::active(self);
+            self.events.buffer_change.fire(&[&buffer.into()]);
+        }
         if new.viewport_y != old.viewport_y {
             self.events.scroll.fire(&[&new.viewport_y.into()]);
         }
@@ -718,7 +707,5 @@ fn default_options(options: Object) -> Object {
     for (key, value) in defaults {
         let _ = Reflect::set(&merged, &key.into(), &value);
     }
-    let merged = Object::assign(&merged, &options);
-    crate::render::options::fill_defaults(&merged);
-    merged
+    Object::assign(&merged, &options)
 }

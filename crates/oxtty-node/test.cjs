@@ -87,3 +87,29 @@ test('native host policy: clipboard and colour queries', () => {
   t.write('\x1b]10;?\x07');
   assert.equal(t.takeReplies().length, 0);
 });
+
+test('native parser hooks', () => {
+  const t = new Terminal(20, 5);
+  t.setHook('csi', 0x6e, true);
+  t.setHook('osc', 133, true);
+  const bytes = Buffer.from('a\x1b]133;A\x07b\x1b[6nc');
+  let fed = t.feedUntilHook(bytes);
+  assert.deepEqual(t.pendingHook(), { kind: 'osc', id: 133, params: [], data: Buffer.from('A') });
+  t.finishHook(true);
+  fed += t.feedUntilHook(bytes.subarray(fed));
+  assert.deepEqual(t.pendingHook(), { kind: 'csi', id: 0x6e, params: [[6]], data: Buffer.alloc(0) });
+  t.finishHook(false);
+  fed += t.feedUntilHook(bytes.subarray(fed));
+  assert.equal(fed, bytes.length);
+  assert.equal(t.pendingHook(), null);
+  assert.equal(t.rowText(0), 'abc');
+  assert.equal(t.takeReplies().length, 0);
+});
+
+test('native windowsPty', () => {
+  const t = new Terminal(10, 3);
+  t.setWindowsPty('conpty', 19045);
+  t.write('0123456789\r\n');
+  assert.equal(t.rowWrapped(0), true);
+  assert.throws(() => t.setWindowsPty('pty', 1), /unknown backend/);
+});

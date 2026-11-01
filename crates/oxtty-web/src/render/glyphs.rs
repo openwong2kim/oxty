@@ -1,17 +1,20 @@
-//! Draws the glyphs of the render model from the atlas pages, one instanced quad per cell.
+//! Draws the glyphs of a render model from the atlas pages, one instanced quad per cell. The program and its
+//! buffers live once per page ([`GlyphProgram`], owned by the shared context); each pane keeps only its vertex
+//! data ([`GlyphVertices`]).
 //!
 //! Ported from xterm.js 6.0.0 (commit f447274f430fd22513f6adbf9862d19524471c04, MIT):
 //! `addons/addon-webgl/src/GlyphRenderer.ts` lines 15-390, and `allowRescaling`/`isEmoji`/`isNerdFontGlyph` of
-//! `src/browser/renderer/shared/RendererUtils.ts` lines 25-66.
+//! `src/browser/renderer/shared/RendererUtils.ts` lines 25-66. The double-buffered vertex copies are one scratch
+//! buffer of the shared context instead of two per pane.
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use web_sys::{
-    HtmlElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlProgram, WebGlTexture,
-    WebGlUniformLocation, WebGlVertexArrayObject,
+    HtmlElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlProgram, WebGlUniformLocation,
+    WebGlVertexArrayObject,
 };
 
-use super::atlas::{self, is_powerline_glyph, TextureAtlas};
+use super::atlas::{is_powerline_glyph, TextureAtlas};
 use super::gl::{buffer_f32, create_program, PROJECTION_MATRIX};
 use super::model::RenderModel;
 use super::Dimensions;
@@ -101,44 +104,18 @@ fn allow_rescaling(code: u32, width: u32, glyph_width: f64, cell_width: f64) -> 
         && !(0xe000..=0xf8ff).contains(&code)
 }
 
-struct AtlasTexture {
-    texture: WebGlTexture,
-    version: i64,
-}
-
-pub struct GlyphRenderer {
-    gl: Gl,
+/// The glyph program and its buffers, once per context.
+pub struct GlyphProgram {
     program: WebGlProgram,
     vao: WebGlVertexArrayObject,
     resolution_location: WebGlUniformLocation,
-    atlas_textures: Vec<AtlasTexture>,
     buffers: [WebGlBuffer; 3],
-    atlas: Option<Rc<RefCell<TextureAtlas>>>,
-    active_buffer: usize,
-    attributes: Vec<f32>,
-    /// Double buffered: the one the GPU may still read is not written next frame.
-    attributes_buffers: [Vec<f32>; 2],
-    count: usize,
-    cols: usize,
-    rows: usize,
-    dims: Dimensions,
-    pub rescale_overlapping_glyphs: bool,
 }
 
-impl GlyphRenderer {
-    pub fn new(gl: &Gl, cols: u32, rows: u32, dims: Dimensions) -> Option<Self> {
-        // Typically 8 or 16 texture units; almost every client supports 4096 px textures
-        let units = gl
-            .get_parameter(Gl::MAX_TEXTURE_IMAGE_UNITS)
-            .ok()?
-            .as_f64()?;
-        let max_size = gl.get_parameter(Gl::MAX_TEXTURE_SIZE).ok()?.as_f64()?;
-        if units < 1.0 || max_size < 1.0 {
-            return None;
-        }
-        atlas::init_limits(units as u32, max_size as u32);
-        let pages = atlas::max_atlas_pages()?;
-        let program = create_program(gl, &vertex_shader(), &fragment_shader(pages))?;
+impl GlyphProgram {
+    /// `units` texture units hold the atlas pages.
+    pub fn new(gl: &Gl, units: u32) -> Option<Self> {
+        let program = create_program(gl, &vertex_shader(), &fragment_shader(units))?;
         let projection = gl.get_uniform_location(&program, "u_projection")?;
         let resolution_location = gl.get_uniform_location(&program, "u_resolution")?;
         let texture_location = gl.get_uniform_location(&program, "u_texture")?;
@@ -186,71 +163,72 @@ impl GlyphRenderer {
         }
 
         gl.use_program(Some(&program));
-        let units: Vec<i32> = (0..pages as i32).collect();
+        let units: Vec<i32> = (0..units as i32).collect();
         gl.uniform1iv_with_i32_array(Some(&texture_location), &units);
         gl.uniform_matrix4fv_with_f32_array(Some(&projection), false, &PROJECTION_MATRIX);
-
-        // 1×1 red textures for every page: a glyph drawn from a page that was never uploaded shows red
-        let mut atlas_textures = Vec::new();
-        for i in 0..pages {
-            let texture = gl.create_texture()?;
-            gl.active_texture(Gl::TEXTURE0 + i);
-            gl.bind_texture(Gl::TEXTURE_2D, Some(&texture));
-            gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_WRAP_S, Gl::CLAMP_TO_EDGE as i32);
-            gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_WRAP_T, Gl::CLAMP_TO_EDGE as i32);
-            let _ = gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
-                Gl::TEXTURE_2D,
-                0,
-                Gl::RGBA as i32,
-                1,
-                1,
-                0,
-                Gl::RGBA,
-                Gl::UNSIGNED_BYTE,
-                Some(&[255, 0, 0, 255]),
-            );
-            atlas_textures.push(AtlasTexture {
-                texture,
-                version: -1,
-            });
-        }
-
-        // Transparent glyph texture
-        gl.enable(Gl::BLEND);
-        gl.blend_func(Gl::SRC_ALPHA, Gl::ONE_MINUS_SRC_ALPHA);
-
-        let mut renderer = Self {
-            gl: gl.clone(),
+        Some(Self {
             program,
             vao,
             resolution_location,
-            atlas_textures,
             buffers: [unit_quad, elements, attributes],
-            atlas: None,
-            active_buffer: 0,
-            attributes: Vec::new(),
-            attributes_buffers: [Vec::new(), Vec::new()],
-            count: 0,
-            cols: cols as usize,
-            rows: rows as usize,
-            dims,
-            rescale_overlapping_glyphs: false,
-        };
-        renderer.handle_resize();
-        Some(renderer)
+        })
     }
 
-    pub fn dispose(&mut self) {
-        let gl = &self.gl;
+    pub fn dispose(&self, gl: &Gl) {
         gl.delete_program(Some(&self.program));
         gl.delete_vertex_array(Some(&self.vao));
         for buffer in &self.buffers {
             gl.delete_buffer(Some(buffer));
         }
-        for texture in &self.atlas_textures {
-            gl.delete_texture(Some(&texture.texture));
-        }
-        self.atlas = None;
+    }
+
+    /// Draws `data` (packed cells, see [`GlyphVertices::pack`]) onto a `width`×`height` drawing buffer with the
+    /// atlas pages already bound.
+    pub fn draw(&self, gl: &Gl, data: &[f32], width: f64, height: f64) {
+        gl.use_program(Some(&self.program));
+        gl.bind_vertex_array(Some(&self.vao));
+        gl.uniform2f(Some(&self.resolution_location), width as f32, height as f32);
+        // Transparent glyph texture
+        gl.enable(Gl::BLEND);
+        gl.blend_func(Gl::SRC_ALPHA, Gl::ONE_MINUS_SRC_ALPHA);
+        gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&self.buffers[2]));
+        buffer_f32(gl, Gl::ARRAY_BUFFER, data, Gl::STREAM_DRAW);
+        gl.draw_elements_instanced_with_i32(
+            Gl::TRIANGLE_STRIP,
+            4,
+            Gl::UNSIGNED_BYTE,
+            0,
+            (data.len() / INDICES_PER_CELL) as i32,
+        );
+    }
+}
+
+/// One pane's glyph vertices (`GlyphRenderer` minus the GL objects).
+pub struct GlyphVertices {
+    atlas: Option<Rc<RefCell<TextureAtlas>>>,
+    attributes: Vec<f32>,
+    cols: usize,
+    rows: usize,
+    dims: Dimensions,
+    pub rescale_overlapping_glyphs: bool,
+}
+
+impl GlyphVertices {
+    pub fn new(cols: u32, rows: u32, dims: Dimensions) -> Self {
+        let mut vertices = Self {
+            atlas: None,
+            attributes: Vec::new(),
+            cols: cols as usize,
+            rows: rows as usize,
+            dims,
+            rescale_overlapping_glyphs: false,
+        };
+        vertices.clear();
+        vertices
+    }
+
+    pub fn atlas(&self) -> Option<&Rc<RefCell<TextureAtlas>>> {
+        self.atlas.as_ref()
     }
 
     /// True when the model must be rebuilt (no atlas, or the atlas merged pages).
@@ -334,16 +312,11 @@ impl GlyphRenderer {
     pub fn clear(&mut self) {
         let (cols, rows) = (self.cols, self.rows);
         let count = cols * rows * INDICES_PER_CELL;
-        if self.count != count {
+        if self.attributes.len() != count {
             self.attributes = vec![0.0; count];
-            self.attributes_buffers = [vec![0.0; count], vec![0.0; count]];
         } else {
             self.attributes.fill(0.0);
-            for b in &mut self.attributes_buffers {
-                b.fill(0.0);
-            }
         }
-        self.count = count;
         let mut i = 0;
         for y in 0..rows {
             for x in 0..cols {
@@ -354,99 +327,27 @@ impl GlyphRenderer {
         }
     }
 
-    pub fn resize(&mut self, cols: u32, rows: u32) {
+    /// New size and cell metrics; clears the vertices.
+    pub fn resize(&mut self, cols: u32, rows: u32, dims: Dimensions) {
         self.cols = cols as usize;
         self.rows = rows as usize;
-    }
-
-    pub fn handle_resize(&mut self) {
-        let gl = &self.gl;
-        gl.use_program(Some(&self.program));
-        let (width, height) = (gl.drawing_buffer_width(), gl.drawing_buffer_height());
-        let (width, height) = canvas_size(gl).unwrap_or((width, height));
-        gl.viewport(0, 0, width, height);
-        gl.uniform2f(Some(&self.resolution_location), width as f32, height as f32);
+        self.dims = dims;
         self.clear();
     }
 
-    pub fn render(&mut self, model: &RenderModel) {
-        let Some(atlas) = self.atlas.clone() else {
-            return;
-        };
-        let Ok(atlas) = atlas.try_borrow() else {
-            return;
-        };
-        let gl = &self.gl;
-        gl.use_program(Some(&self.program));
-        gl.bind_vertex_array(Some(&self.vao));
-
-        // Alternate buffers each frame: the GPU may still be reading the last one
-        self.active_buffer = (self.active_buffer + 1) % 2;
-        let active = &mut self.attributes_buffers[self.active_buffer];
-        // Each row up to its last non-blank cell, so trailing whitespace sends no vertices
-        let mut length = 0;
+    /// Copies each row up to its last non-blank cell into `out`, so trailing whitespace sends no vertices.
+    pub fn pack(&self, model: &RenderModel, out: &mut Vec<f32>) {
+        out.clear();
         for (y, &line_length) in model.line_lengths.iter().enumerate() {
             let start = y * self.cols * INDICES_PER_CELL;
             let end = start + line_length as usize * INDICES_PER_CELL;
-            let (Some(src), true) = (
-                self.attributes.get(start..end),
-                length + end - start <= active.len(),
-            ) else {
-                continue;
-            };
-            active[length..length + src.len()].copy_from_slice(src);
-            length += src.len();
-        }
-        gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&self.buffers[2]));
-        buffer_f32(gl, Gl::ARRAY_BUFFER, &active[..length], Gl::STREAM_DRAW);
-
-        // Upload the atlas pages that changed
-        for i in 0..atlas.page_count().min(self.atlas_textures.len()) {
-            if atlas.page_version(i) as i64 != self.atlas_textures[i].version {
-                let Some(canvas) = atlas.page_canvas(i) else {
-                    continue;
-                };
-                gl.active_texture(Gl::TEXTURE0 + i as u32);
-                gl.bind_texture(Gl::TEXTURE_2D, Some(&self.atlas_textures[i].texture));
-                gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_WRAP_S, Gl::CLAMP_TO_EDGE as i32);
-                gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_WRAP_T, Gl::CLAMP_TO_EDGE as i32);
-                let _ = gl.tex_image_2d_with_u32_and_u32_and_html_canvas_element(
-                    Gl::TEXTURE_2D,
-                    0,
-                    Gl::RGBA as i32,
-                    Gl::RGBA,
-                    Gl::UNSIGNED_BYTE,
-                    canvas,
-                );
-                gl.generate_mipmap(Gl::TEXTURE_2D);
-                self.atlas_textures[i].version = atlas.page_version(i) as i64;
+            if let Some(src) = self.attributes.get(start..end) {
+                out.extend_from_slice(src);
             }
         }
-
-        gl.draw_elements_instanced_with_i32(
-            Gl::TRIANGLE_STRIP,
-            4,
-            Gl::UNSIGNED_BYTE,
-            0,
-            (length / INDICES_PER_CELL) as i32,
-        );
     }
 
-    pub fn set_atlas(&mut self, atlas: Rc<RefCell<TextureAtlas>>) {
-        self.atlas = Some(atlas);
-        for texture in &mut self.atlas_textures {
-            texture.version = -1;
-        }
+    pub fn set_atlas(&mut self, atlas: Option<Rc<RefCell<TextureAtlas>>>) {
+        self.atlas = atlas;
     }
-
-    pub fn set_dimensions(&mut self, dims: Dimensions) {
-        self.dims = dims;
-    }
-}
-
-/// `gl.canvas.width/height`, the size the canvas element was given.
-pub fn canvas_size(gl: &Gl) -> Option<(i32, i32)> {
-    use wasm_bindgen::JsCast;
-    let canvas: web_sys::HtmlCanvasElement = gl.canvas()?.dyn_into().ok()?;
-    Some((canvas.width() as i32, canvas.height() as i32))
 }

@@ -1,5 +1,5 @@
 {
-  "about": "Every xterm.js member wmux uses (non-test src/renderer at the wt-wmux-base checkout, @xterm/xterm 6.1.0-beta.336 and its addons) and its status in the Rust front end (crates/oxtty-web). Restored from 0510a7d, where the TypeScript front end reached the old statuses; reasons still describe that front end until each member is redone.",
+  "about": "Every xterm.js member wmux uses (non-test src/renderer at the wt-wmux-base checkout, @xterm/xterm 6.1.0-beta.336 and its addons) and its status in the Rust front end (crates/oxtty-web). Restored from 0510a7d, where the TypeScript front end reached the old statuses; reasons still describe that front end until each member is redone. An entry whose name is not an API member (DOM, internals, prose) carries `exercisedBy`, a regular expression some test must match, before it may be `supported` (api-checklist.test.mjs).",
   "statuses": {
     "todo": "Supported by the TypeScript front end at 0510a7d; not yet in the Rust front end.",
     "supported": "Implemented in crates/oxtty-web (in the generated .d.ts).",
@@ -8,23 +8,23 @@
   },
   "members": {
     "init": {
-      "status": "todo",
-      "reason": "Re-exported from oxtty/xterm; `await init()` once is the only extra step, constructing before it throws."
+      "status": "supported",
+      "reason": "Loads both WebAssembly modules (engine oxtty.wasm, front end xterm_web_bg.wasm); in Node it reads the files."
     },
     "Terminal.constructor": {
-      "status": "todo",
-      "reason": "Synchronous like xterm.js."
+      "status": "supported",
+      "reason": "crates/oxtty-web Terminal; cols, rows and scrollback are constructor-only like xterm.js."
     },
     "options.cols": {
-      "status": "todo",
-      "reason": "Init-only, like xterm.js; change with resize()."
+      "status": "supported",
+      "reason": "Init-only like xterm.js: a runtime change to another value throws; resize() updates it."
     },
     "options.rows": {
-      "status": "todo",
-      "reason": "Init-only, like xterm.js; change with resize()."
+      "status": "supported",
+      "reason": "Init-only like xterm.js: a runtime change to another value throws; resize() updates it."
     },
     "options.scrollback": {
-      "status": "todo",
+      "status": "supported",
       "reason": "Constructor only: the engine fixes it at creation, a runtime change throws (wmux only reads it)."
     },
     "options.cursorBlink": {
@@ -56,8 +56,8 @@
       "reason": "Only the width the fit keeps free (xterm.js 14px default); no scrollbar is drawn yet."
     },
     "options.allowProposedApi": {
-      "status": "todo",
-      "reason": "Accepted, no effect: there is no proposed-API gate."
+      "status": "supported",
+      "reason": "Read back (xterm.js default false); no effect: there is no proposed-API gate."
     },
     "options.scrollOnUserInput": {
       "status": "todo",
@@ -96,8 +96,8 @@
       "reason": "Accessibility."
     },
     "options.windowsPty": {
-      "status": "later",
-      "reason": "xterm.js ConPTY heuristics; needs a decision for the Windows build."
+      "status": "supported",
+      "reason": "Engine option with xterm.js 6.1's rules: blank rows on growth, no reflow before conpty 21376, the conpty wrapping heuristic. Columns a non-reflowing shrink cuts off are dropped (xterm.js keeps them hidden and shows them again when widened), as on the alternate screen."
     },
     "options.convertEol": {
       "status": "unsupported",
@@ -108,64 +108,64 @@
       "reason": "The engine answers no window operations; wmux only saves and restores it around the image addon."
     },
     "Terminal.open": {
-      "status": "todo",
-      "reason": "Builds div.terminal.xterm > div.xterm-screen > (div.xterm-helpers, canvas); a second open moves the element."
+      "status": "supported",
+      "reason": "Builds the xterm.js DOM (.terminal.xterm > .xterm-screen > .xterm-helpers); opening again moves the element."
     },
     "Terminal.write": {
-      "status": "todo",
-      "reason": "Strings and Uint8Array, callback after parse, write(\"\", cb) as a parse barrier; time-sliced like xterm.js."
+      "status": "supported",
+      "reason": "Queued and fed in 12 ms slices like the xterm.js WriteBuffer; the callback runs once the data is parsed."
     },
     "Terminal.writeln": {
-      "status": "todo",
-      "reason": "write(data) then write(\"\\r\\n\", callback)."
+      "status": "supported",
+      "reason": "write(data) then write('\\r\\n', callback)."
     },
     "Terminal.resize": {
-      "status": "todo",
-      "reason": "Fires onResize; no-op for the same size."
+      "status": "supported",
+      "reason": "Resizes the engine and fires onResize; listeners may write, resize or dispose."
     },
     "Terminal.reset": {
-      "status": "todo",
-      "reason": "RIS applied at once (clears scrollback, like xterm.js reset)."
+      "status": "supported",
+      "reason": "RIS applied at once (scrollback, modes and the pending high surrogate cleared; output a synchronized update holds is applied first); queued writes are parsed afterwards, like xterm.js."
     },
     "Terminal.refresh": {
       "status": "todo",
       "reason": "Marks the rows for the next frame."
     },
     "Terminal.dispose": {
-      "status": "todo",
-      "reason": "Drops pending writes and timers, disposes addons, renderer and engine."
+      "status": "supported",
+      "reason": "Drops pending writes without their callbacks, removes the element; safe from any listener."
     },
     "Terminal.loadAddon": {
       "status": "todo",
       "reason": "Fit addons are activated; webgl and unicode11 are absorbed; anything else throws."
     },
     "Terminal.scrollToLine": {
-      "status": "todo",
-      "reason": "Engine scrollDisplay."
+      "status": "supported",
+      "reason": "Scrolls so the line is the top viewport row (engine scrollDisplay), then onScroll; scrollPages and scrollToTop too."
     },
     "Terminal.scrollToBottom": {
-      "status": "todo",
-      "reason": "Engine scrollToBottom."
+      "status": "supported",
+      "reason": "Engine scrollToBottom, then onScroll."
     },
     "Terminal.element": {
-      "status": "todo",
-      "reason": "Set by open()."
+      "status": "supported",
+      "reason": "The .terminal.xterm element after open()."
     },
     "Terminal.rows": {
-      "status": "todo",
-      "reason": "From the engine."
+      "status": "supported",
+      "reason": "Engine rows; the last size after dispose."
     },
     "Terminal.cols": {
-      "status": "todo",
-      "reason": "From the engine."
+      "status": "supported",
+      "reason": "Engine cols; the last size after dispose."
     },
     "Terminal.dimensions": {
       "status": "todo",
       "reason": "Renderer dimensions; replaces the _core._renderService.dimensions workaround."
     },
     "Terminal.modes": {
-      "status": "todo",
-      "reason": "From engine mode bits, X10 mouse included. reverseWraparoundMode and win32InputMode are always false."
+      "status": "supported",
+      "reason": "A new object per read from the engine mode bits (X10 mouse included) and syncPending; reverseWraparoundMode and win32InputMode are always false."
     },
     "Terminal.unicode.activeVersion": {
       "status": "todo",
@@ -228,40 +228,40 @@
       "reason": "With registerMarker."
     },
     "Terminal.onData": {
-      "status": "todo",
-      "reason": "Engine replies after every write drain (no frame needed); input from step 2."
+      "status": "supported",
+      "reason": "Engine replies after each parsed write (input arrives with the input module)."
     },
     "Terminal.onBinary": {
       "status": "todo",
       "reason": "Fired by default-encoding mouse reports, never by output."
     },
     "Terminal.onResize": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "Fired by resize()."
     },
     "Terminal.onScroll": {
-      "status": "todo",
-      "reason": "Fires when buffer.active.viewportY changes (scroll calls, output, resize)."
+      "status": "supported",
+      "reason": "Fired when the viewport top line changes after output or scrolling."
     },
     "Terminal.onRender": {
       "status": "todo",
       "reason": "Rows drawn by each frame."
     },
     "Terminal.onCursorMove": {
-      "status": "todo",
-      "reason": "Checked after each write drain, scroll and resize."
+      "status": "supported",
+      "reason": "Fired when the cursor moved after a parsed write."
     },
     "Terminal.onWriteParsed": {
-      "status": "todo",
-      "reason": "After each write drain."
+      "status": "supported",
+      "reason": "Fired after each task that parsed writes."
     },
     "Terminal.onTitleChange": {
-      "status": "todo",
-      "reason": "OSC 0/2 after each write drain."
+      "status": "supported",
+      "reason": "OSC 0/2 after each parsed write."
     },
     "Terminal.onBell": {
-      "status": "todo",
-      "reason": "Once per BEL after each write drain."
+      "status": "supported",
+      "reason": "BEL after each parsed write."
     },
     "Terminal.onDimensionsChange": {
       "status": "todo",
@@ -272,68 +272,68 @@
       "reason": "Fires where xterm.js fires: mouse up, API calls, and clears by user input, resize or an alternate screen switch (not when trimming moves or drops it, like xterm.js)."
     },
     "buffer.onBufferChange": {
-      "status": "todo",
-      "reason": "Fires when the alternate screen is entered or left."
+      "status": "supported",
+      "reason": "IEvent property; fires with the new active buffer when the alternate screen is entered or left (once per drain, so a write that enters and leaves fires nothing)."
     },
     "buffer.active.type": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "'normal' or 'alternate'; a buffer object keeps its type across screen switches, like xterm.js. A new object per read (no identity), and the inactive buffer reads empty."
     },
     "buffer.active.baseY": {
-      "status": "todo",
+      "status": "supported",
       "reason": "Engine historyLength."
     },
     "buffer.active.viewportY": {
-      "status": "todo",
+      "status": "supported",
       "reason": "historyLength - displayOffset."
     },
     "buffer.active.cursorX": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "Engine cursor column; at the right edge it stays on the last column where xterm.js reports cols (the engine keeps the pending wrap to itself)."
     },
     "buffer.active.cursorY": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "Engine cursor screen row."
     },
     "buffer.active.length": {
-      "status": "todo",
+      "status": "supported",
       "reason": "historyLength + rows."
     },
     "buffer.active.getLine": {
-      "status": "todo",
-      "reason": "A copy of the line at call time (xterm.js returns a live view)."
+      "status": "supported",
+      "reason": "A copy of one row (code point and attributes per cell) at call time (xterm.js returns a live view); undefined outside 0..length or for non-integers."
     },
     "buffer.active.getNullCell": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "No text, width 1, code 0."
     },
     "IBufferLine.translateToString": {
-      "status": "todo",
-      "reason": "Matches xterm.js except that trimRight also drops trailing typed spaces (the engine does not tell them from erased cells)."
+      "status": "supported",
+      "reason": "Matches xterm.js except that trimRight also drops trailing typed spaces (the engine does not tell them from erased cells) and out-of-range columns are clamped (xterm.js pads them with spaces)."
     },
     "IBufferLine.isWrapped": {
-      "status": "todo",
-      "reason": "xterm.js meaning: continues the previous line."
+      "status": "supported",
+      "reason": "xterm.js meaning: continues the previous line (engine rowWrapped of the line above)."
     },
     "IBufferLine.length": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "Columns of the row."
     },
     "IBufferLine.getCell": {
-      "status": "todo",
-      "reason": "The reuse argument is accepted and ignored."
+      "status": "supported",
+      "reason": "A new cell; the reuse argument is accepted and ignored. Wide characters are width 2 with a width-0 right half."
     },
     "IBufferCell.getChars": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "As xterm.js, combining marks included, except that an erased cell reads ' ' (xterm.js '')."
     },
     "IBufferCell.getWidth": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "2 for a wide character, 0 for its right half, else 1."
     },
     "IBufferCell.isDim": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "Engine DIM attribute; isBold, isItalic, isUnderline, isBlink, isInverse, isInvisible and isStrikethrough too."
     },
     "FitAddon.fit": {
       "status": "todo",

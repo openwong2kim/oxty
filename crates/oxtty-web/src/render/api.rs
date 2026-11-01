@@ -8,7 +8,6 @@ use wasm_bindgen::prelude::*;
 use super::color::engine_colors;
 use super::webgl::WebglRenderer;
 use super::{options, Dimensions, Dirty, Highlight, RendererRequest, SelectionRange, Size};
-use crate::emitter::Disposable;
 use crate::engine::get;
 use crate::terminal::{Shared, Terminal};
 
@@ -81,13 +80,12 @@ impl Terminal {
     }
 
     /// The cell size changed: after a font option, or when fonts finish loading (a loaded fit addon refits then).
-    #[wasm_bindgen(js_name = onDimensionsChange)]
-    pub fn on_dimensions_change(
-        &self,
-        #[wasm_bindgen(unchecked_param_type = "(dimensions: IRenderDimensions) => void")]
-        listener: Function,
-    ) -> Disposable {
-        self.shared.events.dimensions_change.event(listener)
+    #[wasm_bindgen(
+        getter = onDimensionsChange,
+        unchecked_return_type = "IEvent<IRenderDimensions>"
+    )]
+    pub fn on_dimensions_change(&self) -> Function {
+        crate::events::event(&self.shared, crate::events::Event::DimensionsChange)
     }
 
     /// Test-only: the renderer's internal state.

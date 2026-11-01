@@ -152,12 +152,13 @@ test('cursor blink is timed by the renderer and asks for the cursor row', async 
   const r = await inPage(async (theme) => {
     const p = new T.Pane(10, 3, { ...theme, cursorBlink: true });
     await p.write('\r\nab');
+    // Blinks at 600 ms intervals from the focus; the loop stops well before the third change (1800 ms)
     p.focus(true);
+    const t0 = performance.now();
     const shown = async () => (await p.cellColor(2, 1))[0] === 0xff;
     const seen = [await shown()];
     p.takeRequests();
-    const t0 = performance.now();
-    while (performance.now() - t0 < 1400) {
+    while (performance.now() - t0 < 1450) {
       await T.sleep(50);
       const s = await shown();
       if (s !== seen[seen.length - 1]) seen.push(s);
@@ -320,14 +321,13 @@ test('fonts that finish loading re-measure, clear fallback glyphs and fire onDim
   assert.ok(r.requests.includes('all'));
 });
 
-test('dispose releases the atlas, the context, the canvas and the blink timers', async () => {
+test('dispose releases the atlas, the canvas and the blink timers; the last terminal frees the shared context', async () => {
   const r = await inPage(async () => {
     const p = new T.Pane(10, 2, { cursorBlink: true });
     await p.write('x');
     p.focus(true);
     const debug = p.debug;
-    const canvas = debug.canvas;
-    const gl = canvas.getContext('webgl2');
+    const { canvas, gl } = debug;
     const atlases = debug.liveAtlases;
     await T.sleep(100);
     let frames = 0;
@@ -338,8 +338,9 @@ test('dispose releases the atlas, the context, the canvas and the blink timers',
     window.requestAnimationFrame = raf;
     const probe = new T.Pane(1, 1, { fontSize: 9 });
     const after = probe.debug.liveAtlases - 1;
+    const newContext = probe.debug.gl !== gl;
     probe.dispose();
-    return { atlasFreed: after === atlases - 1, lost: gl.isContextLost(), removed: !canvas.isConnected, frames };
+    return { atlasFreed: after === atlases - 1, lost: gl.isContextLost(), removed: !canvas.isConnected, frames, newContext };
   });
-  assert.deepEqual(r, { atlasFreed: true, lost: true, removed: true, frames: 0 });
+  assert.deepEqual(r, { atlasFreed: true, lost: true, removed: true, frames: 0, newContext: true });
 });

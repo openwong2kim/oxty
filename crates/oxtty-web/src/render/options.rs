@@ -1,9 +1,10 @@
 //! Renderer options and the theme read from `term.options`, with xterm.js 6 defaults.
-use js_sys::{Array, Object, Reflect};
+use js_sys::{Array, Object};
 use wasm_bindgen::JsValue;
 
 use super::{CursorInactiveStyle, CursorStyle, RendererOptions, Theme};
 use crate::engine::get;
+use crate::options::option;
 
 /// The `term.options` keys that are renderer options.
 pub const KEYS: [&str; 16] = [
@@ -44,46 +45,12 @@ const ANSI_NAMES: [&str; 16] = [
     "brightWhite",
 ];
 
-/// Sets the xterm.js default of every renderer option `options` lacks, so `term.options.fontSize` reads 15.
-pub fn fill_defaults(options: &Object) {
-    let d = RendererOptions::default();
-    let defaults: [(&str, JsValue); 16] = [
-        ("fontFamily", d.font_family.into()),
-        ("fontSize", d.font_size.into()),
-        ("fontWeight", d.font_weight.into()),
-        ("fontWeightBold", d.font_weight_bold.into()),
-        ("lineHeight", d.line_height.into()),
-        ("letterSpacing", d.letter_spacing.into()),
-        ("theme", Object::new().into()),
-        (
-            "drawBoldTextInBrightColors",
-            d.draw_bold_text_in_bright_colors.into(),
-        ),
-        ("minimumContrastRatio", d.minimum_contrast_ratio.into()),
-        ("customGlyphs", d.custom_glyphs.into()),
-        ("allowTransparency", d.allow_transparency.into()),
-        (
-            "rescaleOverlappingGlyphs",
-            d.rescale_overlapping_glyphs.into(),
-        ),
-        ("cursorBlink", d.cursor_blink.into()),
-        ("cursorStyle", "block".into()),
-        ("cursorWidth", d.cursor_width.into()),
-        ("cursorInactiveStyle", "outline".into()),
-    ];
-    for (key, value) in defaults {
-        if get(options, key).is_undefined() {
-            let _ = Reflect::set(options, &key.into(), &value);
-        }
-    }
-}
-
 fn number(options: &Object, key: &str) -> Option<f64> {
-    get(options, key).as_f64().filter(|v| v.is_finite())
+    option(options, key).as_f64().filter(|v| v.is_finite())
 }
 
 fn boolean(options: &Object, key: &str, default: bool) -> bool {
-    get(options, key).as_bool().unwrap_or(default)
+    option(options, key).as_bool().unwrap_or(default)
 }
 
 const FONT_WEIGHTS: [&str; 11] = [
@@ -103,23 +70,23 @@ fn font_weight(value: &JsValue, default: &str) -> String {
     }
 }
 
-/// The renderer options in `options`; invalid values fall back to the defaults instead of throwing.
+/// The renderer options in `options` (xterm.js defaults where unset); invalid values fall back to the defaults instead of throwing.
 pub fn parse(options: &Object) -> RendererOptions {
     let d = RendererOptions::default();
     RendererOptions {
-        font_family: get(options, "fontFamily")
+        font_family: option(options, "fontFamily")
             .as_string()
             .unwrap_or(d.font_family),
         font_size: number(options, "fontSize")
             .filter(|&v| v > 0.0)
             .unwrap_or(d.font_size),
-        font_weight: font_weight(&get(options, "fontWeight"), &d.font_weight),
-        font_weight_bold: font_weight(&get(options, "fontWeightBold"), &d.font_weight_bold),
+        font_weight: font_weight(&option(options, "fontWeight"), &d.font_weight),
+        font_weight_bold: font_weight(&option(options, "fontWeightBold"), &d.font_weight_bold),
         line_height: number(options, "lineHeight")
             .filter(|&v| v >= 1.0)
             .unwrap_or(d.line_height),
         letter_spacing: number(options, "letterSpacing").unwrap_or(d.letter_spacing),
-        theme: parse_theme(&get(options, "theme")),
+        theme: parse_theme(&option(options, "theme")),
         draw_bold_text_in_bright_colors: boolean(
             options,
             "drawBoldTextInBrightColors",
@@ -137,7 +104,7 @@ pub fn parse(options: &Object) -> RendererOptions {
             d.rescale_overlapping_glyphs,
         ),
         cursor_blink: boolean(options, "cursorBlink", d.cursor_blink),
-        cursor_style: match get(options, "cursorStyle").as_string().as_deref() {
+        cursor_style: match option(options, "cursorStyle").as_string().as_deref() {
             Some("underline") => CursorStyle::Underline,
             Some("bar") => CursorStyle::Bar,
             _ => CursorStyle::Block,
@@ -145,7 +112,10 @@ pub fn parse(options: &Object) -> RendererOptions {
         cursor_width: number(options, "cursorWidth")
             .filter(|&v| v >= 1.0)
             .unwrap_or(d.cursor_width),
-        cursor_inactive_style: match get(options, "cursorInactiveStyle").as_string().as_deref() {
+        cursor_inactive_style: match option(options, "cursorInactiveStyle")
+            .as_string()
+            .as_deref()
+        {
             Some("block") => CursorInactiveStyle::Block,
             Some("bar") => CursorInactiveStyle::Bar,
             Some("underline") => CursorInactiveStyle::Underline,

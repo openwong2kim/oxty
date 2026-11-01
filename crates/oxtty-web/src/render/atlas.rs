@@ -44,6 +44,11 @@ thread_local! {
     static NEXT_ATLAS_ID: Cell<u32> = const { Cell::new(1) };
 }
 
+/// The texture size limit of the first context (0 before there is one).
+pub fn max_texture_size() -> f64 {
+    MAX_TEXTURE_SIZE.with(Cell::get).map_or(0.0, |s| s as f64)
+}
+
 pub fn max_atlas_pages() -> Option<u32> {
     MAX_ATLAS_PAGES.with(Cell::get)
 }
@@ -70,6 +75,17 @@ fn wcwidth(codepoint: u32) -> u32 {
     } else {
         1
     }
+}
+
+/// Ids of the atlases in the cache.
+pub fn live_ids() -> Vec<u32> {
+    CACHE.with(|cache| {
+        cache
+            .borrow()
+            .iter()
+            .filter_map(|e| e.atlas.try_borrow().ok().map(|a| a.id))
+            .collect()
+    })
 }
 
 /// Atlases alive, for the tests.

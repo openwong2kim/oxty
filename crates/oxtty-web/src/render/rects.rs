@@ -1,4 +1,5 @@
-//! Draws cell backgrounds, the cursor and highlight outlines as instanced rectangles.
+//! Draws cell backgrounds, the cursor and highlight outlines as instanced rectangles. The program lives once per
+//! page ([`RectProgram`]); each pane keeps its rectangles ([`RectVertices`]).
 //!
 //! Ported from xterm.js 6.0.0 (commit f447274f430fd22513f6adbf9862d19524471c04, MIT):
 //! `addons/addon-webgl/src/RectangleRenderer.ts` lines 19-382. The highlight outlines and underlines are oxtty's
@@ -87,24 +88,16 @@ pub fn color_to_floats(rgba: u32) -> [f32; 4] {
     ]
 }
 
-pub struct RectangleRenderer {
-    gl: Gl,
+/// The rectangle program and its buffers, once per context.
+pub struct RectProgram {
     program: WebGlProgram,
     vao: WebGlVertexArrayObject,
     buffers: [WebGlBuffer; 3],
     projection_location: WebGlUniformLocation,
-    bg_float: [f32; 4],
-    cursor_float: [f32; 4],
-    vertices: Vertices,
-    vertices_cursor: Vertices,
-    vertices_overlay: Vertices,
-    cols: usize,
-    rows: usize,
-    dims: Dimensions,
 }
 
-impl RectangleRenderer {
-    pub fn new(gl: &Gl, cols: u32, rows: u32, dims: Dimensions, colors: &ColorSet) -> Option<Self> {
+impl RectProgram {
+    pub fn new(gl: &Gl) -> Option<Self> {
         let program = create_program(gl, &vertex_shader(), FRAGMENT_SHADER)?;
         let projection_location = gl.get_uniform_location(&program, "u_projection")?;
         let vao = gl.create_vertex_array()?;
@@ -139,47 +132,23 @@ impl RectangleRenderer {
             );
             gl.vertex_attrib_divisor(location, 1);
         }
-        let mut renderer = Self {
-            gl: gl.clone(),
+        Some(Self {
             program,
             vao,
             buffers: [unit_quad, elements, attributes],
             projection_location,
-            bg_float: [0.0; 4],
-            cursor_float: [0.0; 4],
-            vertices: Vertices::new(),
-            vertices_cursor: Vertices::new(),
-            vertices_overlay: Vertices::new(),
-            cols: cols as usize,
-            rows: rows as usize,
-            dims,
-        };
-        renderer.update_colors(colors);
-        Some(renderer)
+        })
     }
 
-    pub fn dispose(&mut self) {
-        self.gl.delete_program(Some(&self.program));
-        self.gl.delete_vertex_array(Some(&self.vao));
+    pub fn dispose(&self, gl: &Gl) {
+        gl.delete_program(Some(&self.program));
+        gl.delete_vertex_array(Some(&self.vao));
         for buffer in &self.buffers {
-            self.gl.delete_buffer(Some(buffer));
+            gl.delete_buffer(Some(buffer));
         }
     }
 
-    pub fn render_backgrounds(&self) {
-        self.render_vertices(&self.vertices);
-    }
-
-    pub fn render_cursor(&self) {
-        self.render_vertices(&self.vertices_cursor);
-    }
-
-    pub fn render_overlay(&self) {
-        self.render_vertices(&self.vertices_overlay);
-    }
-
-    fn render_vertices(&self, vertices: &Vertices) {
-        let gl = &self.gl;
+    fn draw(&self, gl: &Gl, vertices: &Vertices) {
         gl.use_program(Some(&self.program));
         gl.bind_vertex_array(Some(&self.vao));
         gl.uniform_matrix4fv_with_f32_array(
@@ -188,7 +157,13 @@ impl RectangleRenderer {
             &PROJECTION_MATRIX,
         );
         gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&self.buffers[2]));
-        buffer_f32(gl, Gl::ARRAY_BUFFER, &vertices.attributes, Gl::DYNAMIC_DRAW);
+        let used = (vertices.count * INDICES_PER_RECTANGLE).min(vertices.attributes.len());
+        buffer_f32(
+            gl,
+            Gl::ARRAY_BUFFER,
+            &vertices.attributes[..used],
+            Gl::DYNAMIC_DRAW,
+        );
         gl.draw_elements_instanced_with_i32(
             Gl::TRIANGLE_STRIP,
             4,
@@ -198,17 +173,53 @@ impl RectangleRenderer {
         );
     }
 
-    pub fn resize(&mut self, cols: u32, rows: u32) {
+    pub fn draw_backgrounds(&self, gl: &Gl, r: &RectVertices) {
+        self.draw(gl, &r.vertices);
+    }
+
+    pub fn draw_cursor(&self, gl: &Gl, r: &RectVertices) {
+        self.draw(gl, &r.vertices_cursor);
+    }
+
+    pub fn draw_overlay(&self, gl: &Gl, r: &RectVertices) {
+        self.draw(gl, &r.vertices_overlay);
+    }
+}
+
+/// One pane's rectangles (`RectangleRenderer` minus the GL objects).
+pub struct RectVertices {
+    bg_float: [f32; 4],
+    cursor_float: [f32; 4],
+    vertices: Vertices,
+    vertices_cursor: Vertices,
+    vertices_overlay: Vertices,
+    cols: usize,
+    rows: usize,
+    dims: Dimensions,
+}
+
+impl RectVertices {
+    pub fn new(cols: u32, rows: u32, dims: Dimensions, colors: &ColorSet) -> Self {
+        let mut r = Self {
+            bg_float: [0.0; 4],
+            cursor_float: [0.0; 4],
+            vertices: Vertices::new(),
+            vertices_cursor: Vertices::new(),
+            vertices_overlay: Vertices::new(),
+            cols: cols as usize,
+            rows: rows as usize,
+            dims,
+        };
+        r.update_colors(colors);
+        r
+    }
+
+    /// New size and cell metrics.
+    pub fn resize(&mut self, cols: u32, rows: u32, dims: Dimensions) {
         self.cols = cols as usize;
         self.rows = rows as usize;
-    }
-
-    pub fn handle_resize(&mut self) {
-        self.update_viewport_rectangle();
-    }
-
-    pub fn set_dimensions(&mut self, dims: Dimensions) {
         self.dims = dims;
+        self.update_viewport_rectangle();
     }
 
     /// The theme changed (`onChangeColors`).

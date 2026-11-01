@@ -3,7 +3,7 @@
 
 use napi::bindgen_prelude::{Buffer, Either, Uint32Array};
 use napi_derive::napi;
-use oxtty::{Clipboard, COLOR_SLOTS};
+use oxtty::{Clipboard, HookKind, WindowsPty, WindowsPtyBackend, COLOR_SLOTS};
 
 #[napi(object)]
 pub struct Cursor {
@@ -54,6 +54,18 @@ pub struct AnsiSnapshot {
     pub payload: Option<Buffer>,
     /// `"unsupported-wide-edge"`, `"margins"` or `"partial-tail-overflow"`.
     pub reason: Option<String>,
+}
+
+/// A hooked sequence parsing stopped at, before its default action.
+#[napi(object)]
+pub struct Hook {
+    /// `"csi"`, `"osc"` or `"dcs"`.
+    pub kind: String,
+    pub id: u32,
+    /// Each parameter followed by its sub-parameters.
+    pub params: Vec<Vec<u32>>,
+    /// OSC: everything after the first `;`. DCS: the payload.
+    pub data: Buffer,
 }
 
 #[napi]
@@ -310,6 +322,77 @@ impl Terminal {
     #[napi]
     pub fn flush_sync(&mut self) {
         self.inner.flush_sync();
+    }
+
+    /// Stops parsing at sequences of `kind` (`"csi"`, `"osc"`, `"dcs"`) with `id`, or no longer does.
+    #[napi]
+    pub fn set_hook(&mut self, kind: String, id: u32, on: bool) -> napi::Result<()> {
+        let kind = match kind.as_str() {
+            "csi" => HookKind::Csi,
+            "osc" => HookKind::Osc,
+            "dcs" => HookKind::Dcs,
+            _ => {
+                return Err(napi::Error::from_reason(format!(
+                    "unknown hook kind {kind}"
+                )))
+            }
+        };
+        self.inner.set_hook(kind, id, on);
+        Ok(())
+    }
+
+    /// Like `write`, but stops right after a hooked sequence; returns the bytes taken.
+    #[napi]
+    pub fn feed_until_hook(&mut self, data: Buffer) -> u32 {
+        self.inner.feed_until_hook(&data) as u32
+    }
+
+    #[napi]
+    pub fn pending_hook(&self) -> Option<Hook> {
+        self.inner.pending_hook().map(|hook| Hook {
+            kind: match hook.kind {
+                HookKind::Csi => "csi",
+                HookKind::Osc => "osc",
+                HookKind::Dcs => "dcs",
+            }
+            .into(),
+            id: hook.id,
+            params: hook
+                .params
+                .iter()
+                .map(|p| p.iter().map(|&v| v.into()).collect())
+                .collect(),
+            data: hook.data.into(),
+        })
+    }
+
+    /// Runs the pending hook's default action (`run_default`) or drops it. Parsing goes on with the next
+    /// `feedUntilHook` (with the bytes it did not take, even none).
+    #[napi]
+    pub fn finish_hook(&mut self, run_default: bool) {
+        self.inner.finish_hook(run_default);
+    }
+
+    /// xterm.js `windowsPty`: `backend` is `"conpty"` or `"winpty"`.
+    #[napi]
+    pub fn set_windows_pty(
+        &mut self,
+        backend: Option<String>,
+        build_number: Option<u32>,
+    ) -> napi::Result<()> {
+        let backend = match backend.as_deref() {
+            None => None,
+            Some("conpty") => Some(WindowsPtyBackend::Conpty),
+            Some("winpty") => Some(WindowsPtyBackend::Winpty),
+            Some(other) => {
+                return Err(napi::Error::from_reason(format!("unknown backend {other}")))
+            }
+        };
+        self.inner.set_windows_pty(WindowsPty {
+            backend,
+            build_number,
+        });
+        Ok(())
     }
 
     /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.

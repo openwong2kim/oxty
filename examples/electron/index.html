@@ -10,7 +10,7 @@
 <script type="module">
   import { init, Terminal, FitAddon } from './node_modules/oxtty/dist/xterm.js';
 
-  await init(await window.pty.wasm());
+  await init(...await window.pty.wasm());
   const term = new Terminal({ fontFamily: 'Menlo, Consolas, monospace', fontSize: 14, theme: { background: '#1e1e1e' } });
   const fit = new FitAddon();
   term.loadAddon(fit);

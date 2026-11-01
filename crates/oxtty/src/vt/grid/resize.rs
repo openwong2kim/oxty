@@ -80,6 +80,15 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         self.raw.grow_visible_lines(target);
         self.lines = target;
 
+        // oxtty: the rows that came into view go back to history, and spare rows come in blank at the bottom.
+        if self.grow_blank {
+            self.raw.rotate(-(lines_added as isize));
+            for line in target - lines_added..target {
+                self.raw[Line(line as i32)].reset(&self.cursor.template);
+            }
+            return;
+        }
+
         let history_size = self.history_size();
         let from_history = min(history_size, lines_added);
 
@@ -276,7 +285,12 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         let mut new_raw = Vec::with_capacity(reversed.len());
         for mut row in reversed.drain(..).rev() {
             if row.len() < columns {
-                row.grow(columns);
+                // oxtty: with the xterm.js resize, a row not reflowed keeps its wrapped mark.
+                if !reflow && self.keep_cursor_paragraph {
+                    row.resize_keeping_wrap(columns);
+                } else {
+                    row.grow(columns);
+                }
             }
             new_raw.push(row);
         }
@@ -313,6 +327,12 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         for (i, mut row) in rows.drain(..).enumerate().rev() {
             if reflow && cursor_paragraph.as_ref().is_some_and(|p| p.contains(&i)) {
                 Self::resize_cursor_row(&mut row, columns);
+                new_raw.push(row);
+                continue;
+            }
+            // oxtty: with the xterm.js resize, a row not reflowed keeps its wrapped mark.
+            if !reflow && self.keep_cursor_paragraph {
+                row.resize_keeping_wrap(columns);
                 new_raw.push(row);
                 continue;
             }

@@ -70,6 +70,17 @@ export type AnsiSnapshot =
   /** `"unsupported-wide-edge"`, `"margins"` or `"partial-tail-overflow"`. */
   | { ok: false; reason: string };
 
+/** A hooked sequence parsing stopped at, before its default action (`Terminal.writeUntilHook`). */
+export interface Hook {
+  kind: 'csi' | 'osc' | 'dcs';
+  /** As given to `setHook`. */
+  id: number;
+  /** CSI and DCS parameters, each followed by its sub-parameters (an empty parameter is 0, values stop at 65535). */
+  params: number[][];
+  /** OSC: everything after the first `;`. DCS: the payload. */
+  data: Uint8Array;
+}
+
 export class Terminal {
   constructor(options?: TerminalOptions);
   /** Feeds program output. Strings are encoded as UTF-8. */
@@ -132,7 +143,32 @@ export class Terminal {
   /** Colours (0xRRGGBB, COLOR_SLOTS of them: palette 0–255, foreground, background, cursor) that answer OSC 4/10/11/12 queries; null stops answering. */
   setColors(colors: ArrayLike<number> | null): void;
   syncPending(): boolean;
-  flushSync(): void;
+  /** Applies the output a synchronized update holds. False when it stopped at a hook (see `writeUntilHook`). */
+  flushSync(): boolean;
+  /**
+   * Stops parsing at sequences of `kind` with `id`, or no longer does (`on` false). For CSI and DCS the id is the
+   * intermediates (a private marker such as `?` first) and final byte, one byte each from the most significant;
+   * for OSC the number before the first `;`. `write` runs their default action as usual.
+   */
+  setHook(kind: 'csi' | 'osc' | 'dcs', id: number, on: boolean): void;
+  /**
+   * Like `write`, but stops right after a hooked sequence, before its default action. True when all of `data` was
+   * parsed; false when stopped: read `pendingHook()`, run or skip the default with `finishHook()`, then `resume()`.
+   * Throws until then. The output of a synchronized update is parsed when it ends, so its hooks are met then.
+   */
+  writeUntilHook(data: string | Uint8Array): boolean;
+  pendingHook(): Hook | null;
+  /** Runs the pending hook's default action (`runDefault`) or skips it; `resume()` parses on. */
+  finishHook(runDefault: boolean): void;
+  /** Parses the rest of the stopped write (or flush) after `finishHook`; false when it stopped at the next hook. */
+  resume(): boolean;
+  /**
+   * Behaves as xterm.js 6.1 does with `windowsPty` (none by default): with a backend or build, more rows are added
+   * blank at the bottom instead of bringing scrollback back; with a build that is not conpty 21376 or later,
+   * resizing does not reflow; with conpty before 21376, a line feed or `CSI H` marks the cursor row as continuing
+   * the row above when that row ends in a non-blank cell.
+   */
+  setWindowsPty(pty: { backend?: 'conpty' | 'winpty'; buildNumber?: number } | null | undefined): void;
   /** Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes. */
   ansiSnapshot(): AnsiSnapshot;
   dispose(): void;

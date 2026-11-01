@@ -7,7 +7,9 @@
 
 use std::cell::RefCell;
 
-use oxtty::{Clipboard, CursorShape, Damage, Engine, COLOR_SLOTS};
+use oxtty::{
+    Clipboard, CursorShape, Damage, Engine, HookKind, WindowsPty, WindowsPtyBackend, COLOR_SLOTS,
+};
 
 /// The same dlmalloc std uses on wasm, but growing linear memory in larger
 /// steps: at 64 KiB per `memory.grow`, filling a scrollback calls it thousands
@@ -107,7 +109,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    8
+    9
 }
 
 #[no_mangle]
@@ -484,4 +486,83 @@ pub extern "C" fn oxtty_ansi_snapshot(h: u32) -> i32 {
         Ok(bytes) => set_out(bytes) as i32,
         Err(why) => -(set_out(why.as_str().as_bytes().to_vec()) as i32),
     })
+}
+
+// Parser hooks. `kind` is 0 for CSI, 1 for OSC, 2 for DCS.
+
+/// Stops parsing at sequences of `kind` with `id` (`on` 1), or no longer does (`on` 0).
+#[no_mangle]
+pub extern "C" fn oxtty_set_hook(h: u32, kind: u32, id: u32, on: u32) {
+    let kind = match kind {
+        0 => HookKind::Csi,
+        1 => HookKind::Osc,
+        2 => HookKind::Dcs,
+        _ => return,
+    };
+    with(h, (), |t| t.set_hook(kind, id, on != 0));
+}
+
+/// Like `oxtty_feed`, but stops right after a hooked sequence; returns the bytes taken.
+///
+/// # Safety
+/// `ptr` must point to `len` readable bytes in linear memory (or `len` is 0).
+#[no_mangle]
+pub unsafe extern "C" fn oxtty_feed_until_hook(h: u32, ptr: *const u8, len: u32) -> u32 {
+    // Called with nothing to go on where parsing stopped; `ptr` may then be null.
+    let bytes = if len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(ptr, len as usize)
+    };
+    with(h, 0, |t| t.feed_until_hook(bytes) as u32)
+}
+
+/// The pending hook's kind, or -1 if none. OUT32 holds its id, the parameter count, then each parameter as its
+/// length and values (sub-parameters after the first); OUT holds its data.
+#[no_mangle]
+pub extern "C" fn oxtty_pending_hook(h: u32) -> i32 {
+    with(h, -1, |t| {
+        let Some(hook) = t.pending_hook() else {
+            return -1;
+        };
+        OUT32.with_borrow_mut(|out| {
+            out.clear();
+            out.push(hook.id);
+            out.push(hook.params.len() as u32);
+            for param in &hook.params {
+                out.push(param.len() as u32);
+                out.extend(param.iter().map(|&v| u32::from(v)));
+            }
+        });
+        set_out(hook.data);
+        match hook.kind {
+            HookKind::Csi => 0,
+            HookKind::Osc => 1,
+            HookKind::Dcs => 2,
+        }
+    })
+}
+
+/// Runs the pending hook's default action (`run_default` 1) or drops it. Parsing goes on with the next
+/// `oxtty_feed_until_hook` (`len` may be 0).
+#[no_mangle]
+pub extern "C" fn oxtty_finish_hook(h: u32, run_default: u32) {
+    with(h, (), |t| t.finish_hook(run_default != 0));
+}
+
+/// xterm.js `windowsPty`: `backend` 0 none, 1 conpty, 2 winpty; `build` NaN for none.
+#[no_mangle]
+pub extern "C" fn oxtty_set_windows_pty(h: u32, backend: u32, build: f64) {
+    let backend = match backend {
+        1 => Some(WindowsPtyBackend::Conpty),
+        2 => Some(WindowsPtyBackend::Winpty),
+        _ => None,
+    };
+    let build_number = (!build.is_nan()).then(|| build.clamp(0.0, u32::MAX as f64) as u32);
+    with(h, (), |t| {
+        t.set_windows_pty(WindowsPty {
+            backend,
+            build_number,
+        })
+    });
 }

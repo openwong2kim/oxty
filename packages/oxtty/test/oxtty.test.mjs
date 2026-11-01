@@ -263,3 +263,52 @@ test('trimmedLines counts lines that left the top of the scrollback', () => {
   assert.deepEqual([t.historyLength, t.trimmedLines], [3, 5]);
   t.dispose();
 });
+
+test('parser hooks: writeUntilHook stops at a hooked sequence, finishHook decides its default, resume goes on', async () => {
+  const t = make({ cols: 20, rows: 4 });
+  t.setHook('csi', 0x6e, true); // CSI n
+  t.setHook('osc', 133, true);
+  t.setHook('dcs', 0x2471, true); // DCS $ q
+  assert.equal(t.writeUntilHook('a\x1b]133;A;x\x07b\x1b[6nc\x1bP1$qm\x1b\\d'), false);
+  assert.equal(t.rowText(0), 'a');
+  assert.deepEqual({ ...t.pendingHook(), data: new TextDecoder().decode(t.pendingHook().data) }, { kind: 'osc', id: 133, params: [], data: 'A;x' });
+  assert.throws(() => t.writeUntilHook('x'), /hook is pending/);
+  t.finishHook(true);
+  assert.equal(t.resume(), false);
+  assert.deepEqual(t.pendingHook().params, [[6]]);
+  t.finishHook(false);
+  assert.equal(t.resume(), false);
+  assert.deepEqual(t.pendingHook(), { kind: 'dcs', id: 0x2471, params: [[1]], data: new TextEncoder().encode('m') });
+  t.finishHook(true);
+  assert.equal(t.resume(), true);
+  assert.equal(t.pendingHook(), null);
+  assert.equal(t.rowText(0), 'abcd');
+  assert.equal(t.takeReplies().length, 0);
+  // `write` runs defaults itself; a hook dropped with setHook(…, false) no longer stops.
+  t.write('\x1b[6n');
+  assert.deepEqual(Array.from(t.takeReplies()), Array.from(new TextEncoder().encode('\x1b[1;5R')));
+  t.setHook('csi', 0x6e, false);
+  assert.equal(t.writeUntilHook('\x1b[6n'), true);
+  // Hooks held by a synchronized update stop the flush; resume applies the rest.
+  t.setHook('csi', 0x6e, true);
+  assert.equal(t.writeUntilHook('\x1b[?2026hE\x1b[6nF'), true);
+  assert.equal(t.flushSync(), false);
+  t.finishHook(false);
+  assert.equal(t.resume(), true);
+  assert.equal(t.rowText(0), 'abcdEF');
+  assert.equal(t.syncPending(), false);
+  t.dispose();
+});
+
+test('windowsPty: the conpty wrapping heuristic, and no setting is no heuristic', () => {
+  const t = make({ cols: 10, rows: 3 });
+  t.write('0123456789\r\n');
+  assert.equal(t.rowWrapped(0), false);
+  t.setWindowsPty({ backend: 'conpty', buildNumber: 19045 });
+  t.write('0123456789\r\n');
+  assert.equal(t.rowWrapped(1), true);
+  t.setWindowsPty(undefined);
+  t.write('0123456789\r\n');
+  assert.equal(t.rowWrapped(2), false);
+  t.dispose();
+});

@@ -1,133 +1,80 @@
-//! The WebGL2 renderer: ties together the glyph and rectangle renderers, the shared atlas, the render model and
-//! the colour resolver; fills the model from [`Viewport`] rows; owns the canvas, the context and its recovery.
+//! The WebGL2 renderer of one terminal: fills the render model from [`Viewport`] rows, keeps the pane's vertex
+//! data, and draws through the page's shared context ([`super::gpu`]) into its own canvas.
 //!
 //! Ported from xterm.js 6.0.0 (commit f447274f430fd22513f6adbf9862d19524471c04, MIT): the model update, dimensions
-//! and font/devicePixelRatio handling of `addons/addon-webgl/src/WebglRenderer.ts` lines 200-560,
-//! `src/browser/services/CharSizeService.ts` lines 13-127 (glyph measurement) and
-//! `addons/addon-webgl/src/DevicePixelObserver.ts` lines 8-40, by way of the TypeScript orchestrator at 0510a7d
-//! (`packages/oxtty/xterm/src/renderer/WebglRenderer.ts`), whose context state machine (live/lost/parked) and
-//! context hand-over between panes are oxtty's.
+//! and font/devicePixelRatio handling of `addons/addon-webgl/src/WebglRenderer.ts` lines 200-560 and
+//! `src/browser/services/CharSizeService.ts` lines 13-127 (glyph measurement), by way of the TypeScript
+//! orchestrator at 0510a7d (`packages/oxtty/xterm/src/renderer/WebglRenderer.ts`).
 //!
-//! # Contexts
+//! # Memory
 //!
-//! A page keeps only so many WebGL contexts (16 in Chrome) and takes the least recently used away when a new one
-//! goes over. A lost context waits [`CONTEXT_RESTORE_TIMEOUT`] for `webglcontextrestored`, then the renderer makes a
-//! new canvas under a back-off throttle. A context the browser took away for another pane is never restored, so
-//! that renderer is *parked* instead: it waits to be handed a context by a pane that goes out of view or away,
-//! which keeps panes from evicting each other in a loop.
+//! A pane owns its canvas (holding the last frame), its render model and glyph vertices; the context, programs,
+//! atlas textures, glyph measurement, the visibility observer and the font and window listeners are shared by
+//! every pane on the page. A pane draws only when something changed, and not at all while it is out of view
+//! (`display: none`, zero size, scrolled away): it redraws everything when it comes back.
 //!
 //! # Re-entrancy
 //!
-//! State is behind one `RefCell` per renderer. DOM listeners, timers and observers borrow it with `try_borrow_mut`
+//! State is behind one `RefCell` per pane. DOM listeners, timers and observers borrow it with `try_borrow_mut`
 //! and retry on a later task when it is busy; they never call into the terminal, they queue
 //! [`RendererRequest`]s and call the terminal's `wake`.
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::{Rc, Weak};
 
-use js_sys::{Array, Object, Reflect};
+use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    Document, Event, EventTarget, FocusEvent, HtmlCanvasElement, HtmlElement, IntersectionObserver,
-    IntersectionObserverEntry, OffscreenCanvasRenderingContext2d, ResizeObserver,
-    ResizeObserverBoxOptions, ResizeObserverOptions, WebGl2RenderingContext as Gl,
-    WebGlContextAttributes, WebglLoseContext,
+    Document, Event, FocusEvent, HtmlCanvasElement, HtmlElement, IntersectionObserver,
+    IntersectionObserverEntry, OffscreenCanvasRenderingContext2d,
 };
 
 use super::atlas::{self, AtlasConfig, TextureAtlas};
 use super::blink::Blink;
 use super::cell::{CellData, CM_RGB, RGB_MASK};
 use super::color::{css_to_color, ColorSet};
-use super::glyphs::GlyphRenderer;
+use super::glyphs::GlyphVertices;
+use super::gpu::{self, Listener, Present};
 use super::model::{
     resolve, CursorModel, RenderModel, ResolvedHighlight, SelectionModel, COMBINED_CHAR_BIT_MASK,
     RENDER_MODEL_BG_OFFSET, RENDER_MODEL_EXT_OFFSET, RENDER_MODEL_FG_OFFSET,
     RENDER_MODEL_INDICIES_PER_CELL,
 };
-use super::rects::{css_floats, Rect, RectangleRenderer};
+use super::rects::{css_floats, Rect, RectVertices};
 use super::{
     CursorInactiveStyle, CursorStyle, Dimensions, Dirty, Highlight, Renderer, RendererOptions,
     RendererRequest, SelectionRange,
 };
 use crate::engine::{attr, CursorShape, Viewport};
-use crate::timer::{self, Timeout};
+use crate::timer;
 
-/// How long a lost context may take to come back by itself before the renderer makes a new one (as in xterm.js).
-const CONTEXT_RESTORE_TIMEOUT: i32 = 3000;
 /// Requests kept for [`Renderer::debug`].
 const LOG_LIMIT: usize = 256;
 
 thread_local! {
-    /// Live renderers in creation order, to hand contexts to the ones in view.
-    static RENDERERS: RefCell<Vec<Weak<RefCell<Inner>>>> = const { RefCell::new(Vec::new()) };
+    /// Live panes in creation order.
+    static PANES: RefCell<Vec<Weak<RefCell<Inner>>>> = const { RefCell::new(Vec::new()) };
     static NEXT_ID: Cell<u32> = const { Cell::new(1) };
-}
-
-/// `Live`: drawing. `Lost`: waiting for `webglcontextrestored`. `Parked`: no context until one is handed over.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum State {
-    Live,
-    Lost,
-    Parked,
-}
-
-/// A DOM listener, removed when dropped.
-struct Listener {
-    target: EventTarget,
-    kind: &'static str,
-    closure: Closure<dyn FnMut(Event)>,
-}
-
-impl Listener {
-    fn new(target: &EventTarget, kind: &'static str, closure: Closure<dyn FnMut(Event)>) -> Self {
-        let _ = target.add_event_listener_with_callback(kind, closure.as_ref().unchecked_ref());
-        Self {
-            target: target.clone(),
-            kind,
-            closure,
-        }
-    }
-}
-
-impl Drop for Listener {
-    fn drop(&mut self) {
-        let _ = self
-            .target
-            .remove_event_listener_with_callback(self.kind, self.closure.as_ref().unchecked_ref());
-    }
-}
-
-enum Observer {
-    Resize(ResizeObserver),
-    Intersection(IntersectionObserver),
-}
-
-/// An observer and its callback, disconnected when dropped.
-struct Observed {
-    observer: Observer,
-    _closure: Closure<dyn FnMut(Array)>,
-}
-
-impl Drop for Observed {
-    fn drop(&mut self) {
-        match &self.observer {
-            Observer::Resize(o) => o.disconnect(),
-            Observer::Intersection(o) => o.disconnect(),
-        }
-    }
+    /// Canvas text metrics for glyph measurement, `None` where they are missing (then each pane measures in
+    /// the DOM).
+    static METRICS: Option<OffscreenCanvasRenderingContext2d> = metrics_context();
+    /// One observer tells every pane whether it is in view.
+    static VISIBILITY: Option<IntersectionObserver> = visibility_observer();
+    /// Whether the page-wide font and window listeners are registered.
+    static LISTENING: Cell<bool> = const { Cell::new(false) };
 }
 
 /// How glyphs are measured (`CharSizeService`): canvas text metrics, or a DOM element where those are missing.
 enum Measure {
-    Metrics(OffscreenCanvasRenderingContext2d),
+    Metrics,
     Dom(HtmlElement),
 }
 
 impl Measure {
     fn new(document: &Document, parent: &HtmlElement) -> Option<Self> {
-        if let Some(ctx) = metrics_context() {
-            return Some(Self::Metrics(ctx));
+        if METRICS.with(Option::is_some) {
+            return Some(Self::Metrics);
         }
         const REPEAT: usize = 32;
         let span: HtmlElement = document.create_element("span").ok()?.dyn_into().ok()?;
@@ -142,14 +89,15 @@ impl Measure {
 
     fn measure(&self, options: &RendererOptions) -> Option<(f64, f64)> {
         let (width, height) = match self {
-            Self::Metrics(ctx) => {
+            Self::Metrics => METRICS.with(|ctx| {
+                let ctx = ctx.as_ref()?;
                 ctx.set_font(&format!("{}px {}", options.font_size, options.font_family));
                 let m = ctx.measure_text("W").ok()?;
-                (
+                Some((
                     m.width(),
                     m.font_bounding_box_ascent() + m.font_bounding_box_descent(),
-                )
-            }
+                ))
+            })?,
             Self::Dom(span) => {
                 let style = span.style();
                 let _ = style.set_property("font-family", &options.font_family);
@@ -174,12 +122,64 @@ impl Drop for Measure {
     }
 }
 
-fn metrics_context() -> Option<OffscreenCanvasRenderingContext2d> {
-    let canvas = web_sys::OffscreenCanvas::new(100, 100).ok()?;
-    let ctx: OffscreenCanvasRenderingContext2d = canvas.get_context("2d").ok()??.dyn_into().ok()?;
-    let m = ctx.measure_text("W").ok()?;
-    let has = |key: &str| Reflect::has(&m, &key.into()).unwrap_or(false);
-    (has("width") && has("fontBoundingBoxAscent") && has("fontBoundingBoxDescent")).then_some(ctx)
+fn visibility_observer() -> Option<IntersectionObserver> {
+    let callback = Closure::<dyn FnMut(Array)>::new(|entries: Array| {
+        for entry in entries.iter() {
+            let Some(entry) = entry.dyn_ref::<IntersectionObserverEntry>() else {
+                continue;
+            };
+            // A pane clipped to nothing (a zero-size or scrolled-away parent) counts as out of view
+            let (target, visible) = (entry.target(), entry.intersection_ratio() > 0.0);
+            for pane in panes() {
+                let weak = Rc::downgrade(&pane);
+                let is_target = pane
+                    .try_borrow()
+                    .is_ok_and(|p| AsRef::<web_sys::Element>::as_ref(&p.container) == &target);
+                if is_target {
+                    with_inner(&weak, move |i| i.handle_visibility(visible));
+                }
+            }
+        }
+    });
+    // Lives as long as the page; the GC owns the closure
+    let callback: Function = callback.into_js_value().unchecked_into();
+    IntersectionObserver::new(&callback).ok()
+}
+
+/// The font and window listeners every pane shares, registered with the first pane for the page's lifetime.
+fn listen_page(window: &web_sys::Window, document: &Document) {
+    if LISTENING.with(|l| l.replace(true)) {
+        return;
+    }
+    let fonts_loaded = Closure::<dyn FnMut(Event)>::new(|_| {
+        each_pane(Inner::handle_fonts_loaded);
+    });
+    let _ = document.fonts().add_event_listener_with_callback(
+        "loadingdone",
+        &fonts_loaded.into_js_value().unchecked_into(),
+    );
+    let resize = Closure::<dyn FnMut(Event)>::new(|_| {
+        each_pane(|i| {
+            i.check_device_pixel_ratio();
+        });
+    });
+    let _ =
+        window.add_event_listener_with_callback("resize", &resize.into_js_value().unchecked_into());
+}
+
+fn panes() -> Vec<Rc<RefCell<Inner>>> {
+    PANES.with(|p| p.borrow().iter().filter_map(Weak::upgrade).collect())
+}
+
+fn each_pane(f: fn(&mut Inner)) {
+    for pane in panes() {
+        with_inner(&Rc::downgrade(&pane), f);
+    }
+}
+
+/// Every pane redraws everything (the shared context was restored or made anew).
+pub(super) fn redraw_all() {
+    each_pane(Inner::request_redraw_all);
 }
 
 struct Inner {
@@ -196,11 +196,11 @@ struct Inner {
     char_size: (f64, f64),
     dims: Dimensions,
     dpr: f64,
+    /// The pane's canvas on the page and how frames reach it.
     canvas: HtmlCanvasElement,
-    gl: Gl,
-    max_texture_size: f64,
-    rects: Option<RectangleRenderer>,
-    glyphs: Option<GlyphRenderer>,
+    present: Present,
+    rects: RectVertices,
+    glyphs: GlyphVertices,
     atlas: Option<Rc<RefCell<TextureAtlas>>>,
     model: RenderModel,
     cell: CellData,
@@ -215,22 +215,14 @@ struct Inner {
     blink: Option<Blink>,
     cursor: crate::engine::Cursor,
     cursor_row: i64,
-    /// Resolved background of the last cell drawn (the glyph renderer clips glyphs where it changes).
+    /// Resolved background of the last cell drawn (glyphs are clipped where it changes).
     last_bg: u32,
     full_redraw: bool,
     dirty: BTreeSet<u32>,
-    state: State,
-    context_gone: bool,
     visible: bool,
     disposed: bool,
-    restore_timeout: Option<Timeout>,
-    recreate_timeout: Option<Timeout>,
-    last_recreate: f64,
-    recreate_gap: f64,
-    context_listeners: Vec<Listener>,
-    context_observer: Option<Observed>,
+    draws: u32,
     listeners: Vec<Listener>,
-    observers: Vec<Observed>,
     requests: Vec<RendererRequest>,
     log: Vec<RendererRequest>,
     wake: Rc<dyn Fn()>,
@@ -257,30 +249,33 @@ impl WebglRenderer {
         let window = document
             .default_view()
             .ok_or("oxtty/xterm: the document has no window")?;
-        let (canvas, gl) = new_context(&document)?;
+        gpu::ensure(&document)?;
+        let canvas: HtmlCanvasElement = document.create_element("canvas")?.unchecked_into();
+        let present = Present::new(&canvas).ok_or("oxtty/xterm: the canvas has no context")?;
+        container.append_child(&canvas)?;
         let measure = Measure::new(&document, container);
-        let id = NEXT_ID.with(|n| n.replace(n.get() + 1));
         let focused = document
             .active_element()
             .is_some_and(|active| element.contains(Some(&active)));
+        let colors = ColorSet::new(&options.theme);
+        let dims = Dimensions::default();
         let inner = Rc::new(RefCell::new(Inner {
-            id,
+            id: NEXT_ID.with(|n| n.replace(n.get() + 1)),
             me: Weak::new(),
             document: document.clone(),
             container: container.clone(),
             cols,
             rows,
             options: options.clone(),
-            colors: ColorSet::new(&options.theme),
+            rects: RectVertices::new(cols, rows, dims, &colors),
+            colors,
             measure,
             char_size: (0.0, 0.0),
-            dims: Dimensions::default(),
+            dims,
             dpr: window.device_pixel_ratio(),
-            canvas: canvas.clone(),
-            gl: gl.clone(),
-            max_texture_size: 0.0,
-            rects: None,
-            glyphs: None,
+            canvas,
+            present,
+            glyphs: GlyphVertices::new(cols, rows, dims),
             atlas: None,
             model: RenderModel::default(),
             cell: CellData::default(),
@@ -296,34 +291,29 @@ impl WebglRenderer {
             last_bg: 0,
             full_redraw: true,
             dirty: BTreeSet::new(),
-            state: State::Live,
-            context_gone: false,
             visible: true,
             disposed: false,
-            restore_timeout: None,
-            recreate_timeout: None,
-            last_recreate: f64::NEG_INFINITY,
-            recreate_gap: 1000.0,
-            context_listeners: Vec::new(),
-            context_observer: None,
+            draws: 0,
             listeners: Vec::new(),
-            observers: Vec::new(),
             requests: Vec::new(),
             log: Vec::new(),
             wake,
         }));
+        PANES.with(|p| p.borrow_mut().push(Rc::downgrade(&inner)));
+        listen_page(&window, &document);
+        VISIBILITY.with(|v| {
+            if let Some(v) = v {
+                v.observe(container);
+            }
+        });
         {
             let mut i = inner.borrow_mut();
             i.me = Rc::downgrade(&inner);
+            i.glyphs.rescale_overlapping_glyphs = options.rescale_overlapping_glyphs;
             i.measure_chars();
-            i.install_context(canvas, gl);
-        }
-        RENDERERS.with(|r| r.borrow_mut().push(Rc::downgrade(&inner)));
-        {
-            let mut i = inner.borrow_mut();
-            i.initialize_webgl_state();
+            i.handle_resize();
             i.update_cursor_blink();
-            i.listen(&window, &document, element);
+            i.listen(element);
         }
         Ok(Self { inner })
     }
@@ -334,11 +324,18 @@ impl Drop for WebglRenderer {
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             inner.dispose();
         }
-        RENDERERS.with(|r| {
-            if let Ok(mut r) = r.try_borrow_mut() {
-                r.retain(|w| w.strong_count() > 0 && !Weak::ptr_eq(w, &Rc::downgrade(&self.inner)));
-            }
+        let me = Rc::downgrade(&self.inner);
+        let empty = PANES.with(|p| {
+            let Ok(mut p) = p.try_borrow_mut() else {
+                return false;
+            };
+            p.retain(|w| w.strong_count() > 0 && !Weak::ptr_eq(w, &me));
+            p.is_empty()
         });
+        // The last terminal frees the context
+        if empty {
+            gpu::release();
+        }
     }
 }
 
@@ -355,62 +352,23 @@ fn with_inner(weak: &Weak<RefCell<Inner>>, f: impl FnOnce(&mut Inner) + 'static)
     }
 }
 
-/// Every other live renderer, in creation order.
-fn others(me: &Weak<RefCell<Inner>>) -> Vec<Rc<RefCell<Inner>>> {
-    RENDERERS.with(|r| {
-        r.borrow()
-            .iter()
-            .filter(|w| !Weak::ptr_eq(w, me))
-            .filter_map(Weak::upgrade)
-            .collect()
-    })
-}
-
-fn new_context(document: &Document) -> Result<(HtmlCanvasElement, Gl), JsValue> {
-    let canvas: HtmlCanvasElement = document.create_element("canvas")?.unchecked_into();
-    let attributes = WebGlContextAttributes::new();
-    attributes.set_antialias(false);
-    attributes.set_depth(false);
-    attributes.set_preserve_drawing_buffer(false);
-    let gl: Gl = canvas
-        .get_context_with_context_options("webgl2", &attributes)?
-        .and_then(|c| c.dyn_into().ok())
-        .ok_or("oxtty/xterm: WebGL2 is not supported")?;
-    Ok((canvas, gl))
-}
-
-fn lose_context(gl: &Gl) {
-    if let Ok(Some(ext)) = gl.get_extension("WEBGL_lose_context") {
-        ext.unchecked_into::<WebglLoseContext>().lose_context();
-    }
+fn metrics_context() -> Option<OffscreenCanvasRenderingContext2d> {
+    let canvas = web_sys::OffscreenCanvas::new(1, 1).ok()?;
+    let ctx: OffscreenCanvasRenderingContext2d = canvas.get_context("2d").ok()??.dyn_into().ok()?;
+    let m = ctx.measure_text("W").ok()?;
+    let has = |key: &str| Reflect::has(&m, &key.into()).unwrap_or(false);
+    (has("width") && has("fontBoundingBoxAscent") && has("fontBoundingBoxDescent")).then_some(ctx)
 }
 
 impl Inner {
-    fn listen(&mut self, window: &web_sys::Window, document: &Document, element: &HtmlElement) {
-        let weak = self.me.clone();
-        let w = weak.clone();
-        let fonts_loaded = Closure::<dyn FnMut(Event)>::new(move |_| {
-            with_inner(&w, Inner::handle_fonts_loaded);
-        });
-        self.listeners.push(Listener::new(
-            &document.fonts(),
-            "loadingdone",
-            fonts_loaded,
-        ));
-        let w = weak.clone();
-        let resize = Closure::<dyn FnMut(Event)>::new(move |_| {
-            with_inner(&w, |i| {
-                i.check_device_pixel_ratio();
-            });
-        });
-        self.listeners.push(Listener::new(window, "resize", resize));
-        // Focus picks the cursor style and runs the blink; the textarea that takes focus is inside `element`
-        let w = weak.clone();
+    /// Focus picks the cursor style and runs the blink; the textarea that takes focus is inside `element`.
+    fn listen(&mut self, element: &HtmlElement) {
+        let w = self.me.clone();
         let focus_in =
             Closure::<dyn FnMut(Event)>::new(move |_| with_inner(&w, |i| i.set_focused(true)));
         self.listeners
             .push(Listener::new(element, "focusin", focus_in));
-        let w = weak.clone();
+        let w = self.me.clone();
         let el = element.clone();
         let focus_out = Closure::<dyn FnMut(Event)>::new(move |e: Event| {
             let inside = e
@@ -422,171 +380,16 @@ impl Inner {
         });
         self.listeners
             .push(Listener::new(element, "focusout", focus_out));
-        let w = weak;
-        let visibility = Closure::<dyn FnMut(Array)>::new(move |entries: Array| {
-            let last = entries.get(entries.length().saturating_sub(1));
-            if let Some(entry) = last.dyn_ref::<IntersectionObserverEntry>() {
-                let visible = entry.is_intersecting();
-                with_inner(&w, move |i| i.handle_visibility(visible));
-            }
-        });
-        if let Ok(observer) = IntersectionObserver::new(visibility.as_ref().unchecked_ref()) {
-            observer.observe(&self.container);
-            self.observers.push(Observed {
-                observer: Observer::Intersection(observer),
-                _closure: visibility,
-            });
-        }
     }
 
-    fn measure_chars(&mut self) {
-        if let Some(size) = self.measure.as_ref().and_then(|m| m.measure(&self.options)) {
-            self.char_size = size;
-        }
-    }
-
-    /// Makes `canvas` and `gl` this renderer's, replacing the current canvas in the DOM.
-    fn install_context(&mut self, canvas: HtmlCanvasElement, gl: Gl) {
-        // Over the browser's limit, getContext took the oldest context away. Nothing will restore it, so its
-        // renderer waits to be handed a context instead of making a new one after the timeout, which would take
-        // the next one's
-        for other in others(&self.me) {
-            if let Ok(mut r) = other.try_borrow_mut() {
-                if r.state == State::Live && r.gl.is_context_lost() {
-                    r.context_gone = true;
-                }
-            }
-        }
-        self.context_listeners.clear();
-        self.context_observer = None;
-        let weak = self.me.clone();
-        let lost = Closure::<dyn FnMut(Event)>::new(move |e: Event| {
-            // Allows the context to be restored
-            e.prevent_default();
-            with_inner(&weak, Inner::handle_context_lost);
-        });
-        let weak = self.me.clone();
-        let restored = Closure::<dyn FnMut(Event)>::new(move |_| {
-            with_inner(&weak, Inner::handle_context_restored)
-        });
-        self.context_listeners
-            .push(Listener::new(&canvas, "webglcontextlost", lost));
-        self.context_listeners
-            .push(Listener::new(&canvas, "webglcontextrestored", restored));
-        self.context_observer = self.observe_device_pixels(&canvas);
-        if self.canvas.parent_element().is_some() && self.canvas != canvas {
-            let _ = self.canvas.replace_with_with_node_1(&canvas);
-        } else if canvas.parent_element().is_none() {
-            let _ = self.container.append_child(&canvas);
-        }
-        self.max_texture_size = gl
-            .get_parameter(Gl::MAX_TEXTURE_SIZE)
-            .ok()
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        self.canvas = canvas;
-        self.gl = gl;
-        self.state = State::Live;
-        self.context_gone = false;
-    }
-
-    /// `observeDevicePixelDimensions`: the canvas's exact device-pixel size, which corrects rounding at fractional
-    /// devicePixelRatios.
-    fn observe_device_pixels(&self, canvas: &HtmlCanvasElement) -> Option<Observed> {
-        let weak = self.me.clone();
-        let target: JsValue = canvas.clone().into();
-        let observer_slot: Rc<RefCell<Option<ResizeObserver>>> = Rc::default();
-        let slot = observer_slot.clone();
-        let closure = Closure::<dyn FnMut(Array)>::new(move |entries: Array| {
-            let entry = entries
-                .iter()
-                .find(|e| Reflect::get(e, &"target".into()).is_ok_and(|t| t == target));
-            let Some(entry) = entry else { return };
-            let Ok(sizes) = Reflect::get(&entry, &"devicePixelContentBoxSize".into()) else {
-                return;
-            };
-            if sizes.is_undefined() {
-                // Not supported by this browser
-                if let Some(observer) = slot.borrow_mut().take() {
-                    observer.disconnect();
-                }
-                return;
-            }
-            let size = Reflect::get(&sizes, &0.into()).unwrap_or(JsValue::UNDEFINED);
-            let read = |key: &str| {
-                Reflect::get(&size, &key.into())
-                    .ok()
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0)
-            };
-            let (width, height) = (read("inlineSize"), read("blockSize"));
-            // 0×0 while the canvas is hidden
-            if width > 0.0 && height > 0.0 {
-                with_inner(&weak, move |i| i.handle_device_pixels(width, height));
-            }
-        });
-        let observer = ResizeObserver::new(closure.as_ref().unchecked_ref()).ok()?;
-        let options = ResizeObserverOptions::new();
-        options.set_box(ResizeObserverBoxOptions::DevicePixelContentBox);
-        observer.observe_with_options(canvas, &options);
-        *observer_slot.borrow_mut() = Some(observer.clone());
-        Some(Observed {
-            observer: Observer::Resize(observer),
-            _closure: closure,
-        })
-    }
-
-    fn request(&mut self, request: RendererRequest) {
-        if self.log.len() >= LOG_LIMIT {
-            self.log.remove(0);
-        }
-        self.log.push(request.clone());
-        self.requests.push(request);
-        (self.wake)();
-    }
-
-    fn request_redraw_all(&mut self) {
-        self.full_redraw = true;
-        self.request(RendererRequest::Redraw(Dirty::All));
-    }
-
-    fn request_redraw_rows(&mut self, rows: impl IntoIterator<Item = i64>) {
-        let rows: Vec<u32> = rows
-            .into_iter()
-            .filter(|&y| y >= 0)
-            .map(|y| y as u32)
-            .collect();
-        if rows.is_empty() {
+    fn handle_visibility(&mut self, visible: bool) {
+        if visible == self.visible {
             return;
         }
-        self.dirty.extend(&rows);
-        self.request(RendererRequest::Redraw(Dirty::Rows(rows)));
-    }
-
-    fn clear_model(&mut self, clear_glyphs: bool) {
-        self.model.clear();
-        if clear_glyphs {
-            if let Some(g) = &mut self.glyphs {
-                g.clear();
-            }
+        self.visible = visible;
+        if visible {
+            self.request_redraw_all();
         }
-        self.full_redraw = true;
-    }
-
-    fn initialize_webgl_state(&mut self) {
-        if let Some(mut r) = self.rects.take() {
-            r.dispose();
-        }
-        if let Some(mut g) = self.glyphs.take() {
-            g.dispose();
-        }
-        self.rects =
-            RectangleRenderer::new(&self.gl, self.cols, self.rows, self.dims, &self.colors);
-        self.glyphs = GlyphRenderer::new(&self.gl, self.cols, self.rows, self.dims);
-        if let Some(g) = &mut self.glyphs {
-            g.rescale_overlapping_glyphs = self.options.rescale_overlapping_glyphs;
-        }
-        self.handle_resize();
     }
 
     fn handle_resize(&mut self) {
@@ -599,22 +402,68 @@ impl Inner {
         let style = self.canvas.style();
         let _ = style.set_property("width", &format!("{}px", d.css_canvas.width));
         let _ = style.set_property("height", &format!("{}px", d.css_canvas.height));
-        let (cols, rows) = (self.cols, self.rows);
-        if let Some(r) = &mut self.rects {
-            r.resize(cols, rows);
-            r.set_dimensions(d);
-            r.handle_resize();
-        }
-        if let Some(g) = &mut self.glyphs {
-            g.resize(cols, rows);
-            g.set_dimensions(d);
-            g.handle_resize();
-        }
+        self.rects.resize(self.cols, self.rows, d);
+        self.glyphs.resize(self.cols, self.rows, d);
         self.refresh_char_atlas();
-        // Resizing the glyph renderer cleared it already
+        // Resizing the glyph vertices cleared them already
         self.clear_model(false);
     }
 
+    fn dispose(&mut self) {
+        if self.disposed {
+            return;
+        }
+        self.disposed = true;
+        self.blink = None;
+        self.listeners.clear();
+        VISIBILITY.with(|v| {
+            if let Some(v) = v {
+                v.unobserve(&self.container);
+            }
+        });
+        atlas::release(self.id);
+        self.atlas = None;
+        self.glyphs.set_atlas(None);
+        self.canvas.remove();
+        self.measure = None;
+    }
+
+    fn measure_chars(&mut self) {
+        if let Some(size) = self.measure.as_ref().and_then(|m| m.measure(&self.options)) {
+            self.char_size = size;
+        }
+    }
+    fn request(&mut self, request: RendererRequest) {
+        if self.log.len() >= LOG_LIMIT {
+            self.log.remove(0);
+        }
+        self.log.push(request.clone());
+        self.requests.push(request);
+        (self.wake)();
+    }
+    fn request_redraw_all(&mut self) {
+        self.full_redraw = true;
+        self.request(RendererRequest::Redraw(Dirty::All));
+    }
+    fn request_redraw_rows(&mut self, rows: impl IntoIterator<Item = i64>) {
+        let rows: Vec<u32> = rows
+            .into_iter()
+            .filter(|&y| y >= 0)
+            .map(|y| y as u32)
+            .collect();
+        if rows.is_empty() {
+            return;
+        }
+        self.dirty.extend(&rows);
+        self.request(RendererRequest::Redraw(Dirty::Rows(rows)));
+    }
+    fn clear_model(&mut self, clear_glyphs: bool) {
+        self.model.clear();
+        if clear_glyphs {
+            self.glyphs.clear();
+        }
+        self.full_redraw = true;
+    }
     fn update_dimensions(&mut self) {
         let (char_w, char_h) = self.char_size;
         if char_w <= 0.0 || char_h <= 0.0 {
@@ -643,7 +492,6 @@ impl Inner {
         d.css_cell.height = d.device_cell.height / dpr;
         d.css_cell.width = d.device_cell.width / dpr;
     }
-
     fn refresh_char_atlas(&mut self) {
         let d = self.dims;
         if d.device_char.width <= 0.0 && d.device_char.height <= 0.0 {
@@ -653,7 +501,7 @@ impl Inner {
         let config = AtlasConfig {
             custom_glyphs: o.custom_glyphs,
             device_pixel_ratio: self.dpr,
-            device_max_texture_size: self.max_texture_size,
+            device_max_texture_size: atlas::max_texture_size(),
             letter_spacing: o.letter_spacing,
             line_height: o.line_height,
             font_size: o.font_size,
@@ -672,11 +520,8 @@ impl Inner {
             ansi: self.colors.ansi.clone(),
         };
         self.atlas = atlas::acquire(self.id, config, &self.document);
-        if let (Some(g), Some(a)) = (&mut self.glyphs, &self.atlas) {
-            g.set_atlas(a.clone());
-        }
+        self.glyphs.set_atlas(self.atlas.clone());
     }
-
     fn handle_fonts_loaded(&mut self) {
         let before = self.dims.css_cell;
         self.measure_chars();
@@ -691,7 +536,6 @@ impl Inner {
         }
         self.request_redraw_all();
     }
-
     /// Zoom and moving to another screen change the canvas's device pixels; zoom also resizes the window.
     fn check_device_pixel_ratio(&mut self) -> bool {
         let dpr = self
@@ -708,20 +552,6 @@ impl Inner {
         self.request_redraw_all();
         true
     }
-
-    fn handle_device_pixels(&mut self, width: f64, height: f64) {
-        if self.check_device_pixel_ratio() {
-            return;
-        }
-        // Keep the computed device size (an exact multiple of the cell) unless the real one differs
-        if self.canvas.width() as f64 == width && self.canvas.height() as f64 == height {
-            return;
-        }
-        self.canvas.set_width(width as u32);
-        self.canvas.set_height(height as u32);
-        self.request_redraw_all();
-    }
-
     fn cursor_style(&self) -> CursorInactiveStyle {
         // Until the program sends DECSCUSR (or after `CSI 0 SP q`) the options decide
         if self.cursor.styled {
@@ -737,7 +567,6 @@ impl Inner {
             CursorStyle::Bar => CursorInactiveStyle::Bar,
         }
     }
-
     fn update_cursor_blink(&mut self) {
         let blink = if self.cursor.styled {
             self.cursor.blink
@@ -762,7 +591,6 @@ impl Inner {
         let row = self.cursor_row;
         self.request_redraw_rows([row]);
     }
-
     fn set_focused(&mut self, focused: bool) {
         if self.focused == focused {
             return;
@@ -778,7 +606,6 @@ impl Inner {
         // The cursor style and the selection colour both depend on focus
         self.request_redraw_all();
     }
-
     fn resolve_highlights(&mut self) {
         let mut resolved = Vec::new();
         let mut overlay = Vec::new();
@@ -836,15 +663,14 @@ impl Inner {
         self.overlay = overlay;
         self.highlights_stale = false;
     }
-
     fn render(&mut self, viewport: &Viewport, changed: &[u32], host_dirty: &Dirty) {
         let (cols, rows) = (self.cols, self.rows);
-        if self.state != State::Live
-            || self.glyphs.is_none()
-            || self.rects.is_none()
-            || viewport.cols != cols
-            || viewport.rows != rows
-        {
+        if viewport.cols != cols || viewport.rows != rows {
+            return;
+        }
+        // Out of view, or no context: nothing is drawn, everything is when it can be again
+        if !self.visible || !gpu::is_live() || self.dims.device_canvas.width < 1.0 {
+            self.full_redraw = true;
             return;
         }
         let cursor = viewport.cursor;
@@ -863,7 +689,7 @@ impl Inner {
 
         let mut all = self.full_redraw || *host_dirty == Dirty::All;
         // The atlas merged pages (or there is none): rebuild the whole model
-        if self.glyphs.as_ref().is_some_and(GlyphRenderer::begin_frame) {
+        if self.glyphs.begin_frame() {
             self.clear_model(true);
             all = true;
         }
@@ -896,17 +722,21 @@ impl Inner {
         }
         self.update_model(viewport, &lines);
 
-        let (Some(rects), Some(glyphs)) = (&self.rects, &mut self.glyphs) else {
-            return;
-        };
-        rects.render_backgrounds();
-        glyphs.render(&self.model);
-        rects.render_overlay();
-        if self.blink.as_ref().is_none_or(Blink::is_cursor_visible) {
-            rects.render_cursor();
+        let drawn = gpu::draw(gpu::Frame {
+            width: self.dims.device_canvas.width,
+            height: self.dims.device_canvas.height,
+            rects: &self.rects,
+            glyphs: &self.glyphs,
+            model: &self.model,
+            cursor: self.blink.as_ref().is_none_or(Blink::is_cursor_visible),
+            present: &self.present,
+        });
+        if drawn {
+            self.draws = self.draws.wrapping_add(1);
+        } else {
+            self.full_redraw = true;
         }
     }
-
     /// `WebglRenderer._updateModel` minus character joiners, reading cells from the viewport.
     fn update_model(&mut self, viewport: &Viewport, lines: &[u32]) {
         let cols = self.cols as usize;
@@ -1018,8 +848,8 @@ impl Inner {
                 model[RENDER_MODEL_BG_OFFSET] = result.bg;
                 model[RENDER_MODEL_FG_OFFSET] = result.fg;
                 model[RENDER_MODEL_EXT_OFFSET] = result.ext;
-                if let Some(glyphs) = &mut self.glyphs {
-                    glyphs.update_cell(
+                {
+                    self.glyphs.update_cell(
                         x,
                         y as usize,
                         code,
@@ -1035,15 +865,12 @@ impl Inner {
                 }
             }
         }
-        if let Some(rects) = &mut self.rects {
-            if model_updated {
-                rects.update_backgrounds(&self.model, &self.colors);
-            }
-            rects.update_cursor(self.model.cursor.as_ref());
-            rects.update_overlay(&self.overlay);
+        if model_updated {
+            self.rects.update_backgrounds(&self.model, &self.colors);
         }
+        self.rects.update_cursor(self.model.cursor.as_ref());
+        self.rects.update_overlay(&self.overlay);
     }
-
     fn set_options(&mut self, options: &RendererOptions) {
         let old = std::mem::replace(&mut self.options, options.clone());
         if old == *options {
@@ -1052,16 +879,12 @@ impl Inner {
         if old.theme != options.theme {
             self.colors = ColorSet::new(&options.theme);
             self.highlights_stale = true;
-            if let Some(r) = &mut self.rects {
-                r.update_colors(&self.colors);
-            }
+            self.rects.update_colors(&self.colors);
         }
         if old.font_family != options.font_family || old.font_size != options.font_size {
             self.measure_chars();
         }
-        if let Some(g) = &mut self.glyphs {
-            g.rescale_overlapping_glyphs = options.rescale_overlapping_glyphs;
-        }
+        self.glyphs.rescale_overlapping_glyphs = options.rescale_overlapping_glyphs;
         if old.font_family != options.font_family
             || old.font_size != options.font_size
             || old.line_height != options.line_height
@@ -1075,13 +898,11 @@ impl Inner {
         self.update_cursor_blink();
         self.request_redraw_all();
     }
-
     fn resize(&mut self, cols: u32, rows: u32) {
         self.cols = cols;
         self.rows = rows;
         self.handle_resize();
     }
-
     fn set_selection(&mut self, selection: Option<SelectionRange>) {
         let mut rows = BTreeSet::new();
         let mut add = |m: &SelectionModel| {
@@ -1094,7 +915,6 @@ impl Inner {
         add(&self.selection);
         self.request_redraw_rows(rows);
     }
-
     fn set_highlights(&mut self, layer: &str, highlights: Vec<Highlight>) {
         let mut rows: BTreeSet<i64> = BTreeSet::new();
         rows.extend(highlights.iter().map(|h| h.row as i64));
@@ -1108,191 +928,10 @@ impl Inner {
         self.highlights_stale = true;
         self.request_redraw_rows(rows);
     }
-
-    fn dispose(&mut self) {
-        if self.disposed {
-            return;
-        }
-        self.disposed = true;
-        self.restore_timeout = None;
-        self.recreate_timeout = None;
-        self.blink = None;
-        self.listeners.clear();
-        self.observers.clear();
-        self.context_listeners.clear();
-        self.context_observer = None;
-        if let Some(mut r) = self.rects.take() {
-            r.dispose();
-        }
-        if let Some(mut g) = self.glyphs.take() {
-            g.dispose();
-        }
-        atlas::release(self.id);
-        self.atlas = None;
-        lose_context(&self.gl);
-        self.canvas.remove();
-        self.measure = None;
-        // That freed a context
-        let me = self.me.clone();
-        RENDERERS.with(|r| {
-            if let Ok(mut r) = r.try_borrow_mut() {
-                r.retain(|w| w.strong_count() > 0 && !Weak::ptr_eq(w, &me));
-            }
-        });
-        for other in others(&me) {
-            if let Ok(mut r) = other.try_borrow_mut() {
-                if r.state == State::Parked && r.visible && !r.disposed {
-                    r.recreate();
-                    break;
-                }
-            }
-        }
-    }
-
-    fn handle_context_lost(&mut self) {
-        if self.context_gone {
-            self.park();
-            return;
-        }
-        self.state = State::Lost;
-        // Wait a few seconds for 'webglcontextrestored', then make a new context
-        let weak = self.me.clone();
-        self.restore_timeout = Some(Timeout::new(CONTEXT_RESTORE_TIMEOUT, move || {
-            with_inner(&weak, |i| {
-                i.restore_timeout = None;
-                if !i.visible {
-                    i.park();
-                } else {
-                    i.recreate_throttled();
-                }
-            })
-        }));
-    }
-
-    fn handle_context_restored(&mut self) {
-        self.restore_timeout = None;
-        if self.state != State::Lost {
-            return;
-        }
-        self.state = State::Live;
-        // The atlas textures and the glyph renderer are gone with the context: rebuild them
-        self.reacquire_atlas();
-        self.initialize_webgl_state();
-        self.request_redraw_all();
-    }
-
-    fn reacquire_atlas(&mut self) {
-        atlas::release(self.id);
-        self.atlas = None;
-    }
-
-    /// Waits without a context. A visible renderer takes one from a renderer out of view, if there is one.
-    fn park(&mut self) {
-        self.state = State::Parked;
-        self.context_gone = false;
-        if self.visible {
-            self.take_context_from_hidden();
-        }
-    }
-
-    fn take_context_from_hidden(&mut self) -> bool {
-        for other in others(&self.me) {
-            let Ok(mut r) = other.try_borrow_mut() else {
-                continue;
-            };
-            if r.state == State::Live && !r.visible && !r.disposed {
-                r.release();
-                drop(r);
-                self.recreate();
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Gives the context back to the browser, which frees its slot right away.
-    fn release(&mut self) {
-        self.context_gone = true;
-        self.state = State::Parked;
-        lose_context(&self.gl);
-    }
-
-    fn handle_visibility(&mut self, visible: bool) {
-        if visible == self.visible {
-            return;
-        }
-        self.visible = visible;
-        if visible && self.state == State::Parked {
-            // The pane in view gets drawn, even if that takes the oldest context from another visible pane, which
-            // then waits; that only happens again when visibility changes, so it cannot loop
-            if !self.take_context_from_hidden() {
-                self.recreate();
-            }
-        } else if !visible && self.state == State::Live {
-            for other in others(&self.me) {
-                let Ok(mut r) = other.try_borrow_mut() else {
-                    continue;
-                };
-                if r.state == State::Parked && r.visible && !r.disposed {
-                    self.release();
-                    r.recreate();
-                    return;
-                }
-            }
-        }
-    }
-
-    /// Backs off when contexts keep getting lost (a driver that keeps resetting, or contexts outside oxtty taking
-    /// turns).
-    fn recreate_throttled(&mut self) {
-        let wait = self.last_recreate + self.recreate_gap - timer::now();
-        if wait <= 0.0 {
-            self.recreate();
-            return;
-        }
-        self.state = State::Parked;
-        let weak = self.me.clone();
-        self.recreate_timeout = Some(Timeout::new(wait.ceil() as i32, move || {
-            with_inner(&weak, |i| {
-                i.recreate_timeout = None;
-                if i.state == State::Parked {
-                    i.recreate();
-                }
-            })
-        }));
-    }
-
-    fn recreate(&mut self) {
-        let now = timer::now();
-        self.recreate_gap = if now - self.last_recreate < 60_000.0 {
-            (self.recreate_gap * 2.0).min(60_000.0)
-        } else {
-            1000.0
-        };
-        self.last_recreate = now;
-        self.restore_timeout = None;
-        self.recreate_timeout = None;
-        self.reacquire_atlas();
-        match new_context(&self.document) {
-            Ok((canvas, gl)) => self.install_context(canvas, gl),
-            Err(error) => {
-                web_sys::console::warn_1(&error);
-                self.state = State::Parked;
-                return;
-            }
-        }
-        self.initialize_webgl_state();
-        self.request_redraw_all();
-    }
-
     /// State for the tests; the requests are those since the last call.
     fn debug(&mut self) -> JsValue {
         let info = Object::new();
-        let state = match self.state {
-            State::Live => "live",
-            State::Lost => "lost",
-            State::Parked => "parked",
-        };
+        let (state, gl, gpu_draws) = gpu::debug();
         let set = |k: &str, v: JsValue| {
             let _ = Reflect::set(&info, &k.into(), &v);
         };
@@ -1307,6 +946,10 @@ impl Inner {
         set("liveAtlases", atlas::live_atlases().into());
         set("canvas", self.canvas.clone().into());
         set("focused", self.focused.into());
+        set("visible", self.visible.into());
+        set("draws", self.draws.into());
+        set("gpuDraws", gpu_draws.into());
+        set("gl", gl);
         let requests: Array = std::mem::take(&mut self.log)
             .iter()
             .map(|r| match r {

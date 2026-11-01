@@ -26,16 +26,18 @@ test('replies, title and bell reach their events after the write is parsed', asy
   term.dispose();
 });
 
-test('write callbacks run in order, after their own data, and a surrogate pair may be split across writes', async () => {
+test('write and writeln callbacks run in order, after their own data, and a surrogate pair may be split across writes', async () => {
   const term = new Terminal({ cols: 20, rows: 5 });
   const order = [];
   term.write('\ud83d', () => order.push(1));
   term.write('\ude00\x1b[6n', () => order.push(2));
+  term.writeln('', () => order.push(3));
+  term.write('\x1b[6n');
   const replies = [];
   term.onData((data) => replies.push(data));
   await parsed(term);
-  assert.deepEqual(order, [1, 2]);
-  assert.deepEqual(replies, ['\x1b[1;3R'], 'the emoji is one wide character');
+  assert.deepEqual(order, [1, 2, 3]);
+  assert.deepEqual(replies, ['\x1b[1;3R', '\x1b[2;1R'], 'the emoji is one wide character, and writeln ends the line');
   term.dispose();
 });
 
@@ -91,5 +93,34 @@ test('options: init-only keys throw when changed, others are stored, the clipboa
   await parsed(term);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(replies, ['\x1b]52;c;cGFzdGVk\x07']);
+  term.dispose();
+});
+
+test('options.windowsPty: growing rows adds blank rows instead of pulling back scrollback, like xterm.js', async () => {
+  const cursorRowAfterGrow = async (options) => {
+    const term = new Terminal({ cols: 20, rows: 5, ...options });
+    term.write(Array.from({ length: 10 }, (_, i) => `${i}`).join('\r\n'));
+    await parsed(term);
+    term.resize(20, 8);
+    const reply = new Promise((resolve) => term.onData(resolve));
+    term.write('\x1b[6n');
+    const row = Number((await reply).match(/\[(\d+);/)[1]);
+    term.dispose();
+    return row;
+  };
+  assert.equal(await cursorRowAfterGrow({}), 8, 'scrollback comes back down');
+  assert.equal(await cursorRowAfterGrow({ windowsPty: { backend: 'conpty', buildNumber: 19045 } }), 5);
+});
+
+test('onCursorMove and onScroll fire after output moves the cursor and scrolls the viewport', async () => {
+  const term = new Terminal({ cols: 10, rows: 3 });
+  const seen = [];
+  term.onCursorMove(() => seen.push('cursor'));
+  term.onScroll((top) => seen.push(`scroll ${top}`));
+  term.write('a');
+  await parsed(term);
+  term.write('\r\n\r\n\r\n');
+  await parsed(term);
+  assert.deepEqual(seen, ['cursor', 'scroll 1', 'cursor']);
   term.dispose();
 });

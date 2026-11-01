@@ -12,6 +12,7 @@ pub mod color;
 mod custom_glyphs;
 mod gl;
 mod glyphs;
+mod gpu;
 mod model;
 pub mod options;
 mod rects;
