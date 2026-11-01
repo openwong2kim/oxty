@@ -2,11 +2,15 @@
 
 | Item | Details |
 | --- | --- |
-| Document version | v0.3 |
-| Written | 2026-10-31 (v0.1·v0.2·v0.3) |
+| Document version | v0.4 |
+| Written | 2026-10-31 (v0.1·v0.2·v0.3), 2026-11-01 (v0.4) |
 | Repository | github.com/openwong2kim/oxtty (private) |
 | Current release | 0.0.1 — engine core, wasm, N-API, tests (not published to registries) |
 | First customer | wmux |
+
+### v0.4 change summary
+
+- **D3 replaced (owner decision, 2026-11-01)**: the web front end is rewritten in Rust and compiled to wasm; the TypeScript facade with borrowed xterm.js parts (`packages/oxtty/xterm`, last at `0510a7d`) and the D3 spike are removed. Only generated JS glue and the JS harnesses that compare against xterm.js remain. The parity it reached (keys, IME, mouse, selection, WebGL context loss) is the bar the Rust front end must meet. The design is under engineering review; the M2 rows and D3/D4/D7 are rewritten after it.
 
 ### v0.3 change summary
 
@@ -139,7 +143,7 @@ xterm.js splits into an **engine layer** (`common`: bytes → screen state) and 
 - Underline color (SGR 58) and OSC 8 hyperlinks, which do not fit in 4 u32s, are exposed separately as a **per-row extras table** (column → underline color, link ID). The cell format is frozen after this decision (M1).
 - Damage also reports the number of scrolled lines. Alacritty marks the whole screen as damaged on every scroll (`mark_fully_damaged`), so left as is, a pane streaming logs copies the whole screen every frame.
 
-**D3. The web front end is a thin in-house front end + borrowed xterm.js parts**
+**D3. The web front end is a thin in-house front end + borrowed xterm.js parts** (replaced in v0.4: Rust front end)
 - From xterm.js (MIT), take only the WebGL glyph atlas and render model, IME composition (`CompositionHelper`) and key input (`Keyboard.ts`), and adapt them to oxtty rows. Only the public API is made compatible with xterm.js.
 - Why
   - A fork would have to emulate, on top of oxtty, the xterm.js internal interfaces the screen layer is tied to (`IBufferLine.loadCell`, `CellData`, `BufferService`), and follow every change in the 6.x beta. That is the heaviest cost for a solo developer.

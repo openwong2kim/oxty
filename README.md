@@ -69,17 +69,6 @@ flowchart LR
 
 Compared with xterm.js 6.1 betas. Lower is better.
 
-**Browser renderer** — Chrome on an Apple M4, 8 panes of 120×40 with 10,000 lines of
-scrollback, 2 MiB of output per pane fed in chunks per frame; oxtty drawn with
-the WebGL spike in [`spike/d3-webgl`](spike/d3-webgl), xterm.js with its WebGL
-addon. Both must end on the same screen hash.
-
-| Workload | oxtty renderer RSS | xterm.js renderer RSS |
-| --- | ---: | ---: |
-| Log, 32 KiB chunks | 192 MiB | 350 MiB |
-| Log, 256 KiB chunks | 191 MiB | 356 MiB |
-| TUI (synchronized redraws) | 172 MiB | 183 MiB |
-
 **Buffer memory** — Node, 8 terminals of 120×40 with 10,000 lines of
 scrollback, oxtty (wasm) against `@xterm/headless`.
 
@@ -111,11 +100,7 @@ for xterm.js headless (wmux daemon experiment, local).
 
 **The cost.** Compressing history makes wasm parsing slower than xterm.js on
 some output: 120 ms against 104 ms for log lines, 89 ms against 67 ms for
-Hangul lines. In the browser benchmark, CPU time including rendering was
-still lower than xterm.js's.
-
-Reproduce the browser numbers with `node bench/run.mjs out.json` in
-`spike/d3-webgl` (see its [README](spike/d3-webgl/README.md#renderer-bench)).
+Hangul lines.
 
 ## Quick start
 

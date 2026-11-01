@@ -35,10 +35,6 @@ jobs:
         working-directory: packages/oxtty
       - run: npm test
         working-directory: packages/oxtty
-      - run: npm run typecheck:xterm
-        working-directory: packages/oxtty
-      - run: npm run test:xterm
-        working-directory: packages/oxtty
 
   node-binding:
     strategy:
