@@ -10,6 +10,8 @@ type Position = { start: { x: number; y: number }; end: { x: number; y: number }
 
 /** What the page uses of either terminal (xterm.js beyond the renderer-xterm.d.ts declaration). */
 interface Selectable {
+  readonly cols: number;
+  readonly rows: number;
   readonly element: HTMLElement | undefined;
   readonly buffer: { readonly active: { readonly viewportY: number; readonly baseY: number } };
   options: Record<string, unknown>;
@@ -58,9 +60,9 @@ async function setup({ cols: COLS, rows: ROWS, scrollback }: { cols: number; row
   const screens = both.map(t => t.element!.querySelector<HTMLElement>('.xterm-screen')!);
 
   /** Client coordinates of cell (col, row) of each terminal; `dx` moves within the cell (0 left edge, 1 right edge). */
-  const points = (col: number, row: number, dx = 0.5): [number, number][] => screens.map(screen => {
+  const points = (col: number, row: number, dx = 0.5): [number, number][] => screens.map((screen, k) => {
     const rect = screen.getBoundingClientRect();
-    return [rect.left + (col + dx) * rect.width / COLS, rect.top + (row + 0.5) * rect.height / ROWS];
+    return [rect.left + (col + dx) * rect.width / both[k].cols, rect.top + (row + 0.5) * rect.height / both[k].rows];
   });
 
   Object.assign(window, {

@@ -50,6 +50,8 @@ export interface SelectionHost {
   /** `Terminal.dimensions`: the renderer may re-measure at any time. */
   readonly dimensions: Dimensions | undefined;
   readonly buffer: SelectionBuffer;
+  /** Whether the last cell of buffer line `y` is the blank a wide character left when it moved to the next row. */
+  leadingWideSpacer(y: number): boolean;
   /** Engine `trimmedLines`, read with `buffer` so both describe the same lines. */
   readonly trimmedLines: number;
   /** Terminal options as set; unset ones take the xterm.js defaults. */
@@ -85,18 +87,16 @@ const NO_LINKS: ILinkifier2 = {
 /**
  * A row of `buffer.active` and where its content ends. xterm.js keeps empty cells apart from typed spaces and trims
  * only empty ones; the engine shows both as spaces. Here the spaces that end a row are empty, as `translateToString`
- * trims them, unless the row wraps: then the output typed them on its way to the next row, and only a blank last cell
- * before a wide character that starts the next row is empty. That is where the engine leaves the wide character it
- * pushed to the next row (xterm.js leaves the cell empty); a typed space there looks the same and is taken for it.
+ * trims them, unless the row wraps: then the output typed them on its way to the next row (xterm.js copies them), and
+ * only the blank the engine leaves when a wide character moves to the next row is empty, as in xterm.js.
  */
-function readLine(buffer: SelectionBuffer, y: number): { line: SelectionBufferLine; contentEnd: number } | undefined {
-  const line = buffer.getLine(y);
+function readLine(host: SelectionHost, y: number): { line: SelectionBufferLine; contentEnd: number } | undefined {
+  const line = host.buffer.getLine(y);
   if (!line) return undefined;
-  const next = buffer.getLine(y + 1);
   const chars = (x: number): string | undefined => line.getCell(x)?.getChars();
   let contentEnd = line.length;
-  if (next?.isWrapped) {
-    if (chars(contentEnd - 1) === ' ' && next.getCell(0)?.getWidth() === 2) contentEnd--;
+  if (host.buffer.getLine(y + 1)?.isWrapped) {
+    if (host.leadingWideSpacer(y)) contentEnd--;
   } else {
     while (contentEnd > 0 && (chars(contentEnd - 1) === ' ' || chars(contentEnd - 1) === '')) contentEnd--;
     // Keep the right half of a wide character that ends the text
@@ -177,13 +177,13 @@ export class SelectionController implements MouseSelection {
       lines: {
         get length() { return host.buffer.length; },
         get: index => {
-          const row = readLine(host.buffer, index);
+          const row = readLine(host, index);
           return row && new BufferLineAdapter(row.line, row.contentEnd);
         },
         onTrim: this._onTrim.event,
       },
       translateBufferLineToString: (index, trimRight, startCol, endCol) => {
-        const row = readLine(host.buffer, index);
+        const row = readLine(host, index);
         if (!row) return '';
         return row.line.translateToString(false, startCol, trimRight ? Math.min(endCol ?? row.contentEnd, row.contentEnd) : endCol);
       },
@@ -299,10 +299,15 @@ export class SelectionController implements MouseSelection {
     this._onResize.fire({ cols: this._host.cols, rows: this._host.rows, colsChanged, rowsChanged });
   }
 
-  /** `Terminal.reset`: the selection is cleared. */
+  /**
+   * A full reset (the program's RIS or `Terminal.reset`): like xterm.js, the buffers are set up again, which clears
+   * the selection, and then the selection service is reset, which clears it once more (two `onSelectionChange`).
+   */
   public reset(): void {
+    this._trimmedLines = this._host.trimmedLines;
+    this._alternate = this._host.buffer.type === 'alternate';
+    this._onBufferActivate.fire({ activeBuffer: this._buffer, inactiveBuffer: this._buffer });
     this.service.reset();
-    this.sync();
   }
 
   /**

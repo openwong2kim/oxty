@@ -1,6 +1,6 @@
 // The xterm.js-compatible Terminal: owns the engine, the write queue, the frame loop and the DOM element.
 // It implements what wmux uses (xterm/test/api-checklist.json); the public types are xterm/xterm.d.ts.
-import { Mode, Terminal as Engine, type AnsiSnapshot } from '../../src/index.js';
+import { Attr, Mode, Terminal as Engine, type AnsiSnapshot } from '../../src/index.js';
 import { css } from 'common/Color';
 import { isMac } from 'common/Platform';
 import { Emitter, type Event } from 'vs/base/common/event';
@@ -359,6 +359,10 @@ export class Terminal {
         viewport: this._viewport,
         get dimensions() { return terminal.dimensions; },
         buffer: this.buffer.active,
+        leadingWideSpacer: y => {
+          const cells = this._engine.rowCells(y - this._engine.historyLength);
+          return !!cells && (cells[cells.length - 1] & Attr.LEADING_WIDE_SPACER) !== 0;
+        },
         get trimmedLines() { return terminal._engine.trimmedLines; },
         options: this._options,
         coreService: this._coreService,
@@ -432,7 +436,7 @@ export class Terminal {
     this._highSurrogate = '';
     this._engine.write('\x1bc');
     this._mouse?.reset();
-    this._selection?.reset();
+    // The reset reaches the selection through the engine's events
     this._handleEvents();
     this._redraw('all');
     this._afterChange();
@@ -636,6 +640,7 @@ export class Terminal {
     if (events.replies.length) this._coreService.triggerDataEvent(decoder.decode(events.replies));
     if (events.title !== null) this._onTitleChange.fire(events.title);
     for (let i = 0; i < events.bells; i++) this._onBell.fire();
+    for (let i = 0; i < events.resets; i++) this._selection?.reset();
     const clipboard = this._options.clipboard as ClipboardHandler | undefined;
     for (const { selection, text } of events.clipboardWrites) clipboard?.write?.(text, selection);
     for (const selection of events.clipboardReads) {

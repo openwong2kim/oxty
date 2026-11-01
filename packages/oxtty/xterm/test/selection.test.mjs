@@ -87,7 +87,11 @@ function withTerminals(size, fn) {
     return fn({
       page, mouse, both, ...gestures, state, compare, mismatches, count: () => total, trailingSpaces: () => trailingSpaces,
       write: data => page.evaluate(d => window.write(d), data),
-      call: (name, ...args) => page.evaluate(([n, a]) => window.call(n, a), [name, args]),
+      call: (name, ...args) => {
+        // A resize moves the cells, and the second terminal with them
+        if (name === 'resize') cache.clear();
+        return page.evaluate(([n, a]) => window.call(n, a), [name, args]);
+      },
       setOption: (key, value) => page.evaluate(([k, v]) => window.setOption(k, v), [key, value]),
       viewportY: () => page.evaluate(() => window.viewportY()),
       takeData: () => page.evaluate(() => window.takeData()),
@@ -259,9 +263,11 @@ test('the selection follows its text as the scrollback trims, then clears, like 
   assert.equal(result.has.lines.indexOf(false), 12, 'selectLines cleared once its end fell off');
 });
 
-test('alternate screen switch and a change of rows clear the selection; onSelectionChange fires like xterm.js', async () => {
+test('alternate screen switch, a change of rows and full resets clear the selection; onSelectionChange fires like xterm.js', async () => {
   const result = await withTerminals({ cols: COLS, rows: 16, scrollback: 20 }, async t => {
-    await t.write(CONTENT);
+    // The cursor leaves the wrapped last line: widening does not reflow the cursor's line in the engine (it does in
+    // xterm.js), which would put blank cells inside that line
+    await t.write(`${CONTENT}\r\n`);
     await t.drag([2, 0], [20, 3]);
     await t.compare('drag');
     await t.write('\x1b[?1049h');
@@ -283,6 +289,27 @@ test('alternate screen switch and a change of rows clear the selection; onSelect
       await t.page.keyboard.type('x');
     }
     await t.compare('typing');
+    // A full reset from the program (RIS) and from the API, also on the alternate screen and twice in one write
+    await t.write(CONTENT);
+    await t.drag([2, 0], [20, 3]);
+    await t.compare('drag before RIS');
+    await t.write('\x1bc');
+    await t.compare('RIS');
+    await t.write(CONTENT);
+    await t.call('selectLines', 1, 4);
+    await t.call('reset');
+    await t.compare('reset()');
+    await t.write(`\x1b[?1049h${CONTENT}`);
+    await t.doubleClick([2, 0]);
+    await t.compare('double click on the alternate screen before RIS');
+    await t.write('\x1bc');
+    await t.compare('RIS on the alternate screen');
+    await t.write(CONTENT);
+    await t.call('selectAll');
+    await t.write('\x1bcabc\x1bc');
+    await t.compare('two RIS in one write');
+    await t.call('reset');
+    await t.compare('reset() without a selection');
     return { mismatches: t.mismatches, total: t.count() };
   });
   assert.deepEqual(result.mismatches, [], `${result.mismatches.length} of ${result.total} cases differ`);
