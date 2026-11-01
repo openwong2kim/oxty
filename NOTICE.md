@@ -28,6 +28,19 @@ at sequences the host hooked; the changes are listed in
 xterm.js Unicode 11 provider, Copyright (c) 2017–2019 The xterm.js authors,
 MIT license (`crates/oxtty/LICENSE-XTERM`).
 
+## xterm.js input encoding
+
+`crates/oxtty/src/input` (`keyboard.rs`, `kitty.rs`, `mouse.rs` and the paste
+and focus encoders in `mod.rs`) is a Rust port of xterm.js 6.1.0-beta.336
+(commit 08829c7eb6279dda2a9e86df901353a1a89858ca): `src/common/input/Keyboard.ts`,
+`src/common/input/KittyKeyboard.ts`, `src/common/services/MouseStateService.ts`
+and parts of `src/browser/services/MouseService.ts`, `src/browser/Clipboard.ts`
+and `src/browser/CoreBrowserTerminal.ts`, Copyright (c) 2012-2013 Christopher
+Jeffrey and (c) 2014-2025 The xterm.js authors, MIT license
+(`crates/oxtty/LICENSE-XTERM`). Each file names its source lines. The parity
+fixtures in `crates/oxtty/tests/fixtures/input-*.json` are recorded from
+xterm.js by `packages/oxtty/test/web/gen-input-fixtures.mjs`.
+
 ## wmux
 
 The engine integration started in
