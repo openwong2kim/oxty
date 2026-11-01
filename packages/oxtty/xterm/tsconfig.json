@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "baseUrl": ".",
+    "paths": {
+      "common/*": ["stubs/common/*", "vendor-xterm/src/common/*"],
+      "browser/*": ["stubs/browser/*", "vendor-xterm/src/browser/*"],
+      "vs/*": ["stubs/vs/*"],
+      "@xterm/xterm": ["stubs/xterm/xterm.d.ts"]
+    }
+  },
+  "include": ["src", "stubs", "vendor-xterm", "test/**/*.ts"]
+}

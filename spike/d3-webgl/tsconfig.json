@@ -12,10 +12,11 @@
     "useDefineForClassFields": false,
     "baseUrl": ".",
     "paths": {
-      "common/*": ["stubs/common/*", "vendor-xterm/src/common/*"],
-      "browser/*": ["stubs/browser/*", "vendor-xterm/src/browser/*"],
-      "vs/*": ["stubs/vs/*"]
+      "common/*": ["../../packages/oxtty/xterm/stubs/common/*", "../../packages/oxtty/xterm/vendor-xterm/src/common/*"],
+      "browser/*": ["../../packages/oxtty/xterm/stubs/browser/*", "../../packages/oxtty/xterm/vendor-xterm/src/browser/*"],
+      "vs/*": ["../../packages/oxtty/xterm/stubs/vs/*"],
+      "@xterm/xterm": ["../../packages/oxtty/xterm/stubs/xterm/xterm.d.ts"]
     }
   },
-  "include": ["src", "stubs", "vendor-xterm"]
+  "include": ["src", "../../packages/oxtty/xterm/stubs", "../../packages/oxtty/xterm/vendor-xterm"]
 }
