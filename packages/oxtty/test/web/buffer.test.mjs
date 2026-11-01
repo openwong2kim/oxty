@@ -26,15 +26,32 @@ test('combining marks, styles and a wide character pushed to the next row read l
     for (const args of [[true], [false], [false, 2], [true, 1, 3]]) assert.equal(la.translateToString(...args), lb.translateToString(...args), `line ${y} ${args}`);
     for (let col = 0; col < 5; col++) {
       const [ca, cb] = [la.getCell(col), lb.getCell(col)];
-      // Erased cells read ' ' here and '' in xterm.js (the engine does not tell them from typed spaces).
       assert.deepEqual(
-        [ca.getChars() || ' ', ca.getWidth(), !!ca.isBold(), !!ca.isDim(), !!ca.isItalic()],
-        [cb.getChars() || ' ', cb.getWidth(), !!cb.isBold(), !!cb.isDim(), !!cb.isItalic()],
+        [ca.getChars(), ca.getCode(), ca.getWidth(), !!ca.isBold(), !!ca.isDim(), !!ca.isItalic()],
+        [cb.getChars(), cb.getCode(), cb.getWidth(), !!cb.isBold(), !!cb.isDim(), !!cb.isItalic()],
         `line ${y} cell ${col}`,
       );
     }
   }
   assert.equal(a.getLine(0).getCell(3).getCode(), b.getLine(0).getCell(3).getCode());
+  x.dispose();
+  t.dispose();
+});
+
+test('typed spaces are text and erased cells are empty, like xterm.js (trimRight keeps typed trailing spaces)', async () => {
+  const input = 'a b   \r\nxy  \x1b[2D\x1b[K\r\n\x1b[5Cz  \x1b[1X\r\n  ';
+  const t = new m.Terminal({ cols: 8, rows: 4 });
+  const x = new xtermHeadless.Terminal({ cols: 8, rows: 4, allowProposedApi: true });
+  await write(t, input);
+  await new Promise((resolve) => x.write(input, resolve));
+  for (let y = 0; y < 4; y++) {
+    const [la, lb] = [t.buffer.active.getLine(y), x.buffer.active.getLine(y)];
+    for (const args of [[true], [false], [true, 1, 7]]) assert.equal(la.translateToString(...args), lb.translateToString(...args), `line ${y} ${args}`);
+    for (let col = 0; col < 8; col++) {
+      assert.deepEqual([la.getCell(col).getChars(), la.getCell(col).getCode()], [lb.getCell(col).getChars(), lb.getCell(col).getCode()], `line ${y} cell ${col}`);
+    }
+  }
+  assert.equal(t.buffer.active.getLine(0).translateToString(true), 'a b   ');
   x.dispose();
   t.dispose();
 });

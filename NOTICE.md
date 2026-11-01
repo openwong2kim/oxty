@@ -41,6 +41,14 @@ Jeffrey and (c) 2014-2025 The xterm.js authors, MIT license
 fixtures in `crates/oxtty/tests/fixtures/input-*.json` are recorded from
 xterm.js by `packages/oxtty/test/web/gen-input-fixtures.mjs`.
 
+## xterm.js search addon
+
+`crates/oxtty-web/src/search.rs` is a Rust port of `@xterm/addon-search`
+0.17.0-beta.330 (xterm.js commit 08829c7eb6279dda2a9e86df901353a1a89858ca):
+`addons/addon-search/src/SearchAddon.ts`, `SearchEngine.ts`, `SearchState.ts`
+and `SearchResultTracker.ts`, Copyright (c) 2017 The xterm.js authors, MIT
+license (`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
+
 ## wmux
 
 The engine integration started in

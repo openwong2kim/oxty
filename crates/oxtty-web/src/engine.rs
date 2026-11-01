@@ -87,6 +87,21 @@ extern "C" {
     pub fn set_windows_pty(this: &Engine, pty: &JsValue) -> Result<(), JsValue>;
     #[wasm_bindgen(method, catch, js_name = ansiSnapshot)]
     pub fn ansi_snapshot(this: &Engine) -> Result<JsValue, JsValue>;
+    /// `{ first, rows, text, cells }`: the logical line row `line` is on, as search reads it; `null` outside the
+    /// buffer. `cells` maps each UTF-16 unit of `text` to its cell (`row * cols + col` from `first`, bit 31 wide).
+    #[wasm_bindgen(method, catch, js_name = searchLine)]
+    pub fn search_line(this: &Engine, line: i32) -> Result<JsValue, JsValue>;
+    /// Marker on buffer line `line` of the primary screen (0 the oldest history line); 0 when refused.
+    #[wasm_bindgen(method, catch, js_name = addMarker)]
+    pub fn add_marker(this: &Engine, line: i32) -> Result<u32, JsValue>;
+    /// The marker's buffer line, -1 once it is gone.
+    #[wasm_bindgen(method, catch, js_name = markerLine)]
+    pub fn marker_line(this: &Engine, id: u32) -> Result<i32, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = removeMarker)]
+    pub fn remove_marker(this: &Engine, id: u32) -> Result<(), JsValue>;
+    /// An array of the ids the engine dropped since the last call.
+    #[wasm_bindgen(method, catch, js_name = takeDisposedMarkers)]
+    pub fn take_disposed_markers(this: &Engine) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(method)]
     pub fn dispose(this: &Engine);
 }
@@ -132,6 +147,8 @@ pub mod attr {
     pub const UNDERLINE_COLOR: u32 = 1 << 15;
     pub const HYPERLINK: u32 = 1 << 16;
     pub const LEADING_WIDE_SPACER: u32 = 1 << 17;
+    /// A space the program printed; other blanks were erased or never written (xterm.js empty cells).
+    pub const TYPED_SPACE: u32 = 1 << 18;
     pub const EXTRAS: u32 = COMBINING | UNDERLINE_COLOR | HYPERLINK;
 }
 

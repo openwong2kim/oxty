@@ -96,6 +96,7 @@ type CrashCallback = Closure<dyn FnMut(JsValue)>;
 pub(crate) struct Shared {
     pub core: RefCell<Core>,
     pub events: Emitters,
+    pub markers: RefCell<crate::markers::Markers>,
     state: Cell<State>,
     /// Serialises OSC 52 reads so each answers the oldest pending read.
     clipboard_reads: RefCell<Promise>,
@@ -170,6 +171,7 @@ impl Terminal {
                 disposed_size: (0, 0),
             }),
             events: Emitters::default(),
+            markers: RefCell::default(),
             state: Cell::new(State::default()),
             clipboard_reads: RefCell::new(Promise::resolve(&JsValue::UNDEFINED)),
             drain_timer: RefCell::new(None),
@@ -368,6 +370,7 @@ impl Terminal {
         core.screen = None;
         core.view.engine().dispose();
         drop(core);
+        crate::markers::drop_all(&self.shared);
         self.shared.drain_timer.borrow_mut().take();
         self.shared.frame.borrow_mut().take();
         self.shared.options_proxy.borrow_mut().take();
@@ -484,6 +487,7 @@ impl Shared {
         for selection in events.clipboard_reads {
             self.queue_clipboard_read(&clipboard, selection);
         }
+        crate::markers::sync(self);
     }
 
     /// Reads are answered in order, each with the oldest pending read of its selection; a failed read answers "".
@@ -578,6 +582,7 @@ impl Shared {
         let (old, new) = (self.state.get(), self.read_state());
         self.state.set(new);
         // Hook: selection syncs.
+        crate::markers::sync(self);
         if new.alternate != old.alternate && self.events.buffer_change.has_listeners() {
             let buffer = crate::buffer::active(self);
             self.events.buffer_change.fire(&[&buffer.into()]);
@@ -610,6 +615,7 @@ impl Shared {
             core.dirty = Dirty::All;
             // Hook: selection drops.
         }
+        crate::markers::drop_all(self);
         self.after_change();
     }
 

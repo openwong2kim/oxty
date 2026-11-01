@@ -78,6 +78,45 @@ thread_local! {
     /// ids are never reused, so an event read from a dropped terminal never reaches a new one.
     static TERMINALS: RefCell<Vec<(u32, Weak<Shared>)>> = const { RefCell::new(Vec::new()) };
     static NEXT_ID: Cell<u32> = const { Cell::new(0) };
+    /// Like `SUBSCRIBE`, for emitters outside the terminal's [`Emitters`] (an addon's, a marker's).
+    static SUBSCRIBE_EMITTER: Function = Closure::<dyn Fn(u32, JsValue) -> JsValue>::new(subscribe_emitter)
+        .into_js_value()
+        .unchecked_into();
+    /// Those emitters whose event was read, by id, with the same uniqueness rules as `TERMINALS`.
+    static EMITTERS: RefCell<Vec<(u32, Weak<Emitter>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The `IEvent` function of an emitter that is not one of the terminal's: it holds the emitter weakly, so once
+/// the emitter is dropped (a disposed marker) subscribing does nothing.
+pub(crate) fn emitter_event(emitter: &Rc<Emitter>) -> Function {
+    let id = EMITTERS.with(|list| {
+        let mut list = list.borrow_mut();
+        if let Some((id, _)) = list.iter().find(|(_, w)| w.as_ptr() == Rc::as_ptr(emitter)) {
+            return *id;
+        }
+        list.retain(|(_, w)| w.strong_count() > 0);
+        let id = NEXT_ID.with(|next| next.replace(next.get().wrapping_add(1)));
+        list.push((id, Rc::downgrade(emitter)));
+        id
+    });
+    SUBSCRIBE_EMITTER.with(|subscribe| {
+        subscribe
+            .bind1(&JsValue::NULL, &JsValue::from(id))
+            .unchecked_into()
+    })
+}
+
+fn subscribe_emitter(id: u32, listener: JsValue) -> JsValue {
+    let emitter = EMITTERS.with(|list| {
+        list.borrow()
+            .iter()
+            .find(|(i, _)| *i == id)
+            .and_then(|(_, w)| w.upgrade())
+    });
+    match (emitter, listener.dyn_into::<Function>()) {
+        (Some(emitter), Ok(listener)) => emitter.event(listener).into(),
+        _ => Disposable::new(|| {}).into(),
+    }
 }
 
 /// The `IEvent` function of `event` on this terminal.
