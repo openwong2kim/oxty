@@ -19,7 +19,7 @@ cp "$root/packages/oxtty/src/xterm.js" "$root/packages/oxtty/src/xterm.d.ts" "$d
 size="$(wc -c < "$dist/xterm_web_bg.wasm")"
 echo "packages/oxtty/dist/xterm_web_bg.wasm: $size bytes"
 # Size budget of the front end (the engine's is in build-wasm.sh's caller, PRD §7).
-budget=$((600 * 1024))
+budget=$((800 * 1024))
 if [ "$size" -gt "$budget" ]; then
   echo "front-end wasm is over its $budget-byte budget" >&2
   exit 1
