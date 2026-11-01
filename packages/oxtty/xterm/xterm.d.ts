@@ -83,6 +83,14 @@ export interface ITerminalOptions {
   allowProposedApi?: boolean;
   /** oxtty: OSC 52 clipboard access. */
   clipboard?: IClipboardHandler;
+  /** macOS: Option sends ESC-prefixed keys instead of composing characters (default false). */
+  macOptionIsMeta?: boolean;
+  /** Keys, IME and paste scroll a scrolled-back view to the bottom (default true). */
+  scrollOnUserInput?: boolean;
+  /** Drops all input, and the replies to the program, like xterm.js (default false). */
+  disableStdin?: boolean;
+  /** `kittyKeyboard`: the program may push kitty keyboard flags (`CSI > flags u`), and keys are then encoded that way. */
+  vtExtensions?: { kittyKeyboard?: boolean };
 }
 
 export type FontWeight = 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900' | number;
@@ -181,14 +189,20 @@ export class Terminal {
   readonly element: HTMLElement | undefined;
   /** Cell and canvas size, undefined before `open`. */
   readonly dimensions: IRenderDimensions | undefined;
+  /** The hidden textarea that takes keyboard and IME input, set by `open`. */
+  readonly textarea: HTMLTextAreaElement | undefined;
+  /** oxtty: the kitty keyboard flags keys are encoded with, as of the last frame (0 while the program pushed none). */
+  readonly kittyKeyboardFlags: number;
   readonly buffer: IBufferNamespace;
   readonly modes: IModes;
   readonly unicode: IUnicodeHandling;
   /** Setting a key applies it at once. `cols`, `rows` and `scrollback` throw when changed here. */
   options: ITerminalOptions & ITerminalInitOnlyOptions;
 
-  /** Replies to the program (status reports, colour queries, OSC 52 reads), decoded as UTF-8; input from step 2 on. */
+  /** Input (keys, IME, paste, focus reports) and replies to the program (status reports, colour queries, OSC 52 reads). */
   readonly onData: IEvent<string>;
+  /** oxtty: fires just before `onData` for data the user produced (keys, IME, paste), never for replies. */
+  readonly onUserInput: IEvent<void>;
   readonly onBinary: IEvent<string>;
   readonly onResize: IEvent<{ cols: number; rows: number }>;
   readonly onTitleChange: IEvent<string>;
@@ -218,6 +232,14 @@ export class Terminal {
   scrollToTop(): void;
   scrollToBottom(): void;
   scrollToLine(line: number): void;
+  focus(): void;
+  blur(): void;
+  /** Sends `data` as typed: newlines become CR, bracketed when the program enabled bracketed paste. */
+  paste(data: string): void;
+  /** `customKeyEventHandler` sees every keydown, keypress and keyup first; returning false stops the terminal from handling it. */
+  attachCustomKeyEventHandler(customKeyEventHandler: (event: KeyboardEvent) => boolean): void;
+  /** oxtty: drops the kitty keyboard flags the program pushed, on both screens, at once. */
+  resetKittyKeyboard(): void;
   /**
    * Accepts `FitAddon` (from here or `@xterm/addon-fit` 0.12) and absorbs `@xterm/addon-webgl` (the WebGL
    * renderer is built in; its `onContextLoss` never fires) and `@xterm/addon-unicode11` (the engine already

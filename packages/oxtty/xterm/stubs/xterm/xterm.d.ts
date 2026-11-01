@@ -47,7 +47,8 @@ export interface ITheme {
   extendedAnsi?: string[];
 }
 
-// Options read by CharAtlasUtils.generateConfig, GlyphRenderer, CharSizeService and ThemeService
+// Options read by CharAtlasUtils.generateConfig, GlyphRenderer, CharSizeService and ThemeService, and by the input parts
+// (KeyboardService, CoreBrowserTerminal, Clipboard)
 export interface ITerminalOptions {
   customGlyphs?: boolean;
   letterSpacing?: number;
@@ -61,4 +62,10 @@ export interface ITerminalOptions {
   minimumContrastRatio?: number;
   rescaleOverlappingGlyphs?: boolean;
   theme?: ITheme;
+  macOptionIsMeta?: boolean;
+  scrollOnUserInput?: boolean;
+  disableStdin?: boolean;
+  screenReaderMode?: boolean;
+  ignoreBracketedPasteMode?: boolean;
+  vtExtensions?: { kittyKeyboard?: boolean; win32InputMode?: boolean };
 }
