@@ -148,6 +148,36 @@ impl BufferView {
         self.read(|view| read_line(view, y)).flatten()
     }
 
+    /// OSC 8 hyperlinks of line `y` as `(column, id, uri)`; empty outside the buffer. For links that reach past the
+    /// viewport (rows in view come from the last frame).
+    pub(crate) fn hyperlinks(&self, y: f64) -> Vec<(u32, String, String)> {
+        self.read(|view| {
+            let e = view.engine();
+            let history = f64::from(e.history_length());
+            if !(y >= 0.0 && y.fract() == 0.0 && y < history + f64::from(e.rows())) {
+                return Vec::new();
+            }
+            let extras = e.row_extras((y - history) as i32).unwrap_or(JsValue::NULL);
+            if !Array::is_array(&extras) {
+                return Vec::new();
+            }
+            Array::from(&extras)
+                .iter()
+                .filter_map(|extra| {
+                    let link = get(&extra, "hyperlink");
+                    link.is_object().then(|| {
+                        (
+                            get(&extra, "col").as_f64().unwrap_or(-1.0) as u32,
+                            get(&link, "id").as_string().unwrap_or_default(),
+                            get(&link, "uri").as_string().unwrap_or_default(),
+                        )
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
     /// An empty cell: no text, width 1.
     #[wasm_bindgen(js_name = getNullCell)]
     pub fn get_null_cell(&self) -> BufferCell {

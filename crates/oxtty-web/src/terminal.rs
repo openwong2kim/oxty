@@ -516,8 +516,6 @@ impl Shared {
             }
             if let Some(callback) = finished {
                 self.handle_events();
-                // The selection syncs to the output just parsed, before the callback reads it.
-                crate::selection::sync(self);
                 if let Some(callback) = callback {
                     if let Err(error) = callback.call0(&JsValue::UNDEFINED) {
                         web_sys::console::error_1(&error);
@@ -677,7 +675,6 @@ impl Shared {
         }
         let (old, new) = (self.state.get(), self.read_state());
         self.state.set(new);
-        crate::selection::sync(self);
         crate::markers::sync(self);
         if new.alternate != old.alternate && self.events.buffer_change.has_listeners() {
             let buffer = crate::buffer::active(self);
@@ -733,16 +730,20 @@ impl Shared {
     fn render_frame(self: &Rc<Self>) {
         self.handle_renderer_requests();
         self.apply_scroll_requests();
-        let (rows, content) = {
+        let (rows, content, switched) = {
             let mut core = self.core.borrow_mut();
             if core.disposed || core.element.is_none() {
                 return;
             }
             let frame = core.view.take_frame();
             let changed = core.viewport.apply(frame);
+            let switched = crate::selection::follow(self, &core.viewport);
             // Without a renderer (none yet, or no WebGL2) the viewport still follows the engine: input reads it.
             if core.renderer.is_none() {
                 drop(core);
+                if switched {
+                    crate::selection::screen_switched(self);
+                }
                 crate::input::after_frame(self);
                 return;
             }
@@ -775,8 +776,11 @@ impl Shared {
                 let font_size = crate::options::option(options, "fontSize").as_f64();
                 a11y.frame(viewport, range, &dimensions, font_size.unwrap_or(15.0));
             }
-            (range, content)
+            (range, content, switched)
         };
+        if switched {
+            crate::selection::screen_switched(self);
+        }
         crate::input::after_frame(self);
         // A hovered link on rows the output changed is looked up again (xterm.js `onRenderedViewportChange`).
         if let Some((start, end)) = content {

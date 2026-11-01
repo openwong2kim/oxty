@@ -15,7 +15,8 @@
 //!
 //! Text, widths and wrapping come from `buffer.active` (the buffer API, which PRD D7 lets read the engine): erased
 //! cells and the spaces a program printed differ there as in xterm.js (`Attr.TYPED_SPACE`), so copies trim the
-//! same way. Trims and screen switches are picked up after every parsed write, before its callback runs.
+//! same way. Trims and screen switches come from each frame's `trimmedLines` and modes (`Viewport`, PRD D7), so the
+//! selection follows them on the next animation frame.
 //!
 //! Memory: a few numbers per terminal. The drag timer and the document listeners exist only while the button is
 //! held; lines are read when a selection needs them and dropped.
@@ -30,6 +31,7 @@ use web_sys::{ClipboardEvent, Event, KeyboardEvent, MouseEvent};
 
 use crate::buffer::{self, BufferLine, BufferView};
 use crate::engine::mode;
+use crate::engine::Viewport;
 use crate::input::mouse;
 use crate::options::option;
 use crate::render::{Renderer, SelectionRange};
@@ -66,9 +68,13 @@ pub(crate) struct Selection {
     old_has_selection: bool,
     old_start: Option<Point>,
     old_end: Option<Point>,
-    /// The engine's trimmed line count and screen as last seen.
+    /// The trimmed line count and screen of the last frame.
     trimmed_lines: f64,
     alternate: bool,
+    /// The next frame sets `trimmed_lines` without moving the selection (after `open`, a reset or an engine crash),
+    /// and with `rebase_screen` also `alternate` without clearing it (after `open`).
+    rebase: bool,
+    rebase_screen: bool,
     /// What the renderer was last given.
     drawn: Option<SelectionRange>,
 }
@@ -981,38 +987,36 @@ pub(crate) fn update_cursor_style(shared: &Rc<Shared>, event: &Event) {
     }
 }
 
-/// Follows the engine after output, a resize or a scroll: lines dropped off the top of the scrollback move the
-/// selection up (clearing it once it falls off), a switch to or from the alternate screen clears it.
-pub(crate) fn sync(shared: &Rc<Shared>) {
-    let Some((trimmed, alternate)) = engine_state(shared) else {
-        return;
+/// Follows each frame just applied to the viewport (PRD D7): lines dropped off the top of the scrollback move the
+/// selection up (clearing it once it falls off), and a switch to or from the alternate screen clears it. Runs under
+/// the core borrow before the selection is painted, so it calls no JS; returns whether the selection was cleared
+/// by a screen switch, which the caller announces with [`screen_switched`] once the borrow is dropped.
+pub(crate) fn follow(shared: &Shared, viewport: &Viewport) -> bool {
+    let Ok(mut s) = shared.selection.try_borrow_mut() else {
+        return false;
     };
-    let (amount, switched) = {
-        let mut s = shared.selection.borrow_mut();
-        let amount = trimmed - s.trimmed_lines;
-        let switched = alternate != s.alternate;
-        s.trimmed_lines = trimmed;
-        s.alternate = alternate;
-        (amount, switched)
-    };
-    if amount != 0.0 && shared.selection.borrow_mut().model.handle_trim(amount) {
-        refresh(shared, false);
+    let alternate = viewport.modes & mode::ALT_SCREEN != 0;
+    let (rebase, rebase_screen) = (
+        std::mem::take(&mut s.rebase),
+        std::mem::take(&mut s.rebase_screen),
+    );
+    let amount = viewport.trimmed_lines - s.trimmed_lines;
+    let switched = alternate != s.alternate && !rebase_screen;
+    s.trimmed_lines = viewport.trimmed_lines;
+    s.alternate = alternate;
+    // The frame paints the moved selection right after
+    if amount != 0.0 && !rebase {
+        s.model.handle_trim(amount);
     }
     if switched {
-        clear_selection(shared);
+        s.model.clear();
     }
+    switched
 }
 
-fn engine_state(shared: &Shared) -> Option<(f64, bool)> {
-    let core = shared.core.try_borrow().ok()?;
-    if core.disposed {
-        return None;
-    }
-    let engine = core.view.engine();
-    Some((
-        engine.trimmed_lines(),
-        engine.modes().unwrap_or(0) & mode::ALT_SCREEN != 0,
-    ))
+/// The screen switch [`follow`] saw: the rest of xterm.js `clearSelection` (listeners, `onSelectionChange`).
+pub(crate) fn screen_switched(shared: &Rc<Shared>) {
+    clear_selection(shared);
 }
 
 /// Full resets (the program's RIS, `Terminal.reset`): like xterm.js, each sets the buffers up again, which clears
@@ -1021,10 +1025,11 @@ pub(crate) fn handle_resets(shared: &Rc<Shared>, resets: u32) {
     if resets == 0 || !opened(shared) {
         return;
     }
-    if let Some((trimmed, alternate)) = engine_state(shared) {
+    // A reset leaves the normal screen on; the next frame's trimmed line count is taken as is
+    {
         let mut s = shared.selection.borrow_mut();
-        s.trimmed_lines = trimmed;
-        s.alternate = alternate;
+        s.rebase = true;
+        s.alternate = false;
     }
     for _ in 0..resets {
         clear_selection(shared);
@@ -1034,7 +1039,6 @@ pub(crate) fn handle_resets(shared: &Rc<Shared>, resets: u32) {
 
 /// `Terminal.resize`: like xterm.js, a change of rows clears the selection.
 pub(crate) fn after_resize(shared: &Rc<Shared>, rows_changed: bool) {
-    sync(shared);
     if rows_changed && opened(shared) {
         clear_selection(shared);
     }
@@ -1048,10 +1052,10 @@ pub(crate) fn handle_crash(shared: &Rc<Shared>) {
 
 /// `open`: while the program already takes clicks the selection starts disabled, which clears it.
 pub(crate) fn open(shared: &Rc<Shared>) {
-    if let Some((trimmed, alternate)) = engine_state(shared) {
+    {
         let mut s = shared.selection.borrow_mut();
-        s.trimmed_lines = trimmed;
-        s.alternate = alternate;
+        s.rebase = true;
+        s.rebase_screen = true;
     }
     if !mouse::selection_enabled(shared) {
         disable(shared);

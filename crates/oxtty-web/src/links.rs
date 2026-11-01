@@ -13,8 +13,8 @@
 //!   2019 The xterm.js authors): URLs found with the addon's regular expression, a JS `RegExp` (no matcher in the
 //!   wasm), checked with `URL`.
 //!
-//! Lines come from `buffer.active` like the addon reads them, and OSC 8 links from the engine's cell extras of the
-//! same lines (the buffer API's reads, PRD D7). Unlike xterm.js, the `decorations` of a hovered link are read once
+//! Lines come from `buffer.active` like the addon reads them; OSC 8 links come from the last frame's cell extras
+//! (`Viewport`, PRD D7) for rows in view and from the buffer API for the rows a wrapped link reaches beyond them. Unlike xterm.js, the `decorations` of a hovered link are read once
 //! (later changes to them are not followed), a provider's late reply to an earlier hover is dropped, and a
 //! `urlRegex` that matches empty text moves on instead of looping forever.
 //!
@@ -930,30 +930,25 @@ struct OscLine {
 }
 
 impl OscLine {
-    /// Buffer line `y` (0-based).
+    /// Buffer line `y` (0-based): its hyperlinks from the last frame while it is in view, else from the buffer API.
     fn get(shared: &Shared, view: &BufferView, y: f64) -> Option<OscLine> {
         let line = view.get_line(y)?;
-        let core = shared.core.try_borrow().ok()?;
-        let engine = core.view.engine();
-        let row = y - f64::from(engine.history_length());
-        let extras = engine.row_extras(row as i32).unwrap_or(JsValue::NULL);
-        let links = if Array::is_array(&extras) {
-            Array::from(&extras)
-                .iter()
-                .filter_map(|extra| {
-                    let hyperlink = get(&extra, "hyperlink");
-                    hyperlink.is_object().then(|| {
-                        (
-                            get(&extra, "col").as_f64().unwrap_or(-1.0) as u32,
-                            get(&hyperlink, "id").as_string().unwrap_or_default(),
-                            get(&hyperlink, "uri").as_string().unwrap_or_default(),
-                        )
+        let visible = shared.core.try_borrow().ok().and_then(|core| {
+            let v = &core.viewport;
+            let row = y - (f64::from(v.history_length) - f64::from(v.display_offset));
+            (row >= 0.0 && row < f64::from(v.rows)).then(|| {
+                v.extras
+                    .get(&(row as u32))
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|extra| {
+                        let link = extra.hyperlink.as_ref()?;
+                        Some((extra.col, link.id.clone(), link.uri.clone()))
                     })
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+                    .collect()
+            })
+        });
+        let links = visible.unwrap_or_else(|| view.hyperlinks(y));
         Some(OscLine { line, links })
     }
 
