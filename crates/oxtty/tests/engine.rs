@@ -757,3 +757,25 @@ fn mouse_mode_resets_follow_xterm_js() {
         "either reset returns to the default encoding"
     );
 }
+
+#[test]
+fn trimmed_lines_count_what_leaves_the_top_of_the_scrollback() {
+    for mut t in [Engine::new(10, 2, 3), Engine::new_uncompressed(10, 2, 3)] {
+        // 10 lines on a 2-row screen: 8 enter the history, which keeps 3
+        t.feed(b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9");
+        assert_eq!((t.history_len(), t.trimmed_lines()), (3, 5));
+        assert_eq!(t.row_text(-3).as_deref(), Some("5"));
+        // The alternate screen neither keeps nor drops history
+        t.feed(b"\x1b[?1049ha\r\nb\r\nc\x1b[?1049l");
+        assert_eq!((t.history_len(), t.trimmed_lines()), (3, 5));
+        // A resize reflows; it does not trim
+        t.resize(5, 2);
+        let reflowed = t.history_len();
+        assert_eq!(t.trimmed_lines(), 5);
+        t.feed(b"\x1b[3J");
+        assert_eq!(
+            (t.history_len(), t.trimmed_lines()),
+            (0, 5 + reflowed as u64)
+        );
+    }
+}

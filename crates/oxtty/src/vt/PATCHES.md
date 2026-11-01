@@ -87,6 +87,9 @@ single crate.
   default and turned on by `oxtty::Engine`, resets as xterm.js does: resetting
   any tracking mode (9, 1000, 1002, 1003) turns tracking off, and resetting
   1006 or 1016 returns to the default encoding.
+- `Grid::history_entered` counts the lines that scrolled into the history
+  (whether a full history then dropped them), so the engine can tell how many
+  lines left the top of the scrollback.
 - `Term::set_kitty_keyboard` switches the kitty keyboard protocol at runtime
   and drops its flag stacks, as `set_options` does, without re-sending the
   title or damaging the screen.

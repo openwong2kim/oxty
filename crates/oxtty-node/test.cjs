@@ -35,6 +35,7 @@ test('native sync flush and scrollback', () => {
   assert.equal(t.rowText(0), 'HELD');
   for (let i = 0; i < 10; i++) t.write(`\r\nline ${i}`);
   assert.ok(t.historyLength > 0);
+  assert.equal(typeof t.trimmedLines, 'number');
   assert.equal(t.rowText(-t.historyLength), 'HELD');
 });
 

@@ -31,6 +31,8 @@ export interface Frame {
   cursor: Cursor;
   displayOffset: number;
   historyLength: number;
+  /** Engine `trimmedLines`: selection keeps its lines in place while a full scrollback drops the oldest. */
+  trimmedLines: number;
   /** Bitwise OR of `Mode`; input encoding reads it from here (one frame late in a Worker build). */
   modes: number;
   /** Active kitty keyboard flags (`Terminal.kittyFlags`), read by key encoding like `modes`. */
@@ -95,7 +97,7 @@ export class LocalEngineView implements EngineView {
     const cursor = e.cursor();
     cursor.line += displayOffset;
     if (cursor.line >= rows) cursor.visible = false;
-    return { cols, rows, full, lines, cells: this._cells, extras, cursor, displayOffset, historyLength: e.historyLength, modes: e.modes(), kittyFlags: e.kittyFlags() };
+    return { cols, rows, full, lines, cells: this._cells, extras, cursor, displayOffset, historyLength: e.historyLength, trimmedLines: e.trimmedLines, modes: e.modes(), kittyFlags: e.kittyFlags() };
   }
 }
 
@@ -111,6 +113,7 @@ export class Viewport {
   public cursor: Cursor = { line: 0, col: 0, visible: false, shape: 'block', blink: false, styled: false };
   public displayOffset = 0;
   public historyLength = 0;
+  public trimmedLines = 0;
   public modes = 0;
   public kittyFlags = 0;
 
@@ -133,6 +136,7 @@ export class Viewport {
     this.cursor = frame.cursor;
     this.displayOffset = frame.displayOffset;
     this.historyLength = frame.historyLength;
+    this.trimmedLines = frame.trimmedLines;
     this.modes = frame.modes;
     this.kittyFlags = frame.kittyFlags;
     return frame.lines;

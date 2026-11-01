@@ -358,6 +358,10 @@ pub struct Engine {
     scrolled_seen: u64,
     // The view moved, so the next damage is full.
     view_moved: bool,
+    // Lines that left the top of the primary screen's scrollback, and what the count was taken from.
+    trimmed: u64,
+    entered_seen: u64,
+    history_seen: usize,
     // Scanner state for a DECSTR (`CSI Ps ! p`) split across feeds.
     decstr: DecstrScan,
     // Host colours that answer colour queries; none means queries go unanswered.
@@ -429,6 +433,9 @@ impl Engine {
             scrollback,
             offset: 0,
             scrolled_seen: 0,
+            trimmed: 0,
+            entered_seen: 0,
+            history_seen: 0,
             view_moved: false,
             decstr: DecstrScan::default(),
             colors: None,
@@ -477,6 +484,22 @@ impl Engine {
         }
     }
 
+    /// Adds the lines that left the top of the primary scrollback since the last call: a full history dropping
+    /// its oldest rows, or history cleared (ED3, RIS).
+    fn count_trimmed(&mut self) {
+        let entered = self.primary().history_entered();
+        let now = self.primary_history_len();
+        let added = (entered - self.entered_seen) as usize;
+        self.trimmed += (self.history_seen + added).saturating_sub(now) as u64;
+        self.entered_seen = entered;
+        self.history_seen = now;
+    }
+
+    // Unlike `history_len`, also while the alternate screen is up.
+    fn primary_history_len(&self) -> usize {
+        self.primary().history_size() + self.history.as_ref().map_or(0, |h| h.lock().len())
+    }
+
     /// Hands the row at `line` to `f`, decoding a compressed history row on the spot.
     fn with_row<R>(&self, line: i32, f: impl FnOnce(&Row<AlacCell>) -> R) -> Option<R> {
         let grid = self.term.grid();
@@ -521,6 +544,7 @@ impl Engine {
         self.parser.advance(&mut self.term, bytes);
         self.answer_color_queries();
         self.follow_scroll();
+        self.count_trimmed();
         self.tail.push(bytes);
         // vte's synchronized-update buffer is always a contiguous tail of the input, so its length is
         // enough to keep the copy in step.
@@ -545,6 +569,16 @@ impl Engine {
             }
             None => self.term.resize(size(cols, rows)),
         }
+        // Reflow renumbers the history; it is not trimming.
+        self.entered_seen = self.primary().history_entered();
+        self.history_seen = self.primary_history_len();
+    }
+
+    /// Lines that have left the top of the primary screen's scrollback so far (a full history dropping its oldest
+    /// rows, ED3, RIS), like xterm.js `onTrim` summed up. History row `-k` is line `trimmed_lines() + history_len - k`
+    /// counted from the first line ever kept, until a resize reflows the history.
+    pub fn trimmed_lines(&self) -> u64 {
+        self.trimmed
     }
 
     pub fn cols(&self) -> u16 {

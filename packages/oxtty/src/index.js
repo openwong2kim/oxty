@@ -1,7 +1,7 @@
 // oxtty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 6;
+const ABI = 7;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 // Input buffer: smallest allocation, and the largest one kept between writes.
@@ -282,6 +282,9 @@ export class Terminal {
   get rows() { this.#handle(); return this.#rows; }
   /** Scrollback lines; address them as rows -1 (newest) … -historyLength (oldest). */
   get historyLength() { return wasm.oxtty_history_len(this.#handle()); }
+
+  /** Lines that have left the top of the scrollback (full history, ED3, RIS); history row -k is line trimmedLines + historyLength - k. */
+  get trimmedLines() { return wasm.oxtty_trimmed_lines(this.#handle()); }
 
   /** @returns {string | null} */
   rowText(line) {

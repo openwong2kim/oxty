@@ -153,6 +153,10 @@ pub struct Grid<T> {
     #[cfg_attr(feature = "serde", serde(skip))]
     scrolled_lines: u64,
 
+    /// oxtty: number of lines that have entered the history so far (scrolls of a region at the top).
+    #[cfg_attr(feature = "serde", serde(skip))]
+    history_entered: u64,
+
     /// oxtty: history rows held outside the grid, above its own, during a resize.
     #[cfg_attr(feature = "serde", serde(skip))]
     history_above: Option<Arc<Mutex<dyn HistoryAbove<T>>>>,
@@ -214,6 +218,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             keep_cursor_paragraph: false,
             history_sink: None,
             scrolled_lines: 0,
+            history_entered: 0,
             history_above: None,
         }
     }
@@ -250,6 +255,11 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
     /// oxtty: lines scrolled up so far; the view moves by this much while scrolled back.
     pub fn scrolled_lines(&self) -> u64 {
         self.scrolled_lines
+    }
+
+    /// oxtty: lines that have entered the history so far, whether it kept them or not.
+    pub fn history_entered(&self) -> u64 {
+        self.history_entered
     }
 
     /// oxtty: puts `older` rows (oldest first) above the current history and
@@ -400,6 +410,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
         // Only rotate the entire history if the active region starts at the top.
         if region.start == 0 {
+            self.history_entered += positions as u64;
             // oxtty: hand the rows a full history is about to drop to the sink. They are the
             // oldest history rows, then (with less history than `positions`) the top screen rows.
             if let Some(sink) = &self.history_sink {

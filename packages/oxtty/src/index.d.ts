@@ -79,6 +79,12 @@ export class Terminal {
   readonly rows: number;
   /** Scrollback lines; address them as rows -1 (newest) … -historyLength (oldest). */
   readonly historyLength: number;
+  /**
+   * Lines that have left the top of the scrollback so far (a full history dropping its oldest, ED3, RIS), like
+   * xterm.js `onTrim` summed up. History row `-k` is line `trimmedLines + historyLength - k` counted from the first
+   * line ever kept, until a resize reflows the history.
+   */
+  readonly trimmedLines: number;
   rowText(line: number): string | null;
   /** `[codepoint, fg, bg, attrs]` per cell. */
   rowCells(line: number): Uint32Array | null;

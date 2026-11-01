@@ -256,3 +256,10 @@ test('kitty keyboard flags and X10 mouse mode reach JS, and kitty stays enabled 
   assert.equal(t.kittyFlags(), 1, 'the restarted engine still has the protocol enabled');
   t.dispose();
 });
+
+test('trimmedLines counts lines that left the top of the scrollback', () => {
+  const t = make({ cols: 10, rows: 2, scrollback: 3 });
+  t.write('0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9');
+  assert.deepEqual([t.historyLength, t.trimmedLines], [3, 5]);
+  t.dispose();
+});

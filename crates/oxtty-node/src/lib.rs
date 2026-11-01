@@ -106,6 +106,12 @@ impl Terminal {
         self.inner.history_len() as u32
     }
 
+    /// Lines that have left the top of the scrollback so far (a full history dropping rows, ED3, RIS).
+    #[napi(getter)]
+    pub fn trimmed_lines(&self) -> f64 {
+        self.inner.trimmed_lines() as f64
+    }
+
     #[napi]
     pub fn row_text(&self, line: i32) -> Option<String> {
         self.inner.row_text(line)

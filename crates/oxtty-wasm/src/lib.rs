@@ -107,7 +107,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    6
+    7
 }
 
 #[no_mangle]
@@ -201,6 +201,12 @@ pub extern "C" fn oxtty_rows(h: u32) -> u32 {
 #[no_mangle]
 pub extern "C" fn oxtty_history_len(h: u32) -> u32 {
     with(h, 0, |t| t.history_len() as u32)
+}
+
+/// Lines that have left the top of the scrollback (a double, so the count does not wrap).
+#[no_mangle]
+pub extern "C" fn oxtty_trimmed_lines(h: u32) -> f64 {
+    with(h, 0.0, |t| t.trimmed_lines() as f64)
 }
 
 /// UTF-8 row text into OUT; returns its length, or -1 if out of range.

@@ -252,6 +252,11 @@ fn run(seed: u64) {
         }
         check_bounds(&packed);
         assert_eq!(packed.history_len(), plain.history_len(), "history length");
+        assert_eq!(
+            packed.trimmed_lines(),
+            plain.trimmed_lines(),
+            "trimmed lines"
+        );
         assert_eq!(packed.cursor(), plain.cursor(), "cursor");
     }
     let (a, b) = (screen(&packed), screen(&plain));
