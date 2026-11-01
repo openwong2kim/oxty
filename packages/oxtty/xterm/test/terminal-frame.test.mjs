@@ -18,6 +18,8 @@ test('open, frames, options, fit, crash recovery and dispose drive the renderer 
   assert.deepEqual(open.firstRender, ['all']);
   assert.deepEqual(open.rendered, [{ start: 0, end: 3 }]);
 
+  assert.deepEqual(facts.focus, [false, true, false]);
+
   const { write } = facts;
   assert.equal(write.renders, 2, 'one frame for both writes');
   assert.deepEqual(write.last.rows.slice(0, 2), ['hello', 'world']);

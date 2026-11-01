@@ -12,6 +12,7 @@ class FakeRenderer implements Renderer {
   public readonly renders: { changed: number[]; dirty: number[] | 'all'; rows: string[] }[] = [];
   public readonly options: Partial<RendererOptions>[] = [];
   public readonly selections: (SelectionRange | undefined)[] = [];
+  public readonly focus: boolean[] = [];
   public disposed = false;
   private _cellWidth: number;
   private _cellHeight: number;
@@ -49,7 +50,9 @@ class FakeRenderer implements Renderer {
     this.selections.push(selection);
   }
 
-  public setFocused(): void {}
+  public setFocused(focused: boolean): void {
+    this.focus.push(focused);
+  }
 
   public onDimensionsChange(listener: () => void): () => void {
     this._dimensionListeners.add(listener);
@@ -113,6 +116,14 @@ async function main(): Promise<Record<string, unknown>> {
     firstRender: renderer.renders.map(r => r.dirty),
     rendered: rendered.splice(0),
   };
+
+  // Focus anywhere inside the element (the hidden textarea from step 2) reaches the renderer.
+  const input = document.createElement('input');
+  screen.querySelector('.xterm-helpers')!.appendChild(input);
+  input.focus();
+  input.blur();
+  input.remove();
+  facts.focus = renderer.focus;
 
   // Two writes parsed in one task are one dirty period: one frame.
   t.write('hello');

@@ -45,13 +45,15 @@ test('status reports reach onData before the write callback, without any frame',
   t.dispose();
 });
 
-test('the DA1 reply is the bytes xterm.js sends', { todo: 'the engine answers CSI ? 6 c; reported for crates/' }, async () => {
-  const t = new m.Terminal();
-  const data = collect(t.onData);
-  await write(t, '\x1b[c');
-  assert.equal(data.join(''), await headlessReply('\x1b[c'));
-  assert.equal(data.join(''), '\x1b[?1;2c');
-  t.dispose();
+test('DA1 and DA2 replies are the bytes xterm.js sends', async () => {
+  for (const [query, reply] of [['\x1b[c', '\x1b[?1;2c'], ['\x1b[>c', '\x1b[>0;276;0c']]) {
+    const t = new m.Terminal();
+    const data = collect(t.onData);
+    await write(t, query);
+    assert.equal(data.join(''), await headlessReply(query));
+    assert.equal(data.join(''), reply);
+    t.dispose();
+  }
 });
 
 test('titles and bells become events', async () => {

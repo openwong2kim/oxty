@@ -7,6 +7,7 @@ import type { IDisposable } from 'vs/base/common/lifecycle';
 import { BufferNamespace } from './buffer';
 import { LocalEngineView, Viewport } from './engine-view';
 import type { Dimensions, Renderer, RendererOptions, Theme } from './renderer/types';
+import { WebglRenderer } from './renderer/WebglRenderer';
 import { WriteQueue, isHighSurrogate } from './WriteQueue';
 
 /** OSC 52: the program may copy to (`write`) and read from (`read`) the host clipboard only when the handler is set. */
@@ -50,7 +51,7 @@ export interface TerminalAddon extends IDisposable {
 
 export type RendererFactory = (container: HTMLElement, cols: number, rows: number, options: Partial<RendererOptions>) => Renderer;
 
-let rendererFactory: RendererFactory | undefined;
+let rendererFactory: RendererFactory = (container, cols, rows, options) => new WebglRenderer(container, cols, rows, options);
 
 /** Sets how `open` builds the renderer (tests pass a fake one). */
 export function setRendererFactory(factory: RendererFactory): void {
@@ -124,7 +125,8 @@ export class Terminal {
   private _element: HTMLElement | undefined;
   private _screen: HTMLElement | undefined;
   private _renderer: Renderer | undefined;
-  private _rendererListeners: (() => void)[] = [];
+  /** Renderer and DOM listeners added by `open`. */
+  private _openListeners: (() => void)[] = [];
   private _frame = 0;
   /** Rows the host changed since the last frame (redraw requests, `refresh`). */
   private _hostDirty: Set<number> | 'all' = 'all';
@@ -246,7 +248,6 @@ export class Terminal {
       if (this._element.parentElement !== parent) parent.appendChild(this._element);
       return;
     }
-    if (!rendererFactory) throw new Error('oxtty/xterm: no renderer is available');
     const doc = parent.ownerDocument;
     if (!doc.getElementById(STYLE_ID)) {
       const style = doc.createElement('style');
@@ -270,10 +271,18 @@ export class Terminal {
 
     const options: Partial<RendererOptions> = {};
     for (const key of Object.keys(RENDERER_OPTIONS)) if (this._options[key] !== undefined) Object.assign(options, { [key]: this._options[key] });
+    // The renderer puts its canvas into `screen` and may replace it (WebGL context recreated): never keep it.
     const renderer = rendererFactory(screen, this.cols, this.rows, options);
-    if (!renderer.canvas.parentElement) screen.appendChild(renderer.canvas);
     this._renderer = renderer;
-    this._rendererListeners.push(
+    // Focus picks the cursor style; the hidden textarea (step 2) focuses inside the element.
+    const onFocusIn = (): void => this._setFocused(true);
+    const onFocusOut = (e: FocusEvent): void => this._setFocused(element.contains(e.relatedTarget as Node | null));
+    element.addEventListener('focusin', onFocusIn);
+    element.addEventListener('focusout', onFocusOut);
+    this._setFocused(element.contains(doc.activeElement));
+    this._openListeners.push(
+      () => element.removeEventListener('focusin', onFocusIn),
+      () => element.removeEventListener('focusout', onFocusOut),
       renderer.onDimensionsChange(() => {
         this._syncScreenSize();
         this._onDimensionsChange.fire(renderer.dimensions);
@@ -396,7 +405,7 @@ export class Terminal {
     this._queue.dispose();
     if (this._frame) cancelAnimationFrame(this._frame);
     for (const addon of this._addons.splice(0)) addon.dispose();
-    for (const unsubscribe of this._rendererListeners.splice(0)) unsubscribe();
+    for (const unsubscribe of this._openListeners.splice(0)) unsubscribe();
     this._renderer?.dispose();
     this._renderer = undefined;
     this._element?.remove();
@@ -421,6 +430,11 @@ export class Terminal {
       if (cell.width !== width || cell.height !== height) this._onDimensionsChange.fire(this._renderer.dimensions);
       this._redraw('all');
     }
+  }
+
+  /** Tells the renderer whether the terminal has focus (cursor style and blink); input drives it from step 2. */
+  private _setFocused(focused: boolean): void {
+    this._renderer?.setFocused(focused);
   }
 
   private _applyClipboard(): void {
