@@ -75,19 +75,19 @@ test('screenReaderMode next to xterm.js', { timeout: 120000 }, async (t) => {
       const [ox, xt] = await tree();
       assert.equal(ox.live, 'hello\nworld   !\n$ ls');
       assert.equal(ox.live, xt.live);
-      await setup();
+      // The limit, on one burst the viewport holds whole: both read it in one refresh. (Spread over frames, where
+      // each implementation cuts a long stream depends on when its once-a-second refresh lands: a refresh that finds
+      // "too much output" starts the count again.)
+      await setup({ ...OPTIONS, rows: 30 });
       await settle();
       await page.evaluate(async () => {
-        for (let i = 0; i < 30; i++) {
-          await window.write(`out ${i}\r\n`);
-          await window.frames(1);
-        }
+        await window.write(Array.from({ length: 25 }, (_, i) => `out ${i}\r\n`).join(''));
         await window.frames();
       });
       await settle();
       const [manyOx, manyXt] = await tree();
       assert.equal(manyOx.live, manyXt.live);
-      assert.match(manyOx.live, /^out 0\n[\s\S]*out 20\n$/);
+      assert.equal(manyOx.live, Array.from({ length: 21 }, (_, i) => `out ${i}\n`).join(''), 'up to the 21st line');
     });
 
     await t.test('more lines than the viewport in one frame cannot be read: too much output', async () => {
