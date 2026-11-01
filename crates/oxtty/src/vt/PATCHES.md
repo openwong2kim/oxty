@@ -24,7 +24,10 @@ single crate.
   `_reflowSmaller`: while history is empty and the cursor is above the bottom
   row, each added row drops the bottom row and moves the cursor down; the rest
   go to history with the cursor row unchanged, even when the reflowed paragraph
-  is below the cursor. `oxtty::Engine` sets `reflow_cursor_line: false`.
+  is below the cursor. Widening also frees a pending wrap on a grid that does
+  not reflow (the alternate screen), as xterm.js leaves the cursor past the
+  old last column, which is then a real column; upstream frees it only when
+  reflowing. `oxtty::Engine` sets `reflow_cursor_line: false`.
 - Scroll damage is an option: `term::Config::scroll_damage` (default `false`,
   upstream full damage on every scroll). When on, a whole-screen scroll at the
   bottom of history moves line damage with the content, damages the new
