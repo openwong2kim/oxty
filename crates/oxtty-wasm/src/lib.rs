@@ -107,7 +107,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    5
+    6
 }
 
 #[no_mangle]
@@ -328,6 +328,21 @@ pub extern "C" fn oxtty_row_extras(h: u32, line: i32) -> i32 {
 #[no_mangle]
 pub extern "C" fn oxtty_modes(h: u32) -> u32 {
     with(h, 0, |t| t.modes())
+}
+
+#[no_mangle]
+pub extern "C" fn oxtty_set_kitty_keyboard(h: u32, enabled: u32) {
+    with(h, (), |t| t.set_kitty_keyboard(enabled != 0));
+}
+
+#[no_mangle]
+pub extern "C" fn oxtty_reset_kitty_keyboard(h: u32) {
+    with(h, (), |t| t.reset_kitty_keyboard());
+}
+
+#[no_mangle]
+pub extern "C" fn oxtty_kitty_flags(h: u32) -> u32 {
+    with(h, 0, |t| t.kitty_flags() as u32)
 }
 
 /// -1 = full redraw; otherwise the number of changed lines. OUT32 holds the

@@ -191,6 +191,24 @@ impl Terminal {
         self.inner.modes()
     }
 
+    /// Lets the program use the kitty keyboard protocol (off by default); switching drops its pushed flags.
+    #[napi]
+    pub fn set_kitty_keyboard(&mut self, enabled: bool) {
+        self.inner.set_kitty_keyboard(enabled);
+    }
+
+    /// Drops the kitty keyboard flags the program pushed, keeping the protocol on or off.
+    #[napi]
+    pub fn reset_kitty_keyboard(&mut self) {
+        self.inner.reset_kitty_keyboard();
+    }
+
+    /// Active kitty keyboard flags (1 disambiguate, 2 event types, 4 alternate keys, 8 all keys, 16 associated text).
+    #[napi]
+    pub fn kitty_flags(&self) -> u32 {
+        self.inner.kitty_flags() as u32
+    }
+
     #[napi]
     pub fn take_damage(&mut self) -> Damage {
         match self.inner.take_damage() {

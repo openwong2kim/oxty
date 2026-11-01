@@ -99,6 +99,8 @@ pub mod mode {
     pub const ORIGIN: u32 = 1 << 13;
     /// Any kitty keyboard protocol flag is active.
     pub const KITTY_KEYBOARD: u32 = 1 << 14;
+    /// X10 mouse reporting (`CSI ? 9 h`): button presses only, no modifiers.
+    pub const MOUSE_X10: u32 = 1 << 15;
 }
 
 /// Packed colours in [`Cell::fg`] / [`Cell::bg`]: the top byte is the kind,
@@ -719,6 +721,7 @@ impl Engine {
             (TermMode::LINE_WRAP, mode::LINE_WRAP),
             (TermMode::INSERT, mode::INSERT),
             (TermMode::ORIGIN, mode::ORIGIN),
+            (TermMode::MOUSE_X10, mode::MOUSE_X10),
         ];
         let mut bits = map
             .iter()
@@ -770,6 +773,36 @@ impl Engine {
     /// The new window title if it changed since the last call (`""` = reset).
     pub fn take_title(&mut self) -> Option<String> {
         self.inbox.inbox().title.take()
+    }
+
+    /// Lets the program turn on the kitty keyboard protocol (`CSI > u` and friends; off by default, so its
+    /// sequences are ignored). Switching, either way, drops the flags the program pushed.
+    pub fn set_kitty_keyboard(&mut self, enabled: bool) {
+        self.term.set_kitty_keyboard(enabled);
+    }
+
+    /// Drops the kitty keyboard flags the program pushed, on both screens (for a host that resets them when a
+    /// program exits without popping). The protocol stays enabled or disabled as it was.
+    pub fn reset_kitty_keyboard(&mut self) {
+        let enabled = self.term.kitty_keyboard_enabled();
+        self.term.set_kitty_keyboard(enabled);
+    }
+
+    /// Active kitty keyboard flags as the protocol numbers them: 1 disambiguate escape codes, 2 report event
+    /// types, 4 report alternate keys, 8 report all keys as escape codes, 16 report associated text.
+    pub fn kitty_flags(&self) -> u8 {
+        let m = *self.term.mode();
+        [
+            TermMode::DISAMBIGUATE_ESC_CODES,
+            TermMode::REPORT_EVENT_TYPES,
+            TermMode::REPORT_ALTERNATE_KEYS,
+            TermMode::REPORT_ALL_KEYS_AS_ESC,
+            TermMode::REPORT_ASSOCIATED_TEXT,
+        ]
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| m.contains(**f))
+        .fold(0, |acc, (i, _)| acc | 1 << i)
     }
 
     /// Lets the program read and/or write the host's clipboards with OSC 52.

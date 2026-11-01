@@ -691,3 +691,41 @@ fn ed1_from_line_1_erases_line_0() {
     t.feed(b"\x1b[2;1Hb\x1b[1;1Ha\x1b[2;1H\x1b[1J");
     assert_eq!(t.row_text(0).as_deref(), Some(""));
 }
+
+#[test]
+fn x10_mouse_mode_is_exclusive_with_the_other_mouse_modes() {
+    let mut t = term();
+    t.feed(b"\x1b[?9h");
+    assert_eq!(
+        t.modes() & (mode::MOUSE_X10 | mode::MOUSE_CLICK),
+        mode::MOUSE_X10
+    );
+    t.feed(b"\x1b[?9$p");
+    assert_eq!(t.take_replies(), b"\x1b[?9;1$y");
+    t.feed(b"\x1b[?1000h");
+    assert_eq!(
+        t.modes() & (mode::MOUSE_X10 | mode::MOUSE_CLICK),
+        mode::MOUSE_CLICK
+    );
+    t.feed(b"\x1b[?9h\x1b[?9l");
+    assert_eq!(t.modes() & (mode::MOUSE_X10 | mode::MOUSE_CLICK), 0);
+}
+
+#[test]
+fn kitty_keyboard_flags_follow_the_program_only_when_enabled() {
+    let mut t = term();
+    t.feed(b"\x1b[>1u");
+    assert_eq!(t.kitty_flags(), 0, "off by default: the push is ignored");
+    t.set_kitty_keyboard(true);
+    t.feed(b"\x1b[>1u\x1b[>3u");
+    assert_eq!(t.kitty_flags(), 3);
+    assert_ne!(t.modes() & mode::KITTY_KEYBOARD, 0);
+    t.feed(b"\x1b[<u");
+    assert_eq!(t.kitty_flags(), 1);
+    t.reset_kitty_keyboard();
+    assert_eq!(t.kitty_flags(), 0);
+    t.feed(b"\x1b[>8u");
+    assert_eq!(t.kitty_flags(), 8, "still enabled after a reset");
+    t.set_kitty_keyboard(false);
+    assert_eq!(t.kitty_flags(), 0);
+}

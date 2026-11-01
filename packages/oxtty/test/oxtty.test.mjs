@@ -239,3 +239,20 @@ test('a trap rebuilds the instance and every terminal starts over at its size wi
   a.dispose();
   b.dispose();
 });
+
+test('kitty keyboard flags and X10 mouse mode reach JS, and kitty stays enabled across a crash', async () => {
+  const { __trapForTest } = await import('../dist/index.js');
+  const t = make({ onCrash: () => {} });
+  t.write('\x1b[>1u\x1b[?9h');
+  assert.equal(t.kittyFlags(), 0);
+  assert.ok(t.modes() & Mode.MOUSE_X10);
+  t.setKittyKeyboard(true);
+  t.write('\x1b[>5u');
+  assert.equal(t.kittyFlags(), 5);
+  t.resetKittyKeyboard();
+  assert.equal(t.kittyFlags(), 0);
+  assert.throws(() => __trapForTest(), WebAssembly.RuntimeError);
+  t.write('\x1b[>1u');
+  assert.equal(t.kittyFlags(), 1, 'the restarted engine still has the protocol enabled');
+  t.dispose();
+});

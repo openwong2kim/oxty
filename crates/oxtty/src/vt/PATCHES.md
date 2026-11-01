@@ -78,6 +78,12 @@ single crate.
   turned on by `oxtty::Engine`, answers DA1 with `CSI ? 1 ; 2 c` and DA2 with
   `CSI > 0 ; 276 ; 0 c` as xterm.js does, instead of `CSI ? 6 c` and
   Alacritty's version.
+- Private mode 9 (X10 mouse reporting) sets `TermMode::MOUSE_X10`, which is
+  part of `TermMode::MOUSE_MODE` so the mouse protocols stay exclusive, and
+  DECRQM reports it.
+- `Term::set_kitty_keyboard` switches the kitty keyboard protocol at runtime
+  and drops its flag stacks, as `set_options` does, without re-sending the
+  title or damaging the screen.
 - `Term::cursor_style_set` tells a cursor style the program chose (DECSCUSR
   1–6) from the configured default, so a host can keep its own default.
 - `Term::soft_reset` is DECSTR (`CSI ! p`), which vte drops. It resets what

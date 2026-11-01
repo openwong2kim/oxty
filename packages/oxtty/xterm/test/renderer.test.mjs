@@ -255,7 +255,7 @@ test('fonts that finish loading re-measure, clear fallback glyphs and fire onDim
     let changes = 0;
     p.renderer.onDimensionsChange(() => changes++);
     // A wide proportional font under a new name, so the cell width visibly changes once it is in
-    const face = new FontFace('OxttyTestFont', 'local("Arial"), local("Helvetica")');
+    const face = new FontFace('OxttyTestFont', 'local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("Liberation Sans")');
     document.fonts.add(face);
     await face.load();
     for (let n = 0; n < 50 && !changes; n++) await T.sleep(20);

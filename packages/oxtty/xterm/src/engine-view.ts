@@ -33,6 +33,8 @@ export interface Frame {
   historyLength: number;
   /** Bitwise OR of `Mode`; input encoding reads it from here (one frame late in a Worker build). */
   modes: number;
+  /** Active kitty keyboard flags (`Terminal.kittyFlags`), read by key encoding like `modes`. */
+  kittyFlags: number;
 }
 
 export interface EngineView {
@@ -93,7 +95,7 @@ export class LocalEngineView implements EngineView {
     const cursor = e.cursor();
     cursor.line += displayOffset;
     if (cursor.line >= rows) cursor.visible = false;
-    return { cols, rows, full, lines, cells: this._cells, extras, cursor, displayOffset, historyLength: e.historyLength, modes: e.modes() };
+    return { cols, rows, full, lines, cells: this._cells, extras, cursor, displayOffset, historyLength: e.historyLength, modes: e.modes(), kittyFlags: e.kittyFlags() };
   }
 }
 
@@ -110,6 +112,7 @@ export class Viewport {
   public displayOffset = 0;
   public historyLength = 0;
   public modes = 0;
+  public kittyFlags = 0;
 
   /** Copies a frame in and returns the rows that changed (all of them when `frame.full`). */
   public apply(frame: Frame): number[] {
@@ -131,6 +134,7 @@ export class Viewport {
     this.displayOffset = frame.displayOffset;
     this.historyLength = frame.historyLength;
     this.modes = frame.modes;
+    this.kittyFlags = frame.kittyFlags;
     return frame.lines;
   }
 

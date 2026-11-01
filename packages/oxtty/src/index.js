@@ -1,7 +1,7 @@
 // oxtty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 5;
+const ABI = 6;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 // Input buffer: smallest allocation, and the largest one kept between writes.
@@ -121,7 +121,7 @@ export const Mode = Object.freeze({
   SHOW_CURSOR: 1 << 0, APP_CURSOR: 1 << 1, APP_KEYPAD: 1 << 2, BRACKETED_PASTE: 1 << 3,
   MOUSE_CLICK: 1 << 4, MOUSE_DRAG: 1 << 5, MOUSE_MOTION: 1 << 6, SGR_MOUSE: 1 << 7,
   FOCUS_EVENTS: 1 << 8, ALT_SCREEN: 1 << 9, ALTERNATE_SCROLL: 1 << 10, LINE_WRAP: 1 << 11,
-  INSERT: 1 << 12, ORIGIN: 1 << 13, KITTY_KEYBOARD: 1 << 14,
+  INSERT: 1 << 12, ORIGIN: 1 << 13, KITTY_KEYBOARD: 1 << 14, MOUSE_X10: 1 << 15,
 });
 
 const CURSOR_SHAPES = ['block', 'underline', 'bar'];
@@ -163,6 +163,7 @@ export class Terminal {
   #scrollback;
   // Host settings re-applied when the engine starts over after a crash.
   #clipboard = { read: false, write: false };
+  #kittyKeyboard = false;
   #colors = null;
 
   /**
@@ -200,6 +201,7 @@ export class Terminal {
     this.#inCap = 0;
     this.#open(wasm, this.#cols, this.#rows);
     wasm.oxtty_set_clipboard_access(this.#h, this.#clipboard.read ? 1 : 0, this.#clipboard.write ? 1 : 0);
+    if (this.#kittyKeyboard) wasm.oxtty_set_kitty_keyboard(this.#h, 1);
     if (this.#colors) this.setColors(this.#colors);
     this.#onCrash?.(new Error('oxtty: the engine crashed and this terminal was reset'));
   }
@@ -370,6 +372,22 @@ export class Terminal {
 
   modes() {
     return wasm.oxtty_modes(this.#handle());
+  }
+
+  /** Lets the program use the kitty keyboard protocol (off by default); switching drops its pushed flags. */
+  setKittyKeyboard(enabled) {
+    this.#kittyKeyboard = !!enabled;
+    wasm.oxtty_set_kitty_keyboard(this.#handle(), enabled ? 1 : 0);
+  }
+
+  /** Drops the kitty keyboard flags the program pushed, keeping the protocol on or off. */
+  resetKittyKeyboard() {
+    wasm.oxtty_reset_kitty_keyboard(this.#handle());
+  }
+
+  /** Active kitty keyboard flags: 1 disambiguate, 2 event types, 4 alternate keys, 8 all keys as escapes, 16 associated text. */
+  kittyFlags() {
+    return wasm.oxtty_kitty_flags(this.#handle());
   }
 
   /** Viewport changes since the last call: move drawn rows up by `scroll`, then redraw `lines`. */

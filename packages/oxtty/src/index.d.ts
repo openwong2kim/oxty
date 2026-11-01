@@ -101,6 +101,12 @@ export class Terminal {
   scrollToBottom(): void;
   /** Bitwise OR of {@link Mode} values. */
   modes(): number;
+  /** Lets the program use the kitty keyboard protocol (off by default, its sequences ignored); switching drops the flags it pushed. */
+  setKittyKeyboard(enabled: boolean): void;
+  /** Drops the kitty keyboard flags the program pushed on both screens, keeping the protocol on or off. */
+  resetKittyKeyboard(): void;
+  /** Active kitty keyboard flags: 1 disambiguate, 2 event types, 4 alternate keys, 8 all keys as escapes, 16 associated text. */
+  kittyFlags(): number;
   takeDamage(): Damage;
   /** Bytes to write back to the PTY (status reports, …). */
   takeReplies(): Uint8Array;
@@ -137,7 +143,7 @@ export declare const Mode: Readonly<{
   SHOW_CURSOR: number; APP_CURSOR: number; APP_KEYPAD: number; BRACKETED_PASTE: number;
   MOUSE_CLICK: number; MOUSE_DRAG: number; MOUSE_MOTION: number; SGR_MOUSE: number;
   FOCUS_EVENTS: number; ALT_SCREEN: number; ALTERNATE_SCROLL: number; LINE_WRAP: number;
-  INSERT: number; ORIGIN: number; KITTY_KEYBOARD: number;
+  INSERT: number; ORIGIN: number; KITTY_KEYBOARD: number; MOUSE_X10: number;
 }>;
 
 export declare const ColorKind: Readonly<{ NAMED: 1; INDEXED: 2; RGB: 3 }>;

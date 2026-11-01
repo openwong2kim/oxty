@@ -77,7 +77,9 @@ bitflags! {
         const REPORT_ALTERNATE_KEYS   = 1 << 20;
         const REPORT_ALL_KEYS_AS_ESC  = 1 << 21;
         const REPORT_ASSOCIATED_TEXT  = 1 << 22;
-        const MOUSE_MODE              = Self::MOUSE_REPORT_CLICK.bits() | Self::MOUSE_MOTION.bits() | Self::MOUSE_DRAG.bits();
+        /// oxtty: X10 mouse reporting (`CSI ? 9 h`), presses only and no modifiers.
+        const MOUSE_X10               = 1 << 23;
+        const MOUSE_MODE              = Self::MOUSE_REPORT_CLICK.bits() | Self::MOUSE_MOTION.bits() | Self::MOUSE_DRAG.bits() | Self::MOUSE_X10.bits();
         const KITTY_KEYBOARD_PROTOCOL = Self::DISAMBIGUATE_ESC_CODES.bits()
                                       | Self::REPORT_EVENT_TYPES.bits()
                                       | Self::REPORT_ALTERNATE_KEYS.bits()
@@ -1152,6 +1154,20 @@ impl<T> Term<T> {
     #[cfg(test)]
     pub(crate) fn set_semantic_escape_chars(&mut self, semantic_escape_chars: &str) {
         self.config.semantic_escape_chars = semantic_escape_chars.into();
+    }
+
+    /// oxtty: turns the kitty keyboard protocol on or off without the other effects of `set_options`, dropping
+    /// both screens' flag stacks either way (so calling it with the current value resets the protocol).
+    pub fn set_kitty_keyboard(&mut self, enabled: bool) {
+        self.config.kitty_keyboard = enabled;
+        self.keyboard_mode_stack = Vec::new();
+        self.inactive_keyboard_mode_stack = Vec::new();
+        self.mode.remove(TermMode::KITTY_KEYBOARD_PROTOCOL);
+    }
+
+    /// oxtty: whether the kitty keyboard protocol is enabled (see `set_kitty_keyboard`).
+    pub fn kitty_keyboard_enabled(&self) -> bool {
+        self.config.kitty_keyboard
     }
 
     /// oxtty: whether the program set the cursor style (DECSCUSR 1–6); `false` after `CSI 0 SP q` or a reset.
@@ -2315,6 +2331,12 @@ impl<T: EventListener> Handler for Term<T> {
                         self.inactive_grid.saved_cursor = saved_cursor;
                     },
                     1048 => self.save_cursor_position(),
+                    // oxtty: X10 mouse reporting, exclusive with the other mouse protocols like them.
+                    9 => {
+                        self.mode.remove(TermMode::MOUSE_MODE);
+                        self.mode.insert(TermMode::MOUSE_X10);
+                        self.event_proxy.send_event(Event::MouseCursorDirty);
+                    },
                     _ => debug!("Ignoring unknown mode {mode} in set_private_mode"),
                 }
                 return;
@@ -2386,6 +2408,10 @@ impl<T: EventListener> Handler for Term<T> {
                         self.grid.cursor = self.inactive_grid.cursor.clone();
                     },
                     1048 => self.restore_cursor_position(),
+                    9 => {
+                        self.mode.remove(TermMode::MOUSE_X10);
+                        self.event_proxy.send_event(Event::MouseCursorDirty);
+                    },
                     _ => debug!("Ignoring unknown mode {mode} in unset_private_mode"),
                 }
                 return;
@@ -2474,6 +2500,7 @@ impl<T: EventListener> Handler for Term<T> {
                 NamedPrivateMode::SyncUpdate => ModeState::Reset,
                 NamedPrivateMode::ColumnMode => ModeState::NotSupported,
             },
+            PrivateMode::Unknown(9) => self.mode.contains(TermMode::MOUSE_X10).into(),
             PrivateMode::Unknown(_) => ModeState::NotSupported,
         };
 
