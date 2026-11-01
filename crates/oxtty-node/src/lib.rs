@@ -68,6 +68,49 @@ pub struct Hook {
     pub data: Buffer,
 }
 
+/// How the search methods compare text (no regex here: match `searchLine` text with your own).
+#[napi(object)]
+#[derive(Default)]
+pub struct SearchOptions {
+    pub case_sensitive: Option<bool>,
+    pub whole_word: Option<bool>,
+}
+
+/// A match in cells; the end is exclusive and on `endLine`.
+#[napi(object)]
+pub struct SearchMatch {
+    pub start_line: i32,
+    pub start_col: u32,
+    pub end_line: i32,
+    pub end_col: u32,
+}
+
+/// A logical line as search reads it; `cells[i]` is the cell of the i-th character (not UTF-16 unit) of `text`.
+#[napi(object)]
+pub struct SearchLine {
+    pub first: i32,
+    pub rows: u32,
+    pub text: String,
+    pub cells: Uint32Array,
+}
+
+fn search_options(options: Option<SearchOptions>) -> oxtty::SearchOptions {
+    let options = options.unwrap_or_default();
+    oxtty::SearchOptions {
+        case_sensitive: options.case_sensitive.unwrap_or(false),
+        whole_word: options.whole_word.unwrap_or(false),
+    }
+}
+
+fn search_match(m: oxtty::SearchMatch) -> SearchMatch {
+    SearchMatch {
+        start_line: m.start_line,
+        start_col: m.start_col as u32,
+        end_line: m.end_line,
+        end_col: m.end_col as u32,
+    }
+}
+
 #[napi]
 pub struct Terminal {
     inner: oxtty::Engine,
@@ -393,6 +436,61 @@ impl Terminal {
             build_number,
         });
         Ok(())
+    }
+
+    /// First match starting at or after cell (`line`, `col`), down to the bottom of the screen.
+    #[napi]
+    pub fn search_next(
+        &self,
+        query: String,
+        options: Option<SearchOptions>,
+        line: i32,
+        col: u32,
+    ) -> Option<SearchMatch> {
+        let col = col.min(u16::MAX as u32) as u16;
+        self.inner
+            .search_next(&query, search_options(options), line, col)
+            .map(search_match)
+    }
+
+    /// Last match ending at or before cell (`line`, `col`), up to the top of the history.
+    #[napi]
+    pub fn search_previous(
+        &self,
+        query: String,
+        options: Option<SearchOptions>,
+        line: i32,
+        col: u32,
+    ) -> Option<SearchMatch> {
+        let col = col.min(u16::MAX as u32) as u16;
+        self.inner
+            .search_previous(&query, search_options(options), line, col)
+            .map(search_match)
+    }
+
+    /// Every match in the logical lines rows `first`…`last` belong to, keeping those that touch the rows.
+    #[napi]
+    pub fn search_rows(
+        &self,
+        query: String,
+        options: Option<SearchOptions>,
+        first: i32,
+        last: i32,
+    ) -> Vec<SearchMatch> {
+        let mut found = Vec::new();
+        self.inner
+            .search_rows(&query, search_options(options), first, last, &mut found);
+        found.into_iter().map(search_match).collect()
+    }
+
+    #[napi]
+    pub fn search_line(&self, line: i32) -> Option<SearchLine> {
+        self.inner.search_line(line).map(|l| SearchLine {
+            first: l.first,
+            rows: l.rows as u32,
+            text: l.text,
+            cells: l.cells.into(),
+        })
     }
 
     /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.

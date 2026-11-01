@@ -109,7 +109,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    9
+    10
 }
 
 #[no_mangle]
@@ -565,4 +565,25 @@ pub extern "C" fn oxtty_set_windows_pty(h: u32, backend: u32, build: f64) {
             build_number,
         })
     });
+}
+
+// Search: the host matches over the engine's logical lines (`Engine::search_line`); the engine's own matching
+// stays out of the wasm to keep it small.
+
+/// `Engine::search_line`: the text's character count (-1 outside the buffer), the UTF-8 text in OUT and
+/// `[first row, rows, cell of each character…]` in OUT32.
+#[no_mangle]
+pub extern "C" fn oxtty_search_line(h: u32, line: i32) -> i32 {
+    with(h, -1, |t| {
+        let Some(found) = t.search_line(line) else {
+            return -1;
+        };
+        set_out(found.text.into_bytes());
+        OUT32.with_borrow_mut(|out| {
+            out.clear();
+            out.extend([found.first as u32, found.rows as u32]);
+            out.extend(&found.cells);
+        });
+        found.cells.len() as i32
+    })
 }

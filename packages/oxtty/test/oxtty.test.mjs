@@ -312,3 +312,31 @@ test('windowsPty: the conpty wrapping heuristic, and no setting is no heuristic'
   assert.equal(t.rowWrapped(2), false);
   t.dispose();
 });
+
+test('search: plain and regex over scrollback, wrapped rows and wide characters', () => {
+  const t = new Terminal({ cols: 10, rows: 3, scrollback: 50 });
+  // Rows -4 'foo one', -3/-2 '0123456789' 'abcdef' (wrapped), -1 '한글foo', 0/1 'Foo_x (foo' ')' (wrapped), 2 'last'
+  t.write('foo one\r\n0123456789abcdef\r\n한글foo\r\nFoo_x (foo)\r\nlast');
+  assert.equal(t.historyLength, 4);
+  const at = (m) => m && [m.startLine, m.startCol, m.endLine, m.endCol];
+  assert.deepEqual(at(t.searchNext('foo')), [-4, 0, -4, 3]);
+  assert.deepEqual(at(t.searchNext('foo', {}, -4, 3)), [-1, 4, -1, 7]);
+  assert.deepEqual(at(t.searchNext('89ab')), [-3, 8, -2, 2], 'a match across a soft wrap');
+  assert.deepEqual(at(t.searchNext('foo', { caseSensitive: true }, 0, 0)), [0, 7, 0, 10]);
+  assert.deepEqual(at(t.searchNext('foo', { wholeWord: true }, 0, 0)), [0, 7, 0, 10], '_ is a word character');
+  assert.deepEqual(at(t.searchPrevious('foo')), [0, 7, 0, 10]);
+  assert.deepEqual(at(t.searchPrevious('foo', {}, -1, 4)), [-4, 0, -4, 3]);
+  assert.equal(t.searchNext(''), null);
+  // Regex runs in JS over the same text, with the same cells
+  assert.deepEqual(at(t.searchNext('글f.o', { regex: true })), [-1, 2, -1, 7]);
+  assert.deepEqual(at(t.searchNext('[0-9]+[a-f]+', { regex: true })), [-3, 0, -2, 6]);
+  assert.deepEqual(at(t.searchPrevious('FOO', { regex: true }, 0, 0)), [-1, 4, -1, 7]);
+  assert.deepEqual(t.searchRows('foo', { regex: true }, 0, 1).map(at), [[0, 0, 0, 3], [0, 7, 0, 10]]);
+  assert.deepEqual(t.searchRows('foo', { regex: true }, 1, 1), [], 'only matches on the rows asked for');
+  assert.deepEqual(t.searchRows('foo', {}, -4, 2).map(at), t.searchRows('foo', { regex: true }, -4, 2).map(at));
+  const line = t.searchLine(-1);
+  assert.deepEqual([line.first, line.rows, line.text], [-1, 1, '한글foo']);
+  assert.deepEqual(Array.from(line.cells.slice(0, 3)), [0x80000000, 0x80000002, 4]);
+  assert.equal(t.searchLine(3), null);
+  t.dispose();
+});

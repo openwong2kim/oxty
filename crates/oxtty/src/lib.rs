@@ -31,8 +31,10 @@ pub mod vt;
 
 mod history;
 pub mod input;
+mod search;
 mod snapshot;
 pub use history::TermHistory;
+pub use search::{SearchLine, SearchMatch, SearchOptions};
 pub use snapshot::SnapshotRefusal;
 
 use crate::history::History;

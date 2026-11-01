@@ -1,7 +1,7 @@
 // oxtty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 9;
+const ABI = 10;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 // Input buffer: smallest allocation, and the largest one kept between writes.
@@ -103,6 +103,49 @@ function requireWasm() {
 const bytesOut = (len) => new Uint8Array(wasm.memory.buffer, wasm.oxtty_out_ptr(), len).slice();
 const textOut = (len) => (len <= 0 ? '' : decoder.decode(new Uint8Array(wasm.memory.buffer, wasm.oxtty_out_ptr(), len)));
 const wordsOut = (n) => (n <= 0 ? new Uint32Array(0) : new Uint32Array(wasm.memory.buffer, wasm.oxtty_out32_ptr(), n).slice());
+
+/** `@xterm/addon-search` `NON_WORD_CHARACTERS`: what ends a word for `wholeWord`. */
+const NON_WORD = ' ~!@#$%^&*()+`-=[]{}|\\;:"\',./<>?';
+const CELL_WIDE = 0x80000000;
+
+const isWholeWord = (text, at, len) =>
+  (at === 0 || NON_WORD.includes(text[at - 1])) && (at + len === text.length || NON_WORD.includes(text[at + len]));
+
+// The first regex match in `text` at or after unit `from`, as [index, length]; empty matches are skipped.
+function regexNext(re, text, from, wholeWord) {
+  for (let at = from; at <= text.length;) {
+    re.lastIndex = at;
+    const m = re.exec(text);
+    if (!m) return null;
+    if (m[0].length && (!wholeWord || isWholeWord(text, m.index, m[0].length))) return [m.index, m[0].length];
+    at = m.index + 1;
+  }
+  return null;
+}
+
+// The last regex match in `text` that ends at or before unit `before`.
+function regexPrevious(re, text, before, wholeWord) {
+  let last = null;
+  for (let at = 0; at < before;) {
+    const found = regexNext(re, text, at, wholeWord);
+    if (!found || found[0] + found[1] > before) {
+      if (!found || found[0] >= before) break;
+      at = found[0] + 1;
+      continue;
+    }
+    last = found;
+    at = found[0] + 1;
+  }
+  return last;
+}
+
+// [index, length] in a search line's units to a match in cells.
+function lineMatch(line, [at, len], cols) {
+  const start = line.cells[at] & ~CELL_WIDE;
+  const lastCell = line.cells[at + len - 1];
+  const end = (lastCell & ~CELL_WIDE) + (lastCell & CELL_WIDE ? 2 : 1) - 1;
+  return { startLine: line.first + Math.floor(start / cols), startCol: start % cols, endLine: line.first + Math.floor(end / cols), endCol: end % cols + 1 };
+}
 
 const registry = typeof FinalizationRegistry === 'undefined'
   ? null
@@ -569,6 +612,94 @@ export class Terminal {
     this.#windowsPty = pty ? { backend: pty.backend, buildNumber: pty.buildNumber } : null;
     const backend = pty?.backend === 'conpty' ? 1 : pty?.backend === 'winpty' ? 2 : 0;
     wasm.oxtty_set_windows_pty(h, backend, pty?.buildNumber ?? NaN);
+  }
+
+  // Search runs here over the engine's logical lines (`searchLine`), with a RegExp for every query: a plain one is
+  // escaped, and the `i` flag folds case without changing lengths. Matching in the wasm would cost the size budget.
+  #matcher(query, { caseSensitive = false, regex = false } = {}) {
+    return new RegExp(regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), caseSensitive ? 'g' : 'gi');
+  }
+
+  /** First match starting at or after cell (`line`, `col`), down to the bottom of the screen. @returns {object | null} */
+  searchNext(query, options = {}, line = -this.historyLength, col = 0) {
+    if (!query) return null;
+    const re = this.#matcher(query, options);
+    const cols = this.cols;
+    line += Math.floor(col / cols);
+    col %= cols;
+    if (line < -this.historyLength) [line, col] = [-this.historyLength, 0];
+    let found = this.searchLine(line);
+    let target = found ? (line - found.first) * cols + col : 0;
+    while (found) {
+      let from = 0;
+      while (from < found.text.length && (found.cells[from] & ~CELL_WIDE) < target) from++;
+      const at = regexNext(re, found.text, from, options.wholeWord);
+      if (at) return lineMatch(found, at, cols);
+      found = this.searchLine(found.first + found.rows);
+      target = 0;
+    }
+    return null;
+  }
+
+  /** Last match ending at or before cell (`line`, `col`), up to the top of the history; (`rows - 1`, `cols`) is the end. */
+  searchPrevious(query, options = {}, line = this.rows - 1, col = this.cols) {
+    if (!query) return null;
+    const re = this.#matcher(query, options);
+    const cols = this.cols;
+    const top = -this.historyLength;
+    line += Math.floor(col / cols);
+    col %= cols;
+    if (col === 0 && line > top) [line, col] = [line - 1, cols];
+    if (line > this.rows - 1) [line, col] = [this.rows - 1, cols];
+    let found = this.searchLine(line);
+    let before = found ? (line - found.first) * cols + col : 0;
+    while (found) {
+      let bound = 0;
+      while (bound < found.text.length && (found.cells[bound] & ~CELL_WIDE) + (found.cells[bound] & CELL_WIDE ? 2 : 1) <= before) bound++;
+      const at = regexPrevious(re, found.text, bound, options.wholeWord);
+      if (at) return lineMatch(found, at, cols);
+      if (found.first <= top) return null;
+      found = this.searchLine(found.first - 1);
+      before = Infinity;
+    }
+    return null;
+  }
+
+  /** Every match in the logical lines rows `first`…`last` belong to (each from the end of the previous one), keeping those that touch the rows. */
+  searchRows(query, options = {}, first, last) {
+    const out = [];
+    if (!query) return out;
+    const re = this.#matcher(query, options);
+    last = Math.min(last, this.rows - 1);
+    let found = this.searchLine(Math.max(first, -this.historyLength));
+    while (found && found.first <= last) {
+      for (let at = 0, m; (m = regexNext(re, found.text, at, options.wholeWord)); at = m[0] + m[1]) {
+        const match = lineMatch(found, m, this.cols);
+        if (match.endLine >= first && match.startLine <= last) out.push(match);
+      }
+      found = this.searchLine(found.first + found.rows);
+    }
+    return out;
+  }
+
+  /**
+   * The logical line row `line` belongs to as search reads it, or null outside the buffer. `cells[i]` is the cell of
+   * the UTF-16 unit `text[i]`: `row * cols + col` from `first`, bit 31 set for a wide character.
+   */
+  searchLine(line) {
+    const n = wasm.oxtty_search_line(this.#handle(), line);
+    if (n < 0) return null;
+    const text = textOut(wasm.oxtty_out_len());
+    const words = new Uint32Array(wasm.memory.buffer, wasm.oxtty_out32_ptr(), n + 2);
+    const cells = new Uint32Array(text.length);
+    let unit = 0;
+    let k = 2;
+    for (const ch of text) {
+      cells[unit++] = words[k];
+      if (ch.length === 2) cells[unit++] = words[k];
+      k++;
+    }
+    return { first: words[0] | 0, rows: words[1], text, cells };
   }
 
   /** Bytes that rebuild this screen in a fresh xterm.js, or why they cannot. */
