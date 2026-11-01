@@ -86,7 +86,7 @@
     },
     "options.macOptionClickForcesSelection": {
       "status": "supported",
-      "reason": "Option+click is not reported to the program; the selection it then makes is step 4."
+      "reason": "Option+click is not reported to the program and selects (xterm.js SelectionService.shouldForceSelection)."
     },
     "options.linkHandler": {
       "status": "later",
@@ -185,20 +185,20 @@
       "reason": "Sees every keydown, keypress and keyup first; false stops the key (the copied xterm.js arbitration)."
     },
     "Terminal.getSelection": {
-      "status": "step 4",
-      "reason": "Selection."
+      "status": "supported",
+      "reason": "xterm.js SelectionService.selectionText: wrapped rows joined, wide characters once. Typed trailing spaces are dropped like erased cells (the engine does not tell them apart)."
     },
     "Terminal.hasSelection": {
-      "status": "step 4",
-      "reason": "Selection."
+      "status": "supported",
+      "reason": "xterm.js SelectionService.hasSelection."
     },
     "Terminal.clearSelection": {
-      "status": "step 4",
-      "reason": "Selection."
+      "status": "supported",
+      "reason": "xterm.js SelectionService.clearSelection."
     },
     "Terminal.select": {
-      "status": "step 4",
-      "reason": "Selection."
+      "status": "supported",
+      "reason": "xterm.js SelectionService.setSelection; does nothing before open() (xterm.js throws)."
     },
     "Terminal.parser.registerOscHandler": {
       "status": "later",
@@ -269,8 +269,8 @@
       "reason": "Font option changes and renderer-reported changes (late fonts, devicePixelRatio)."
     },
     "Terminal.onSelectionChange": {
-      "status": "step 4",
-      "reason": "Selection."
+      "status": "supported",
+      "reason": "Fires where xterm.js fires: mouse up, API calls, and clears by user input, resize or an alternate screen switch (not when trimming moves or drops it, like xterm.js)."
     },
     "buffer.onBufferChange": {
       "status": "supported",
@@ -457,8 +457,8 @@
       "reason": "The element can be moved; open() again also moves it."
     },
     "Synthetic mouse events on .xterm-screen": {
-      "status": "step 4",
-      "reason": "Mouse reports handle them (listener based); selection from them is step 4."
+      "status": "supported",
+      "reason": "Mouse reports and selection both listen on the element, so dispatched events (plainDragSelect replays) select and report like real ones."
     },
     "write() from inside parser handlers": {
       "status": "later",

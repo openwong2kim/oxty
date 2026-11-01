@@ -1,7 +1,8 @@
 // The xterm.js-compatible Terminal: owns the engine, the write queue, the frame loop and the DOM element.
 // It implements what wmux uses (xterm/test/api-checklist.json); the public types are xterm/xterm.d.ts.
-import { Mode, Terminal as Engine, type AnsiSnapshot } from '../../src/index.js';
+import { Attr, Mode, Terminal as Engine, type AnsiSnapshot } from '../../src/index.js';
 import { css } from 'common/Color';
+import { isMac } from 'common/Platform';
 import { Emitter, type Event } from 'vs/base/common/event';
 import type { IDisposable } from 'vs/base/common/lifecycle';
 import type { ITerminalOptions } from '@xterm/xterm';
@@ -12,6 +13,7 @@ import { MouseController } from './mouse/MouseController';
 import { CoreService, OptionsService } from './input/services';
 import type { Dimensions, Renderer, RendererOptions, Theme } from './renderer/types';
 import { WebglRenderer } from './renderer/WebglRenderer';
+import { SelectionController } from './selection/SelectionController';
 import { WriteQueue, isHighSurrogate } from './WriteQueue';
 
 /** OSC 52: the program may copy to (`write`) and read from (`read`) the host clipboard only when the handler is set. */
@@ -41,6 +43,8 @@ export interface TerminalOptions extends Omit<Partial<RendererOptions>, 'fontWei
   scrollSensitivity?: number;
   fastScrollSensitivity?: number;
   mouseEventsRequireAlt?: boolean;
+  wordSeparator?: string;
+  rightClickSelectsWord?: boolean;
 }
 
 export interface Modes {
@@ -79,6 +83,7 @@ const DEFAULT_OPTIONS: TerminalOptions = {
   minimumContrastRatio: 1, allowTransparency: false, theme: {},
   macOptionIsMeta: false, scrollOnUserInput: true, disableStdin: false, vtExtensions: {},
   altClickMovesCursor: true, macOptionClickForcesSelection: false, scrollSensitivity: 1, fastScrollSensitivity: 5, mouseEventsRequireAlt: false,
+  wordSeparator: ' ()[]{}\',"`', rightClickSelectsWord: isMac,
 };
 const INIT_ONLY = new Set(['cols', 'rows', 'scrollback']);
 const RENDERER_OPTIONS: Record<keyof RendererOptions, true> = {
@@ -126,6 +131,7 @@ const STYLE = `
 .xterm .xterm-helpers { position: absolute; top: 0; z-index: 5; }
 .xterm.focus, .xterm:focus { outline: none; }
 .xterm.enable-mouse-events { cursor: default; }
+.xterm.column-select.focus { cursor: crosshair; }
 .xterm .xterm-helper-textarea { padding: 0; border: 0; margin: 0; position: absolute; opacity: 0; left: -9999em; top: 0; width: 0; height: 0; z-index: -5; white-space: nowrap; overflow: hidden; resize: none; }
 .xterm .composition-view { background: #000; color: #FFF; display: none; position: absolute; white-space: nowrap; z-index: 1; }
 .xterm .composition-view.active { display: block; }
@@ -149,11 +155,14 @@ export class Terminal {
   private _screen: HTMLElement | undefined;
   private _renderer: Renderer | undefined;
   private _mouse: MouseController | undefined;
+  private _selection: SelectionController | undefined;
   /** Kept for `open`, which creates the mouse. */
   private _customWheelEventHandler: ((event: WheelEvent) => boolean) | undefined;
   /** Renderer and DOM listeners added by `open`. */
   private _openListeners: (() => void)[] = [];
   private _frame = 0;
+  /** Redraws asked for while a frame is being prepared land in that frame. */
+  private _preparingFrame = false;
   /** Rows the host changed since the last frame (redraw requests, `refresh`). */
   private _hostDirty: Set<number> | 'all' = 'all';
   /** A string write that ended in a high surrogate keeps it for the next string write, like xterm.js. */
@@ -187,6 +196,8 @@ export class Terminal {
   public readonly onCursorMove = this._onCursorMove.event;
   private readonly _onDimensionsChange = new Emitter<Dimensions>();
   public readonly onDimensionsChange = this._onDimensionsChange.event;
+  private readonly _onSelectionChange = new Emitter<void>();
+  public readonly onSelectionChange = this._onSelectionChange.event;
   /** Fires just before `onData` for data the user produced (keys, IME, paste), never for replies to the program. */
   public readonly onUserInput: Event<void>;
 
@@ -213,7 +224,11 @@ export class Terminal {
       onCrash: error => this._handleCrash(error),
     });
     this._view = new LocalEngineView(this._engine);
-    this._queue = new WriteQueue(data => this._engine.write(data), () => this._handleEvents(), () => this._afterWrite());
+    this._queue = new WriteQueue(data => this._engine.write(data), () => {
+      this._handleEvents();
+      // A write callback reads the selection as the output just parsed left it
+      this._selection?.sync();
+    }, () => this._afterWrite());
     this._optionsProxy = new Proxy(this._options, {
       set: (_, key, value) => {
         this._setOption(key as string, value);
@@ -335,6 +350,26 @@ export class Terminal {
       },
       scrollLines: amount => this.scrollLines(amount),
       focus: () => this.focus(),
+      createSelection: (mouseCoordsService, mouseStateService) => this._selection = new SelectionController({
+        element,
+        screenElement: screen,
+        get textarea() { return terminal.textarea; },
+        get cols() { return terminal.cols; },
+        get rows() { return terminal.rows; },
+        viewport: this._viewport,
+        get dimensions() { return terminal.dimensions; },
+        buffer: this.buffer.active,
+        leadingWideSpacer: y => {
+          const cells = this._engine.rowCells(y - this._engine.historyLength);
+          return !!cells && (cells[cells.length - 1] & Attr.LEADING_WIDE_SPACER) !== 0;
+        },
+        get trimmedLines() { return terminal._engine.trimmedLines; },
+        options: this._options,
+        coreService: this._coreService,
+        scrollLines: amount => this.scrollLines(amount),
+        redraw: () => this._scheduleFrame(),
+        selectionChanged: () => this._onSelectionChange.fire(),
+      }, mouseCoordsService, mouseStateService),
     });
     mouse.attachCustomWheelEventHandler(this._customWheelEventHandler);
     this._mouse = mouse;
@@ -350,6 +385,7 @@ export class Terminal {
       () => {
         mouse.dispose();
         this._mouse = undefined;
+        this._selection = undefined;
       },
       renderer.onDimensionsChange(() => {
         this._syncScreenSize();
@@ -384,7 +420,9 @@ export class Terminal {
 
   public resize(cols: number, rows: number): void {
     if (isNaN(cols) || isNaN(rows) || (cols === this.cols && rows === this.rows)) return;
+    const [colsChanged, rowsChanged] = [cols !== this.cols, rows !== this.rows];
     this._engine.resize(cols, rows);
+    this._selection?.handleResize(colsChanged, rowsChanged);
     this._options.cols = this.cols;
     this._options.rows = this.rows;
     this._renderer?.resize(this.cols, this.rows);
@@ -398,6 +436,7 @@ export class Terminal {
     this._highSurrogate = '';
     this._engine.write('\x1bc');
     this._mouse?.reset();
+    // The reset reaches the selection through the engine's events
     this._handleEvents();
     this._redraw('all');
     this._afterChange();
@@ -499,6 +538,43 @@ export class Terminal {
     return this._engine.ansiSnapshot();
   }
 
+  public hasSelection(): boolean {
+    return this._selection?.service.hasSelection ?? false;
+  }
+
+  /** The selected text: wrapped rows join into one line, lines end in `\n` (`\r\n` on Windows), trailing blanks dropped. */
+  public getSelection(): string {
+    return this._selection?.service.selectionText ?? '';
+  }
+
+  /** Buffer lines (`buffer.active.getLine` numbering), end exclusive; undefined without a selection. */
+  public getSelectionPosition(): { start: { x: number; y: number }; end: { x: number; y: number } } | undefined {
+    const service = this._selection?.service;
+    if (!service?.hasSelection) return undefined;
+    return {
+      start: { x: service.selectionStart![0], y: service.selectionStart![1] },
+      end: { x: service.selectionEnd![0], y: service.selectionEnd![1] },
+    };
+  }
+
+  public clearSelection(): void {
+    this._selection?.service.clearSelection();
+  }
+
+  /** Selects `length` cells from (`column`, `row`), continuing on the next rows; `row` is a buffer line. */
+  public select(column: number, row: number, length: number): void {
+    this._selection?.service.setSelection(column, row, length);
+  }
+
+  public selectAll(): void {
+    this._selection?.service.selectAll();
+  }
+
+  /** Selects buffer lines `start`…`end` whole. */
+  public selectLines(start: number, end: number): void {
+    this._selection?.service.selectLines(start, end);
+  }
+
   public dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
@@ -514,7 +590,7 @@ export class Terminal {
     this._element?.remove();
     this._engine.dispose();
     for (const emitter of [this._onData, this._onBinary, this._onResize, this._onTitleChange, this._onBell, this._onScroll,
-      this._onRender, this._onWriteParsed, this._onCursorMove, this._onDimensionsChange, this.buffer._onBufferChange]) emitter.dispose();
+      this._onRender, this._onWriteParsed, this._onCursorMove, this._onDimensionsChange, this._onSelectionChange, this.buffer._onBufferChange]) emitter.dispose();
   }
 
   private _setOption(key: string, value: unknown): void {
@@ -564,6 +640,7 @@ export class Terminal {
     if (events.replies.length) this._coreService.triggerDataEvent(decoder.decode(events.replies));
     if (events.title !== null) this._onTitleChange.fire(events.title);
     for (let i = 0; i < events.bells; i++) this._onBell.fire();
+    for (let i = 0; i < events.resets; i++) this._selection?.reset();
     const clipboard = this._options.clipboard as ClipboardHandler | undefined;
     for (const { selection, text } of events.clipboardWrites) clipboard?.write?.(text, selection);
     for (const selection of events.clipboardReads) {
@@ -593,6 +670,7 @@ export class Terminal {
   private _afterChange(): void {
     const [cursorX, cursorY, viewportY, alternate] = [this._cursorX, this._cursorY, this._viewportY, this._alternate];
     this._readState();
+    this._selection?.sync();
     if (this._alternate !== alternate) this.buffer._onBufferChange.fire(this.buffer.active);
     if (this._viewportY !== viewportY) this._onScroll.fire(this._viewportY);
     if (this._cursorX !== cursorX || this._cursorY !== cursorY) this._onCursorMove.fire();
@@ -613,6 +691,7 @@ export class Terminal {
     console.warn(error);
     this._view.invalidate();
     this._renderer?.setSelection(undefined);
+    this._selection?.handleCrash();
     this._redraw('all');
   }
 
@@ -623,7 +702,7 @@ export class Terminal {
   }
 
   private _scheduleFrame(): void {
-    if (this._frame || !this._renderer || this._disposed) return;
+    if (this._frame || this._preparingFrame || !this._renderer || this._disposed) return;
     this._frame = requestAnimationFrame(() => {
       this._frame = 0;
       this._renderFrame();
@@ -635,6 +714,10 @@ export class Terminal {
     if (!renderer) return;
     const changed = this._viewport.apply(this._view.takeFrame());
     this._mouse?.syncModes();
+    // The renderer asks to redraw the rows the selection left and entered
+    this._preparingFrame = true;
+    this._selection?.render(renderer);
+    this._preparingFrame = false;
     const dirty = this._hostDirty;
     this._hostDirty = new Set();
     renderer.render(this._viewport, changed, dirty);

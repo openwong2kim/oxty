@@ -1,21 +1,20 @@
-// Mouse reports, the wheel and Alt+click for the Terminal (M2 step 2). The copied xterm.js 6.1 MouseService and
+// Mouse reports and the wheel for the Terminal (M2 step 2). The copied xterm.js 6.1 MouseService and
 // MouseStateService do the work; this file gives them their services from oxtty: modes from the Viewport (the last
 // frame, PRD D7), cells from the renderer dimensions, the cursor and scroll position from `buffer.active`.
 import { Mode } from '../../../src/index.js';
 import { MouseCoordsService } from 'browser/services/MouseCoordsService';
 import { MouseService } from 'browser/services/MouseService';
-import type { IRenderService, ISelectionService } from 'browser/services/MouseServices';
+import type { IMouseCoordsService, IRenderService, ISelectionService } from 'browser/services/MouseServices';
 import type { IDisposable } from 'common/Lifecycle';
 import { isFirefox, isMac } from 'common/Platform';
 import { MouseStateService } from 'common/services/MouseStateService';
-import type { IBufferService, ICoreService, IOptionsService } from 'common/services/MouseServices';
+import type { IBufferService, ICoreService, IMouseStateService, IOptionsService } from 'common/services/MouseServices';
 import { CoreMouseEventType } from 'common/Types.mouse';
 import { Emitter } from 'vs/base/common/event';
 import type { Viewport } from '../engine-view';
 import type { Dimensions } from '../renderer/types';
-import { AltClick } from './AltClick';
 
-/** The lines of `terminal.buffer.active` the mouse reads (Alt+click walks wrapped rows). */
+/** The lines of `terminal.buffer.active` the mouse reads. */
 export interface MouseBuffer {
   readonly cursorX: number;
   readonly cursorY: number;
@@ -46,12 +45,14 @@ export interface MouseHost {
   scrollLines(amount: number): void;
   /** Every mousedown focuses the terminal. */
   focus(): void;
+  /** Builds the selection, which shares the mouse coordinates and the reporting state with the mouse. */
+  createSelection(mouseCoordsService: IMouseCoordsService, mouseStateService: IMouseStateService): MouseSelection;
 }
 
 /**
  * What selection does with the mouse, like xterm.js SelectionService: it sees every mousedown on the element before
  * mouse reporting does, takes the drags reporting leaves (reporting off, or forced by a modifier) and is disabled
- * while reporting is on. `AltClick` stands in until selection (M2 step 4) replaces it through `selection`.
+ * while reporting is on. Built by `MouseHost.createSelection`.
  */
 export interface MouseSelection extends ISelectionService {
   handleMouseDown(event: MouseEvent): void;
@@ -60,10 +61,8 @@ export interface MouseSelection extends ISelectionService {
 
 /** xterm.js 6.1 defaults (common/services/OptionsService.ts) of the options the mouse reads. */
 const DEFAULT_OPTIONS = {
-  altClickMovesCursor: true,
   fastScrollSensitivity: 5,
   logLevel: 'info',
-  macOptionClickForcesSelection: false,
   mouseEventsRequireAlt: false,
   scrollback: 1000,
   scrollSensitivity: 1,
@@ -83,7 +82,7 @@ export class MouseController {
   private readonly _options: Readonly<typeof DEFAULT_OPTIONS>;
   private readonly _onOptionChange = new Emitter<string>();
   private readonly _disposables: IDisposable[] = [];
-  private _selection: MouseSelection;
+  private readonly _selection: MouseSelection;
   private _wheelReports = false;
   private _alternate = false;
   /** View scroll position in CSS pixels, kept between wheels like xterm.js `Viewport`. */
@@ -126,18 +125,12 @@ export class MouseController {
       get hasValidSize() { return renderService.dimensions.css.cell.width > 0 && renderService.dimensions.css.cell.height > 0; },
     };
     const mouseCoordsService = new MouseCoordsService(charSizeService, renderService);
-    this._selection = new AltClick(host.element, options, bufferService, coreService, mouseCoordsService, this._mouseStateService);
-    // MouseService keeps the selection it was given; this one forwards so `selection` can be replaced.
-    const selectionService: ISelectionService = {
-      shouldForceSelection: event => this._selection.shouldForceSelection(event),
-      enable: () => this._selection.enable(),
-      disable: () => this._selection.disable(),
-    };
+    this._selection = host.createSelection(mouseCoordsService, this._mouseStateService);
     const coreBrowserService = {
       get dpr() { return host.element.ownerDocument.defaultView?.devicePixelRatio ?? 1; },
     };
     this._mouseService = new MouseService(renderService, mouseCoordsService, this._mouseStateService, coreService, bufferService,
-      optionsService, selectionService, { debug: () => {} }, coreBrowserService);
+      optionsService, this._selection, { debug: () => {} }, coreBrowserService);
 
     this._disposables.push(this._mouseStateService.onProtocolChange(events => this._wheelReports = (events & CoreMouseEventType.WHEEL) !== 0));
     this.syncModes();
@@ -152,18 +145,6 @@ export class MouseController {
     );
     this._mouseService.bindMouse({ element: host.element, screenElement: host.screenElement, document: host.element.ownerDocument },
       disposable => this._disposables.push(disposable), () => host.focus());
-  }
-
-  /** The selection that gets mousedowns and drags not reported to the program. */
-  public get selection(): MouseSelection {
-    return this._selection;
-  }
-
-  public set selection(selection: MouseSelection) {
-    this._selection.dispose();
-    this._selection = selection;
-    if (this._mouseStateService.areMouseEventsActive && !this._options.mouseEventsRequireAlt) selection.disable();
-    else selection.enable();
   }
 
   /** Follows the mouse modes of the frame just applied to the Viewport; call after every `Viewport.apply`. */

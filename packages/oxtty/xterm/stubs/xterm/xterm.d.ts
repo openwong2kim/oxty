@@ -7,6 +7,17 @@ export interface IDisposable {
   dispose(): void;
 }
 
+// BufferRange (getRangeLength), for the copied selection parts
+export interface IBufferCellPosition {
+  x: number;
+  y: number;
+}
+
+export interface IBufferRange {
+  start: IBufferCellPosition;
+  end: IBufferCellPosition;
+}
+
 // GlyphRenderer·RectangleRenderer: cols·rows·element, SelectionRenderModel: buffer.active.viewportY
 export interface Terminal {
   readonly cols: number;

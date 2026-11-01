@@ -91,8 +91,12 @@ export interface ITerminalOptions {
   disableStdin?: boolean;
   /** Alt+click moves the shell cursor there with arrow keys (default true). */
   altClickMovesCursor?: boolean;
-  /** macOS: Option+click selects even while the program reports the mouse (default false). */
+  /** macOS: Option+click selects even while the program reports the mouse, and Option no longer selects a column (default false). */
   macOptionClickForcesSelection?: boolean;
+  /** Characters that end a word for double-click selection (default `' ()[]{}\',"`'`). */
+  wordSeparator?: string;
+  /** Right click selects the word under the mouse (default true on macOS). */
+  rightClickSelectsWord?: boolean;
   /** Wheel scroll speed multiplier (default 1). */
   scrollSensitivity?: number;
   /** Wheel scroll speed multiplier while Alt is held (default 5). */
@@ -174,6 +178,17 @@ export interface IUnicodeHandling {
   activeVersion: string;
 }
 
+export interface IBufferCellPosition {
+  x: number;
+  y: number;
+}
+
+/** Buffer cells; `y` numbers lines like `IBuffer.getLine`. */
+export interface IBufferRange {
+  start: IBufferCellPosition;
+  end: IBufferCellPosition;
+}
+
 export interface IRenderDimensions {
   css: { canvas: { width: number; height: number }; cell: { width: number; height: number } };
   device: { canvas: { width: number; height: number }; cell: { width: number; height: number } };
@@ -226,6 +241,8 @@ export class Terminal {
   readonly onCursorMove: IEvent<void>;
   /** The cell size changed: after a font option, or when fonts finish loading (a loaded fit addon refits then). */
   readonly onDimensionsChange: IEvent<IRenderDimensions>;
+  /** The selection was made, changed or cleared (on mouse up, not during a drag). */
+  readonly onSelectionChange: IEvent<void>;
 
   /** Builds the DOM in `parent` and starts drawing; opening again moves the element to `parent`. */
   open(parent: HTMLElement): void;
@@ -260,6 +277,20 @@ export class Terminal {
   loadAddon(addon: ITerminalAddon): void;
   /** oxtty: the screen and scrollback as bytes, in place of `@xterm/addon-serialize`. */
   ansiSnapshot(): AnsiSnapshot;
+  hasSelection(): boolean;
+  /**
+   * The selected text: wrapped rows join into one line, lines end in `\n` (`\r\n` on Windows). Trailing blanks are
+   * dropped, typed trailing spaces too (the engine does not tell them from erased cells).
+   */
+  getSelection(): string;
+  /** Where the selection starts and ends (end exclusive), undefined without one. */
+  getSelectionPosition(): IBufferRange | undefined;
+  clearSelection(): void;
+  /** Selects `length` cells from (`column`, `row`), continuing on the next rows; `row` is a buffer line. Call after `open`. */
+  select(column: number, row: number, length: number): void;
+  selectAll(): void;
+  /** Selects buffer lines `start`…`end` whole. */
+  selectLines(start: number, end: number): void;
   dispose(): void;
 }
 
