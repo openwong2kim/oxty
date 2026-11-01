@@ -49,6 +49,8 @@ const STYLE_ID: &str = "oxtty-xterm-input-style";
 /// The xterm.css rules of the textarea, the composition view and the mouse cursor while the program takes clicks.
 const STYLE: &str = "
 .xterm.enable-mouse-events { cursor: default; }
+.xterm.xterm-cursor-pointer, .xterm .xterm-cursor-pointer { cursor: pointer; }
+.xterm.column-select.focus { cursor: crosshair; }
 .xterm .xterm-helper-textarea { padding: 0; border: 0; margin: 0; position: absolute; opacity: 0; left: -9999em; top: 0; width: 0; height: 0; z-index: -5; white-space: nowrap; overflow: hidden; resize: none; }
 .xterm .composition-view { background: #000; color: #FFF; display: none; position: absolute; white-space: nowrap; z-index: 1; }
 .xterm .composition-view.active { display: block; }
@@ -59,6 +61,7 @@ const STYLE: &str = "
 struct Browser {
     mac: bool,
     windows: bool,
+    linux: bool,
     firefox: bool,
     /// The Chrome major version in the user agent.
     chrome: Option<u32>,
@@ -72,6 +75,7 @@ thread_local! {
         Browser {
             mac: matches!(platform.as_str(), "Macintosh" | "MacIntel" | "MacPPC" | "Mac68K"),
             windows: matches!(platform.as_str(), "Windows" | "Win16" | "Win32" | "WinCE"),
+            linux: platform.contains("Linux"),
             firefox: agent.contains("Firefox"),
             chrome: agent.split_once("Chrome/").and_then(|(_, v)| {
                 let digits: String = v.chars().take_while(char::is_ascii_digit).collect();
@@ -107,7 +111,7 @@ enum Target {
 }
 
 /// Listeners on from `open` to `dispose`: target, type, capture, and whether it may cancel (`passive: false`).
-const STATIC: [(Target, &str, bool, bool); 14] = [
+const STATIC: [(Target, &str, bool, bool); 21] = [
     (Target::Textarea, "focus", false, false),
     (Target::Textarea, "blur", false, false),
     (Target::Textarea, "keyup", true, false),
@@ -125,6 +129,15 @@ const STATIC: [(Target, &str, bool, bool); 14] = [
     (Target::Element, "wheel", false, true),
     // View scrolling, which sees wheels before the element (xterm.js's scrollable element is inside it).
     (Target::Screen, "wheel", false, true),
+    // The selection's copy and context menu (contextmenu off Firefox, auxclick on Linux, as the handlers check).
+    (Target::Element, "copy", false, false),
+    (Target::Element, "contextmenu", false, false),
+    (Target::Element, "auxclick", false, false),
+    // The column-select cursor, then the link under the mouse (xterm.js `Linkifier`).
+    (Target::Screen, "mousemove", false, false),
+    (Target::Screen, "mouseleave", false, false),
+    (Target::Screen, "mousedown", false, false),
+    (Target::Screen, "mouseup", false, false),
 ];
 
 /// Listeners that come and go with the mouse state, as bits.
@@ -327,6 +340,36 @@ fn handle_event(shared: &Rc<Shared>, event: Event) {
                 mouse::scroll_view(shared, e);
             }
         }
+        (Target::Element, "copy") => {
+            if let Some(e) = cast::<ClipboardEvent>(&event) {
+                crate::selection::copy(shared, e);
+            }
+        }
+        (Target::Element, "contextmenu") if !browser().firefox => {
+            if let Some(e) = cast(&event) {
+                crate::selection::right_click(shared, e);
+            }
+        }
+        (Target::Element, "auxclick") if browser().linux => {
+            if let Some(e) = cast::<web_sys::MouseEvent>(&event) {
+                if e.button() == 1 {
+                    crate::selection::move_textarea_under_mouse(shared, e);
+                }
+            }
+        }
+        (Target::Screen, "mousemove") => {
+            crate::selection::update_cursor_style(shared, &event);
+            if let Some(e) = cast(&event) {
+                crate::links::mouse_move(shared, e);
+            }
+        }
+        (Target::Screen, "mouseleave") => crate::links::mouse_leave(shared),
+        (Target::Screen, "mousedown") => crate::links::mouse_down(shared),
+        (Target::Screen, "mouseup") => {
+            if let Some(e) = cast(&event) {
+                crate::links::mouse_up(shared, e);
+            }
+        }
         (Target::Document, "mouseup") => {
             if let Some(e) = cast(&event) {
                 mouse::document_mouse_up(shared, e);
@@ -505,6 +548,7 @@ pub(crate) fn send_data(shared: &Rc<Shared>, data: &JsValue, user_input: bool) {
         let _ = terminal(shared).scroll_to_bottom();
     }
     if user_input {
+        crate::selection::user_input(shared);
         shared.events.user_input.fire(&[]);
     }
     shared.events.data.fire(&[data]);
@@ -662,7 +706,7 @@ fn buffer_cursor(core: &Core) -> (u32, i32, bool) {
 }
 
 /// A number as JavaScript prints it (`n + 'px'` in xterm.js), without Rust's float formatting in the wasm.
-fn js_number(n: f64) -> String {
+pub(crate) fn js_number(n: f64) -> String {
     js_sys::Number::from(n)
         .to_string_with_radix(10)
         .map(String::from)

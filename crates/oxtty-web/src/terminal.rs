@@ -101,6 +101,7 @@ pub(crate) struct Emitters {
     pub buffer_change: Rc<Emitter>,
     pub user_input: Rc<Emitter>,
     pub dimensions_change: Rc<Emitter>,
+    pub selection_change: Rc<Emitter>,
 }
 
 /// What the engine looked like after the last change, to fire `onScroll`/`onCursorMove` on differences.
@@ -119,6 +120,8 @@ pub(crate) struct Shared {
     pub events: Emitters,
     pub input: crate::input::Input,
     pub markers: RefCell<crate::markers::Markers>,
+    pub selection: RefCell<crate::selection::Selection>,
+    pub links: crate::links::Links,
     pub parser: crate::parser::ParserState,
     state: Cell<State>,
     /// Serialises OSC 52 reads so each answers the oldest pending read.
@@ -202,6 +205,8 @@ impl Terminal {
             events: Emitters::default(),
             input: Default::default(),
             markers: RefCell::default(),
+            selection: RefCell::default(),
+            links: Default::default(),
             parser: Default::default(),
             state: Cell::new(State::default()),
             clipboard_reads: RefCell::new(Promise::resolve(&JsValue::UNDEFINED)),
@@ -309,6 +314,7 @@ impl Terminal {
         core.view.invalidate();
         core.dirty = Dirty::All;
         drop(core);
+        crate::selection::open(&self.shared);
         self.shared.apply_scrollbar();
         self.shared.create_renderer()?;
         self.shared.apply_screen_reader_mode();
@@ -347,12 +353,13 @@ impl Terminal {
     }
 
     pub fn resize(&self, cols: u32, rows: u32) -> Result<(), JsValue> {
-        {
+        let rows_changed = {
             let mut core = self.shared.core.borrow_mut();
             let engine = core.view.engine();
             if core.disposed || (cols == engine.cols() && rows == engine.rows()) {
                 return Ok(());
             }
+            let old_rows = engine.rows();
             engine.resize(cols, rows)?;
             let (cols, rows) = (engine.cols(), engine.rows());
             Reflect::set(&core.options, &"cols".into(), &cols.into())?;
@@ -360,8 +367,11 @@ impl Terminal {
             if let Some(renderer) = core.renderer.as_mut() {
                 renderer.resize(cols, rows);
             }
-            // Hook: selection drops on row changes.
-        }
+            rows != old_rows
+        };
+        // The selection drops on row changes and the hovered link is let go, before `onResize` (xterm.js).
+        crate::selection::after_resize(&self.shared, rows_changed);
+        crate::links::after_resize(&self.shared);
         crate::input::after_resize(&self.shared);
         self.shared.sync_screen_size();
         let size = Object::new();
@@ -403,6 +413,8 @@ impl Terminal {
         core.queue.clear();
         // Hook: input, mouse, selection and accessibility remove their listeners here.
         crate::input::dispose(&self.shared);
+        crate::selection::dispose(&self.shared);
+        crate::links::dispose(&self.shared);
         core.a11y = None;
         core.scrollbar = None;
         core.renderer = None;
@@ -431,6 +443,7 @@ impl Terminal {
             &e.buffer_change,
             &e.user_input,
             &e.dimensions_change,
+            &e.selection_change,
         ] {
             emitter.clear();
         }
@@ -503,7 +516,6 @@ impl Shared {
             }
             if let Some(callback) = finished {
                 self.handle_events();
-                // Hook: selection syncs to the output just parsed, before the callback reads it.
                 if let Some(callback) = callback {
                     if let Err(error) = callback.call0(&JsValue::UNDEFINED) {
                         web_sys::console::error_1(&error);
@@ -560,7 +572,7 @@ impl Shared {
         for _ in 0..events.bells {
             self.events.bell.fire(&[]);
         }
-        // Hook: selection drops on each of `events.resets`.
+        crate::selection::handle_resets(self, events.resets);
         let write: Option<Function> = get(&clipboard, "write").dyn_into().ok();
         for w in events.clipboard_writes {
             if let Some(write) = &write {
@@ -676,7 +688,6 @@ impl Shared {
         }
         let (old, new) = (self.state.get(), self.read_state());
         self.state.set(new);
-        // Hook: selection syncs.
         crate::markers::sync(self);
         if new.alternate != old.alternate && self.events.buffer_change.has_listeners() {
             let buffer = crate::buffer::active(self);
@@ -708,8 +719,9 @@ impl Shared {
             let mut core = self.core.borrow_mut();
             core.view.invalidate();
             core.dirty = Dirty::All;
-            // Hook: selection drops.
         }
+        crate::selection::handle_crash(self);
+        crate::links::after_resize(self);
         crate::markers::drop_all(self);
         self.after_change();
     }
@@ -731,16 +743,20 @@ impl Shared {
     fn render_frame(self: &Rc<Self>) {
         self.handle_renderer_requests();
         self.apply_scroll_requests();
-        let rows = {
+        let (rows, content, switched) = {
             let mut core = self.core.borrow_mut();
             if core.disposed || core.element.is_none() {
                 return;
             }
             let frame = core.view.take_frame();
             let changed = core.viewport.apply(frame);
+            let switched = crate::selection::follow(self, &core.viewport);
             // Without a renderer (none yet, or no WebGL2) the viewport still follows the engine: input reads it.
             if core.renderer.is_none() {
                 drop(core);
+                if switched {
+                    crate::selection::screen_switched(self);
+                }
                 crate::input::after_frame(self);
                 return;
             }
@@ -754,8 +770,11 @@ impl Shared {
                 ..
             } = &mut *core;
             let renderer = renderer.as_mut().unwrap();
+            // The selection is handed over before the draw, so the rows it moved to are drawn now.
+            crate::selection::paint(self, renderer.as_mut(), viewport);
             renderer.render(viewport, &changed, &dirty);
-            // Hook: selection and links repaint.
+            // The rows whose content changed (ascending), not those only redrawn
+            let content = changed.first().zip(changed.last()).map(|(&a, &b)| (a, b));
             let range = match dirty {
                 Dirty::All => Some((0, viewport.rows.saturating_sub(1))),
                 Dirty::Rows(rows) => changed.iter().chain(&rows).fold(None, |range, &y| {
@@ -770,9 +789,16 @@ impl Shared {
                 let font_size = crate::options::option(options, "fontSize").as_f64();
                 a11y.frame(viewport, range, &dimensions, font_size.unwrap_or(15.0));
             }
-            range
+            (range, content, switched)
         };
+        if switched {
+            crate::selection::screen_switched(self);
+        }
         crate::input::after_frame(self);
+        // A hovered link on rows the output changed is looked up again (xterm.js `onRenderedViewportChange`).
+        if let Some((start, end)) = content {
+            crate::links::after_render(self, start, end);
+        }
         if let Some((start, end)) = rows {
             let range = Object::new();
             let _ = Reflect::set(&range, &"start".into(), &start.into());

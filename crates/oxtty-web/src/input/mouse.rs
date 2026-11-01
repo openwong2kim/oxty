@@ -50,8 +50,8 @@ pub(super) struct Mouse {
     document_drag: bool,
     /// Selection is on (no reporting, or reporting with `mouseEventsRequireAlt`): xterm.js `SelectionService._enabled`.
     selection_enabled: bool,
-    /// The selection's mousedown time while its document mouseup listener is on.
-    selection_down: Option<f64>,
+    /// The selection's document mousemove and mouseup listeners are on (the button is held after its mousedown).
+    selection_listening: bool,
     alternate: bool,
     /// View scroll position in CSS pixels, kept between wheels like xterm.js `Viewport`.
     scroll_top: f64,
@@ -85,10 +85,10 @@ fn wanted(m: &Mouse, require_alt: bool) -> u8 {
     if m.requested(mouse_event::MOVE) || alt_cursor {
         wanted |= dynamic::ELEMENT_MOUSEMOVE;
     }
-    if m.document_up || m.selection_down.is_some() {
+    if m.document_up || m.selection_listening {
         wanted |= dynamic::DOCUMENT_MOUSEUP;
     }
-    if m.document_drag {
+    if m.document_drag || m.selection_listening {
         wanted |= dynamic::DOCUMENT_MOUSEMOVE;
     }
     if alt_cursor {
@@ -112,20 +112,24 @@ fn reconcile_now(shared: &Shared) {
 }
 
 /// xterm.js `bindMouse` and the initial `onProtocolChange` it forces. Under the core borrow of `open`.
+/// Under the core borrow: the selection clears itself when `open` finds it disabled (`crate::selection::open`).
 pub(super) fn bind(shared: &Shared, core: &Core) {
     sync_modes_with(shared, core, true);
 }
 
 /// Follows the mouse modes of the frame just applied to the viewport (xterm.js `onProtocolChange`).
-pub(super) fn sync_modes(shared: &Shared, force: bool) {
-    if let Ok(core) = shared.core.try_borrow() {
-        if !core.disposed {
-            sync_modes_with(shared, &core, force);
-        }
+pub(super) fn sync_modes(shared: &Rc<Shared>, force: bool) {
+    let disable_selection = match shared.core.try_borrow() {
+        Ok(core) if !core.disposed => sync_modes_with(shared, &core, force),
+        _ => false,
+    };
+    if disable_selection {
+        crate::selection::disable(shared);
     }
 }
 
-fn sync_modes_with(shared: &Shared, core: &Core, force: bool) {
+/// Returns whether the selection was disabled, which clears it once the core borrow is dropped.
+fn sync_modes_with(shared: &Shared, core: &Core, force: bool) -> bool {
     let modes = core.viewport.modes;
     let events = mouse_events(modes);
     let changed = {
@@ -149,19 +153,21 @@ fn sync_modes_with(shared: &Shared, core: &Core, force: bool) {
             true
         }
     };
-    if changed {
-        let require_alt = require_alt(core);
-        sync_mouse_mode_state(shared, require_alt);
-        reconcile(shared, require_alt);
+    if !changed {
+        return false;
     }
+    let require_alt = require_alt(core);
+    let enabled = sync_mouse_mode_state(shared, require_alt);
+    reconcile(shared, require_alt);
+    !enabled
 }
 
 /// xterm.js `_syncMouseModeState`: while the program takes clicks they are not selections, unless
-/// `mouseEventsRequireAlt` leaves clicks without Alt to the selection.
-fn sync_mouse_mode_state(shared: &Shared, require_alt: bool) {
+/// `mouseEventsRequireAlt` leaves clicks without Alt to the selection. Returns whether selection is on; the caller
+/// clears the selection when it is not (xterm.js `disable`), without holding a borrow.
+fn sync_mouse_mode_state(shared: &Shared, require_alt: bool) -> bool {
     let active = shared.input.mouse.borrow().active();
     let enable_selection = !active || require_alt;
-    // Hook: selection clears itself when it is disabled here.
     shared.input.mouse.borrow_mut().selection_enabled = enable_selection;
     if let Some(element) = shared.input.element() {
         let classes = element.class_list();
@@ -171,18 +177,22 @@ fn sync_mouse_mode_state(shared: &Shared, require_alt: bool) {
             classes.remove_1("enable-mouse-events")
         };
     }
+    enable_selection
 }
 
 /// `mouseEventsRequireAlt` changed.
-pub(super) fn require_alt_changed(shared: &Shared) {
+pub(super) fn require_alt_changed(shared: &Rc<Shared>) {
     let Ok(core) = shared.core.try_borrow() else {
         return;
     };
     let require_alt = require_alt(&core);
     drop(core);
     if shared.input.mouse.borrow().events.is_some() {
-        sync_mouse_mode_state(shared, require_alt);
+        let enabled = sync_mouse_mode_state(shared, require_alt);
         reconcile(shared, require_alt);
+        if !enabled {
+            crate::selection::disable(shared);
+        }
     }
 }
 
@@ -205,9 +215,88 @@ pub(crate) fn should_force_selection(shared: &Shared, event: &MouseEvent) -> boo
 }
 
 /// Whether selection is on (xterm.js `SelectionService.enable`/`disable`), for the selection module.
-#[allow(dead_code)]
 pub(crate) fn selection_enabled(shared: &Shared) -> bool {
     shared.input.mouse.borrow().selection_enabled
+}
+
+/// Turns the selection's document mousemove and mouseup listeners on or off (xterm.js
+/// `_addMouseDownListeners`/`_removeMouseDownListeners`).
+pub(crate) fn set_selection_listeners(shared: &Shared, on: bool) {
+    if let Ok(mut m) = shared.input.mouse.try_borrow_mut() {
+        if m.selection_listening == on {
+            return;
+        }
+        m.selection_listening = on;
+    }
+    reconcile_now(shared);
+}
+
+/// `mouseEventsRequireAlt` is on while the program takes clicks.
+pub(crate) fn require_alt_active(shared: &Shared) -> bool {
+    alt_cursor_active(shared)
+}
+
+pub(crate) fn platform_mac() -> bool {
+    browser().mac
+}
+
+pub(crate) fn platform_windows() -> bool {
+    browser().windows
+}
+
+pub(crate) fn platform_linux() -> bool {
+    browser().linux
+}
+
+pub(crate) fn textarea(shared: &Shared) -> Option<web_sys::HtmlTextAreaElement> {
+    shared.input.textarea()
+}
+
+pub(crate) fn element(shared: &Shared) -> Option<web_sys::HtmlElement> {
+    shared.input.element()
+}
+
+pub(crate) fn screen(shared: &Shared) -> Option<web_sys::HtmlElement> {
+    shared.input.dom(|dom| dom.screen.clone())
+}
+
+/// xterm.js `MouseCoordsService.getCoords` over the screen with the engine's size: the cell under the mouse,
+/// 1-based; `selection` puts the right half of a cell on the next one.
+pub(crate) fn screen_coords(
+    shared: &Shared,
+    event: &MouseEvent,
+    selection: bool,
+) -> Option<(i32, i32)> {
+    let (screen, window) = shared.input.dom(|dom| {
+        (
+            dom.screen.clone().unchecked_into::<Element>(),
+            dom.window.clone(),
+        )
+    })?;
+    let (cols, rows, d) = {
+        let core = shared.core.try_borrow().ok()?;
+        if core.disposed {
+            return None;
+        }
+        let (cols, rows) = core.size();
+        (cols, rows, dimensions(&core))
+    };
+    coords(event, &screen, window.as_ref(), cols, rows, &d, selection)
+}
+
+/// The mouse's y in CSS pixels from the top of the screen, and the canvas height (drag scrolling).
+pub(crate) fn screen_offset_y(shared: &Shared, event: &MouseEvent) -> Option<(f64, f64)> {
+    let (screen, window) = shared.input.dom(|dom| {
+        (
+            dom.screen.clone().unchecked_into::<Element>(),
+            dom.window.clone(),
+        )
+    })?;
+    let height = {
+        let core = shared.core.try_borrow().ok()?;
+        dimensions(&core).css_canvas.height
+    };
+    Some((relative_coords(event, &screen, window.as_ref()).1, height))
 }
 
 fn number(target: &JsValue, key: &str) -> f64 {
@@ -402,6 +491,13 @@ fn send(shared: &Rc<Shared>, event: &MouseEvent, action: MouseAction) {
 /// The element's mousedown: the selection's handler, then MouseService's.
 pub(super) fn mouse_down(shared: &Rc<Shared>, event: &MouseEvent) {
     selection_mouse_down(shared, event);
+    // Firefox doesn't appear to fire the contextmenu event on right click (CoreBrowserTerminal `_initGlobal`)
+    if browser().firefox && event.button() == 2 {
+        crate::selection::right_click(shared, event);
+    }
+    if is_disposed(shared) {
+        return;
+    }
     // MouseService `_handleMouseDown`
     event.prevent_default();
     terminal(shared).focus();
@@ -430,7 +526,11 @@ pub(super) fn mouse_down(shared: &Rc<Shared>, event: &MouseEvent) {
 
 /// The start of xterm.js `SelectionService.handleMouseDown`.
 fn selection_mouse_down(shared: &Rc<Shared>, event: &MouseEvent) {
-    // Hook: with a selection, a right click keeps it for the context menu (xterm.js returns here).
+    crate::selection::set_mouse_down_time(shared, event.time_stamp());
+    // If we have selection, we want the context menu on right click even if the terminal is in mouse mode.
+    if event.button() == 2 && crate::selection::has_selection(shared) {
+        return;
+    }
     // Only action the primary button
     if event.button() != 0 {
         return;
@@ -449,18 +549,15 @@ fn selection_mouse_down(shared: &Rc<Shared>, event: &MouseEvent) {
     }
     // Tell the browser not to start a regular selection
     event.prevent_default();
-    // Hook: the selection starts here (single, double and triple clicks; Shift+click extends).
-    shared.input.mouse.borrow_mut().selection_down = Some(event.time_stamp());
-    reconcile_now(shared);
+    crate::selection::mouse_down(shared, event);
 }
 
 /// A mouseup anywhere in the document: the selection's listener (added by the earlier mousedown listener), then
 /// MouseService's.
 pub(super) fn document_mouse_up(shared: &Rc<Shared>, event: &MouseEvent) {
-    let down = shared.input.mouse.borrow_mut().selection_down.take();
-    if let Some(down) = down {
-        reconcile_now(shared);
-        selection_mouse_up(shared, event, down);
+    if shared.input.mouse.borrow().selection_listening {
+        crate::selection::mouse_up(shared);
+        selection_mouse_up(shared, event);
         if is_disposed(shared) {
             return;
         }
@@ -480,14 +577,17 @@ pub(super) fn document_mouse_up(shared: &Rc<Shared>, event: &MouseEvent) {
 }
 
 /// The Alt+click branch of xterm.js `SelectionService._handleMouseUp`.
-fn selection_mouse_up(shared: &Rc<Shared>, event: &MouseEvent, down: f64) {
-    let elapsed = event.time_stamp() - down;
+fn selection_mouse_up(shared: &Rc<Shared>, event: &MouseEvent) {
+    let elapsed = event.time_stamp() - crate::selection::mouse_down_time(shared);
     let alt_click_moves = shared.core.try_borrow().is_ok_and(|core| {
         !core.disposed && option(&core.options, "altClickMovesCursor").is_truthy()
     });
-    // Hook: and the selection's text is at most one character.
-    if !(elapsed < ALT_CLICK_MOVE_CURSOR_TIME && event.alt_key() && alt_click_moves) {
-        // Hook: selection fires onSelectionChange here.
+    if !(elapsed < ALT_CLICK_MOVE_CURSOR_TIME
+        && event.alt_key()
+        && alt_click_moves
+        && crate::selection::text_is_at_most_one_unit(shared))
+    {
+        crate::selection::mouse_up_changed(shared);
         return;
     }
     let view = crate::buffer::active(shared);
@@ -532,6 +632,11 @@ fn selection_mouse_up(shared: &Rc<Shared>, event: &MouseEvent, down: f64) {
 
 /// A mousemove anywhere in the document after a reported press: drags.
 pub(super) fn document_mouse_move(shared: &Rc<Shared>, event: &MouseEvent) {
+    // The selection's listener came first and stops the event from reaching MouseService's
+    if shared.input.mouse.borrow().selection_listening {
+        crate::selection::mouse_move(shared, event);
+        return;
+    }
     if shared.input.mouse.borrow().document_drag && event.buttons() != 0 {
         send(shared, event, MouseAction::Move);
     }

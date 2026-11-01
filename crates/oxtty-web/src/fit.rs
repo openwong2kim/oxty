@@ -376,7 +376,10 @@ impl Terminal {
                 return Ok(());
             }
         }
-        if crate::search::load(self, &addon) || absorb_webgl_addon(&self.shared, &addon) {
+        if crate::search::load(self, &addon)
+            || crate::links::load(self, &addon)
+            || absorb_webgl_addon(&self.shared, &addon)
+        {
             return Ok(());
         }
         if get(&addon, "findNext").is_function() {
@@ -398,7 +401,7 @@ impl Terminal {
             .as_string()
             .unwrap_or_default();
         Err(js_sys::Error::new(&format!(
-            "oxtty/xterm: unsupported addon {name}; only the built-in FitAddon, SearchAddon and WebglAddon, @xterm/addon-webgl and @xterm/addon-unicode11 can be loaded"
+            "oxtty/xterm: unsupported addon {name}; only the built-in FitAddon, SearchAddon, WebLinksAddon and WebglAddon, @xterm/addon-webgl and @xterm/addon-unicode11 can be loaded"
         ))
         .into())
     }

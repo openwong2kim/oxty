@@ -6,7 +6,7 @@
 //! (`crates/oxtty/LICENSE-XTERM`): lines 846-1058 (`_keyDown`, `_keyUp`, `_keyPress`, `_inputEvent`) and 1168-1177
 //! (`wasModifierKeyOnlyEvent`), with `src/browser/services/KeyboardService.ts` lines 39-66 (kitty only with
 //! `vtExtensions.kittyKeyboard`). The rules and their order are unchanged; win32 input mode is not supported, and
-//! `onKey`, the cursor style and select-all wait for their modules.
+//! `onKey` waits for its module.
 use std::rc::Rc;
 
 use js_sys::{JsString, Reflect};
@@ -100,7 +100,7 @@ pub(super) fn key_down(shared: &Rc<Shared>, event: &KeyboardEvent) {
     };
     let input = key_input(event, event_type);
     let result = encode_key(&input, context.modes, context.kitty_flags, &context.options);
-    // Hook: selection toggles its column-select cursor here (xterm.js `updateCursorStyle`).
+    crate::selection::update_cursor_style(shared, event);
     match result.action {
         KeyAction::PageUp | KeyAction::PageDown => {
             let count = context.rows as i32 - 1;
@@ -113,8 +113,8 @@ pub(super) fn key_down(shared: &Rc<Shared>, event: &KeyboardEvent) {
             cancel(event);
             return;
         }
-        // Hook: selection selects all here.
-        KeyAction::SelectAll | KeyAction::Send => {}
+        KeyAction::SelectAll => crate::selection::select_all(shared),
+        KeyAction::Send => {}
     }
     if is_third_level_shift(
         &input,
@@ -193,7 +193,7 @@ pub(super) fn key_up(shared: &Rc<Shared>, event: &KeyboardEvent) {
             send_data(shared, &key.into(), true);
         }
     }
-    // Hook: selection toggles its column-select cursor here (xterm.js `updateCursorStyle`).
+    crate::selection::update_cursor_style(shared, event);
     update(shared, |k| k.key_press_handled = false);
 }
 

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { cdp, withPage } from './harness.mjs';
 
 // Set to `false` once the members land in crates/oxtty-web.
-const TODO = 'Terminal.onSelectionChange, Terminal.getSelection, Terminal.hasSelection, Terminal.select (selection)';
+const TODO = false;
 
 const ALT = 1, SHIFT = 8;
 const COLS = 40;
@@ -29,13 +29,6 @@ const LINES = [
 ];
 const CONTENT = LINES.join('\r\n');
 const DOUBLE_CLICK_COLS = [0, 1, 2, 3, 5, 7, 10, 13, 17, 20, 24, 28, 33, 36, 38, 39];
-
-/**
- * The one known difference: xterm.js keeps spaces the output typed at the end of a line apart from erased cells and
- * copies them; the engine stores both as spaces, so oxtty drops them like erased cells (same range, shorter text).
- */
-const trailingSpacesOnly = ({ oxtty, xterm }) =>
-  JSON.stringify({ ...oxtty, text: '' }) === JSON.stringify({ ...xterm, text: '' }) && xterm.text.replace(/ +$/gm, '') === oxtty.text;
 
 /** Runs `fn` on a page with both terminals; `fn` gets helpers that act on both terminals in turn. */
 function withTerminals(size, fn) {
@@ -73,18 +66,16 @@ function withTerminals(size, fn) {
     };
     const state = () => page.evaluate(() => window.state());
     const mismatches = [];
-    let total = 0, trailingSpaces = 0;
-    /** Compares the selections after `what`; returns xterm.js's. */
+    let total = 0;
+    /** Compares the selections after `what` (text, typed trailing spaces included); returns xterm.js's. */
     const compare = async (what) => {
       const { oxtty, xterm } = await state();
       total++;
-      if (JSON.stringify(oxtty) === JSON.stringify(xterm)) return xterm;
-      if (trailingSpacesOnly({ oxtty, xterm })) trailingSpaces++;
-      else mismatches.push({ what, oxtty, xterm });
+      if (JSON.stringify(oxtty) !== JSON.stringify(xterm)) mismatches.push({ what, oxtty, xterm });
       return xterm;
     };
     return fn({
-      page, mouse, both, ...gestures, state, compare, mismatches, count: () => total, trailingSpaces: () => trailingSpaces,
+      page, mouse, both, ...gestures, state, compare, mismatches, count: () => total,
       write: (data) => page.evaluate((d) => window.write(d), data),
       call: (name, ...args) => {
         // A resize moves the cells, and the second terminal with them
@@ -149,11 +140,9 @@ test('mouse selections match xterm.js: double and triple click, drags, Alt colum
     // A click clears
     await t.click([5, 5]);
     await t.compare('click');
-    return { mismatches: t.mismatches, total: t.count(), trailingSpaces: t.trailingSpaces(), nonEmpty };
+    return { mismatches: t.mismatches, total: t.count(), nonEmpty };
   });
   assert.equal(result.total, 16 * (DOUBLE_CLICK_COLS.length + 1) + 19 * 2 + 6 * 2 + 4 * 2 + 1);
-  // Double clicks on the typed spaces of 'trailing   ' (10), its triple click and its plain and Alt drags
-  assert.equal(result.trailingSpaces, 13);
   assert.ok(result.nonEmpty.double > 200 && result.nonEmpty.triple === 16 && result.nonEmpty.drag === 19 && result.nonEmpty.column > 10, JSON.stringify(result.nonEmpty));
   assert.deepEqual(result.mismatches, [], `${result.mismatches.length} of ${result.total} cases differ`);
 });
@@ -180,11 +169,9 @@ test('select, selectLines, selectAll and wordSeparator match xterm.js', { todo: 
         await t.compare(`wordSeparator ${JSON.stringify(separator)}: double click ${col},${row}`);
       }
     }
-    return { mismatches: t.mismatches, total: t.count(), trailingSpaces: t.trailingSpaces() };
+    return { mismatches: t.mismatches, total: t.count() };
   });
   assert.equal(result.total, 10 + 7 + 2 + 4 * 11);
-  // selectLines(2, 9) and selectAll take in 'trailing   '
-  assert.equal(result.trailingSpaces, 2);
   assert.deepEqual(result.mismatches, [], `${result.mismatches.length} of ${result.total} cases differ`);
 });
 
@@ -265,8 +252,7 @@ test('the selection follows its text as the scrollback trims, then clears, like 
 test('alternate screen switch, a change of rows and full resets clear the selection; onSelectionChange fires like xterm.js', { todo: TODO, timeout: 300000 }, async () => {
   const result = await withTerminals({ cols: COLS, rows: 16, scrollback: 20 }, async (t) => {
     // The cursor leaves the wrapped last line. Widening leaves the cursor's line unreflowed in both, with a blank
-    // tail on its first row that xterm.js trims as empty cells and oxtty copies as typed spaces (the known
-    // erased-cell-or-space difference)
+    // tail on its first row that both trim as erased cells
     await t.write(`${CONTENT}\r\n`);
     await t.drag([2, 0], [20, 3]);
     await t.compare('drag');
@@ -313,6 +299,50 @@ test('alternate screen switch, a change of rows and full resets clear the select
     return { mismatches: t.mismatches, total: t.count() };
   });
   assert.deepEqual(result.mismatches, [], `${result.mismatches.length} of ${result.total} cases differ`);
+});
+
+test('a right click selects the word under it with rightClickSelectsWord and puts the selection in the textarea; copy copies it; like xterm.js', { timeout: 300000 }, async () => {
+  const result = await withTerminals({ cols: COLS, rows: 16, scrollback: 20 }, async (t) => {
+    await t.write(CONTENT);
+    const textareas = [];
+    // Each textarea is read right after its own click: the next terminal's right click focuses its textarea, and
+    // the blur empties the other one (in both)
+    const rightClick = async ([col, row]) => {
+      const points = await t.page.evaluate(([c, r]) => window.points(c, r), [col, row]);
+      const values = [];
+      for (const k of [0, 1]) {
+        await Promise.all([
+          t.mouse('mousePressed', points[k], { button: 'right', buttons: 2, clickCount: 1 }),
+          t.mouse('mouseReleased', points[k], { button: 'right', clickCount: 1 }),
+        ]);
+        values.push((await t.page.evaluate(() => window.textareas()))[k]);
+      }
+      textareas.push(values);
+    };
+    for (const on of [false, true]) {
+      await t.setOption('rightClickSelectsWord', on);
+      await t.call('clearSelection');
+      await t.compare(`rightClickSelectsWord ${on}: clear`);
+      // A word, the same word again, whitespace (nothing to select), inside a selection, a wide-character word
+      for (const cell of [[14, 0], [14, 0], [11, 6], [2, 1], [22, 0]]) {
+        await rightClick(cell);
+        await t.compare(`rightClickSelectsWord ${on}: right click ${cell}`);
+      }
+      await t.drag([2, 4], [30, 4]);
+      await rightClick([10, 4]);
+      await t.compare(`rightClickSelectsWord ${on}: right click inside a drag selection`);
+    }
+    // Copy puts the selection on the clipboard; without one the event is left alone
+    const copies = [await t.page.evaluate(() => window.copied())];
+    await t.call('clearSelection');
+    copies.push(await t.page.evaluate(() => window.copied()));
+    return { mismatches: t.mismatches, total: t.count(), textareas, copies };
+  });
+  for (const [oxtty, xterm] of result.copies) assert.deepEqual(oxtty, xterm);
+  assert.ok(result.copies[0][1][0].length > 0 && result.copies[0][1][1], 'xterm.js copied the selection');
+  assert.deepEqual(result.mismatches, [], `${result.mismatches.length} of ${result.total} cases differ`);
+  for (const [oxtty, xterm] of result.textareas) assert.equal(oxtty, xterm);
+  assert.ok(result.textareas.some(([, xterm]) => xterm.length > 0), 'the textarea held a selection');
 });
 
 test('dragging past the top or bottom scrolls and extends the selection like xterm.js', { todo: TODO, timeout: 300000 }, async () => {

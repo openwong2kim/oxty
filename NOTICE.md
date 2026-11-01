@@ -65,6 +65,27 @@ xterm.js 6.1.0-beta.336 does (`src/common/parser/EscapeSequenceParser.ts`,
 and `SearchResultTracker.ts`, Copyright (c) 2017 The xterm.js authors, MIT
 license (`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
 
+## xterm.js selection
+
+`crates/oxtty-web/src/selection` is a Rust port of xterm.js 6.1.0-beta.336
+(commit 08829c7eb6279dda2a9e86df901353a1a89858ca):
+`src/browser/services/SelectionService.ts`,
+`src/browser/selection/SelectionModel.ts` and parts of `src/browser/Clipboard.ts`,
+`src/browser/CoreBrowserTerminal.ts`, `src/common/buffer/Buffer.ts` and
+`src/common/buffer/BufferRange.ts`, Copyright (c) 2014-2021 The xterm.js
+authors, MIT license (`crates/oxtty/LICENSE-XTERM`). Each file names its source
+lines.
+
+## xterm.js links
+
+`crates/oxtty-web/src/links.rs` is a Rust port of xterm.js 6.1.0-beta.336 and
+`@xterm/addon-web-links` 0.13.0-beta.330 (commit
+08829c7eb6279dda2a9e86df901353a1a89858ca): `src/browser/Linkifier.ts`,
+`src/browser/OscLinkProvider.ts`, `src/browser/services/LinkProviderService.ts`,
+`addons/addon-web-links/src/WebLinksAddon.ts` and `WebLinkProvider.ts`,
+Copyright (c) 2019-2022 The xterm.js authors, MIT license
+(`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
+
 ## xterm.js accessibility and scrollbar
 
 `crates/oxtty-web/src/a11y.rs` (`screenReaderMode`) and

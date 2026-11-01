@@ -38,11 +38,12 @@ pub(crate) enum Event {
     BufferChange,
     UserInput,
     DimensionsChange,
+    SelectionChange,
 }
 
 impl Event {
     /// In discriminant order: the bound function carries the index.
-    const ALL: [Event; 12] = [
+    const ALL: [Event; 13] = [
         Event::Data,
         Event::Binary,
         Event::Resize,
@@ -55,6 +56,7 @@ impl Event {
         Event::BufferChange,
         Event::UserInput,
         Event::DimensionsChange,
+        Event::SelectionChange,
     ];
 
     fn emitter(self, e: &Emitters) -> &Rc<Emitter> {
@@ -71,6 +73,7 @@ impl Event {
             Event::BufferChange => &e.buffer_change,
             Event::UserInput => &e.user_input,
             Event::DimensionsChange => &e.dimensions_change,
+            Event::SelectionChange => &e.selection_change,
         }
     }
 }
@@ -133,6 +136,21 @@ pub(crate) fn event(shared: &Rc<Shared>, event: Event) -> Function {
         subscribe
             .bind2(&JsValue::NULL, &id, &event)
             .unchecked_into()
+    })
+}
+
+/// The page-wide id of a terminal, for page-wide callbacks bound to it (link provider replies).
+pub(crate) fn terminal_id(shared: &Rc<Shared>) -> u32 {
+    id_of(shared)
+}
+
+/// The terminal of an id from [`terminal_id`], while it lives.
+pub(crate) fn terminal_of(id: u32) -> Option<Rc<Shared>> {
+    TERMINALS.with(|list| {
+        list.borrow()
+            .iter()
+            .find(|(i, _)| *i == id)
+            .and_then(|(_, w)| w.upgrade())
     })
 }
 

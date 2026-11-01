@@ -84,12 +84,12 @@
       "reason": "wmux turns it off for headless parity; the engine follows xterm.js with it off."
     },
     "options.macOptionClickForcesSelection": {
-      "status": "todo",
-      "reason": "Option+click is not reported to the program and selects (xterm.js SelectionService.shouldForceSelection)."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/input/mouse.rs should_force_selection: on macOS, Option+click is not reported to the program and selects, and Option no longer makes a column selection (xterm.js shouldForceSelection, shouldColumnSelect); selection.test.mjs compares it with xterm.js."
     },
     "options.linkHandler": {
-      "status": "later",
-      "reason": "Links step (OSC 8 + regex detection)."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/links.rs, a port of xterm.js OscLinkProvider: OSC 8 links activate, hover and leave through linkHandler with their 1-based range (wrapped links across rows), non-http links only with allowNonHttpProtocols, and without a handler the default confirm-then-open; links.test.mjs compares every callback with xterm.js."
     },
     "options.screenReaderMode": {
       "status": "supported",
@@ -184,20 +184,20 @@
       "reason": "Sees every keydown, keypress and keyup first; false stops the key (the ported xterm.js 6.1 arbitration)."
     },
     "Terminal.getSelection": {
-      "status": "todo",
-      "reason": "xterm.js SelectionService.selectionText: wrapped rows joined, wide characters once. Typed trailing spaces are dropped like erased cells (the engine does not tell them apart)."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/selection, a port of xterm.js SelectionService.selectionText over buffer.active: wrapped rows joined, wide characters once, NBSP as spaces; typed trailing spaces are copied and erased cells trimmed like xterm.js (the engine marks typed spaces). Same text as xterm.js in every selection.test.mjs case."
     },
     "Terminal.hasSelection": {
-      "status": "todo",
-      "reason": "xterm.js SelectionService.hasSelection."
+      "status": "supported",
+      "reason": "xterm.js SelectionService.hasSelection (crates/oxtty-web/src/selection)."
     },
     "Terminal.clearSelection": {
-      "status": "todo",
-      "reason": "xterm.js SelectionService.clearSelection."
+      "status": "supported",
+      "reason": "xterm.js SelectionService.clearSelection; fires onSelectionChange every time, like xterm.js; does nothing before open()."
     },
     "Terminal.select": {
-      "status": "todo",
-      "reason": "xterm.js SelectionService.setSelection; does nothing before open() (xterm.js throws)."
+      "status": "supported",
+      "reason": "xterm.js SelectionService.setSelection (JavaScript numbers, so API input behaves the same); does nothing before open() (xterm.js throws). The built-in SearchAddon selects its match through it."
     },
     "Terminal.parser.registerOscHandler": {
       "status": "supported",
@@ -215,8 +215,8 @@
       "exercisedBy": "registerDcsHandler\\("
     },
     "Terminal.registerLinkProvider": {
-      "status": "later",
-      "reason": "Links step."
+      "status": "supported",
+      "reason": "A port of xterm.js Linkifier and LinkProviderService: providers are asked after the OSC 8 links in registration order, synchronously or on a later task; the earliest provider with a link under the mouse wins and later overlapping links are dropped; hover underline (the renderer's \"link\" layer), pointer cursor and activation on mouseup like xterm.js. A link's decorations are read when it is hovered (later changes are not followed)."
     },
     "Terminal.registerMarker": {
       "status": "supported",
@@ -272,8 +272,8 @@
       "reason": "Fires when the cell size changes: font options, fonts that finish loading, a devicePixelRatio change."
     },
     "Terminal.onSelectionChange": {
-      "status": "todo",
-      "reason": "Fires where xterm.js fires: mouse up, API calls, and clears by user input, resize or an alternate screen switch (not when trimming moves or drops it, like xterm.js)."
+      "status": "supported",
+      "reason": "Fires where xterm.js fires, as often: mouse up, API calls, clears by user input, a change of rows, an alternate screen switch, mouse reporting turning on and full resets (twice each, like xterm.js); not when trimming moves or drops the selection. selection.test.mjs counts the events against xterm.js."
     },
     "buffer.onBufferChange": {
       "status": "supported",
@@ -380,7 +380,7 @@
     },
     "SearchAddon.findNext/findPrevious/clearDecorations": {
       "status": "supported",
-      "reason": "crates/oxtty-web/src/search.rs, a port of @xterm/addon-search 0.17.0-beta.330 over the engine's searchLine (JS string methods and RegExp, no matcher in the wasm): same matches, selection and scrolling, quirks included; decorations go to the renderer's \"search\" highlight layer (no overview ruler). Loaded with activate() until loadAddon accepts it; the selected match is kept by the addon until the selection module exists.",
+      "reason": "crates/oxtty-web/src/search.rs, a port of @xterm/addon-search 0.17.0-beta.330 over the engine's searchLine (JS string methods and RegExp, no matcher in the wasm): same matches, selection and scrolling, quirks included; decorations go to the renderer's \"search\" highlight layer (no overview ruler). The match is selected with Terminal.select and the next search starts from getSelectionPosition, as in the addon.",
       "exercisedBy": "findPrevious"
     },
     "SerializeAddon.serialize": {
@@ -388,8 +388,9 @@
       "reason": "loadAddon throws; Terminal.ansiSnapshot() (engine) replaces it. coldFrame's scrollback:0 + excludeModes variant needs an engine option (later)."
     },
     "WebLinksAddon": {
-      "status": "later",
-      "reason": "Links step (OSC 8 + regex detection); loadAddon throws until then."
+      "status": "supported",
+      "reason": "Built in (crates/oxtty-web/src/links.rs), a port of @xterm/addon-web-links 0.13.0-beta.330 accepted by loadAddon: the same URL pattern (a JS RegExp, or options.urlRegex), URL check, wrapped-line windows and handler, hover and leave options; links.test.mjs compares it with the real addon. Load this package's WebLinksAddon; the npm addon is refused by loadAddon.",
+      "exercisedBy": "new WebLinksAddon\\("
     },
     "ImageAddon": {
       "status": "later",
@@ -471,8 +472,9 @@
       "exercisedBy": "park and re-append"
     },
     "Synthetic mouse events on .xterm-screen": {
-      "status": "todo",
-      "reason": "Mouse reports and selection both listen on the element, so dispatched events (plainDragSelect replays) select and report like real ones."
+      "status": "supported",
+      "reason": "Mouse reports and selection both listen on the element, so dispatched events (wmux plainDragSelect replays) select and report like real ones; selection.test.mjs dispatches them on both terminals.",
+      "exercisedBy": "window\\.synthetic\\("
     },
     "write() from inside parser handlers": {
       "status": "supported",
