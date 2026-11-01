@@ -28,13 +28,13 @@
 // 1164-1177).
 // The class is abstract and extends the lifecycle stub instead of CoreTerminal: the [oxtty stub] block declares the
 // members the excerpt reads from the rest of xterm.js, and oxtty's InputController (src/input) provides them.
-// The imports are rewritten to this tree's paths; the stubs are in xterm/stubs.
+// The import block is rewritten to this tree's path-mapped specifiers; the stubs are in xterm/stubs.
 import { paste, handlePasteEvent } from 'browser/Clipboard';
-import { CustomKeyEventHandler, IBrowser, ICompositionHelper } from 'browser/Types';
+import { CustomKeyEventHandler, IBrowser, ICompositionHelper } from 'browser/Types.keyboard';
 import { addDisposableListener } from 'browser/Dom';
 import { IKeyboardService, IRenderService } from 'browser/services/Services';
 import * as Browser from 'common/Platform';
-import { KeyboardResultType } from 'common/Types';
+import { KeyboardResultType } from 'common/Types.keyboard';
 import { C0 } from 'common/data/EscapeSequences';
 import { IBuffer, ICoreService, IOptionsService } from 'common/services/Services';
 import { Emitter, type Event as IEvent } from 'vs/base/common/event';

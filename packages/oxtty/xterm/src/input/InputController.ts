@@ -5,7 +5,7 @@ import { CoreBrowserTerminal } from 'browser/CoreBrowserTerminal';
 import { CompositionHelper } from 'browser/input/CompositionHelper';
 import { KeyboardService } from 'browser/services/KeyboardService';
 import { IRenderService } from 'browser/services/Services';
-import { ICompositionHelper } from 'browser/Types';
+import { ICompositionHelper } from 'browser/Types.keyboard';
 import { IBuffer } from 'common/services/Services';
 import { Emitter } from 'vs/base/common/event';
 import { Mode } from '../../../src/index.js';
