@@ -12,6 +12,12 @@ export interface TerminalOptions {
   syncTimeoutMs?: number;
   /** Called after such a timed flush, so the renderer can redraw. */
   onSyncFlush?: () => void;
+  /**
+   * Called when the engine crashed (a trap in the shared WebAssembly
+   * instance) and this terminal started over empty at the same size. The
+   * call that hit the crash throws; the terminal works again afterwards.
+   */
+  onCrash?: (error: Error) => void;
 }
 
 export interface Cursor {

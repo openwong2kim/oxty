@@ -11,6 +11,10 @@ const IN_KEEP = 256 * 1024;
 /** @type {any} */
 let wasm = null;
 let initPromise = null;
+// The compiled module, kept to rebuild the instance after a trap.
+let wasmModule = null;
+// Bumped each time the instance is rebuilt; terminals from an older one start over.
+let generation = 0;
 
 /**
  * Loads the WebAssembly module once. Call before creating terminals.
@@ -26,27 +30,55 @@ export function init(source) {
 
 async function load(source) {
   source ??= new URL('./oxtty.wasm', import.meta.url);
+  let module;
   let instance;
   if (source instanceof WebAssembly.Module) {
+    module = source;
     instance = await WebAssembly.instantiate(source, {});
   } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
-    ({ instance } = await WebAssembly.instantiate(source, {}));
+    ({ module, instance } = await WebAssembly.instantiate(source, {}));
   } else {
     const response = typeof Response !== 'undefined' && source instanceof Response
       ? source
       : await fetchWasm(source);
     if (response instanceof Uint8Array) {
-      ({ instance } = await WebAssembly.instantiate(response, {}));
+      ({ module, instance } = await WebAssembly.instantiate(response, {}));
     } else if (WebAssembly.instantiateStreaming &&
       response.headers.get('content-type')?.startsWith('application/wasm')) {
-      ({ instance } = await WebAssembly.instantiateStreaming(response, {}));
+      ({ module, instance } = await WebAssembly.instantiateStreaming(response, {}));
     } else {
-      ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {}));
+      ({ module, instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {}));
     }
   }
   const abi = instance.exports.oxtty_abi();
   if (abi !== ABI) throw new Error(`oxtty: wasm ABI ${abi} does not match JS wrapper ABI ${ABI}`);
-  wasm = instance.exports;
+  wasmModule = module;
+  wasm = guard(instance.exports);
+}
+
+// A Rust panic aborts the whole instance (every terminal in it) with a
+// WebAssembly.RuntimeError. Each export is wrapped so that a trap rebuilds the
+// instance from the same module before the error reaches the caller; terminals
+// notice the new generation on their next call and start over empty.
+function guard(exports) {
+  const guarded = { memory: exports.memory };
+  for (const [name, fn] of Object.entries(exports)) {
+    if (typeof fn !== 'function') continue;
+    guarded[name] = (a, b, c, d) => {
+      try {
+        return fn(a, b, c, d);
+      } catch (err) {
+        if (err instanceof WebAssembly.RuntimeError) rebuild();
+        throw err;
+      }
+    };
+  }
+  return guarded;
+}
+
+function rebuild() {
+  wasm = guard(new WebAssembly.Instance(wasmModule, {}).exports);
+  generation++;
 }
 
 async function fetchWasm(source) {
@@ -74,7 +106,7 @@ const wordsOut = (n) => (n <= 0 ? new Uint32Array(0) : new Uint32Array(wasm.memo
 
 const registry = typeof FinalizationRegistry === 'undefined'
   ? null
-  : new FinalizationRegistry((handle) => wasm?.oxtty_drop(handle));
+  : new FinalizationRegistry(({ h, gen }) => { if (gen === generation) wasm?.oxtty_drop(h); });
 
 /** Cell attribute bits (`rowCells` word 3). */
 export const Attr = Object.freeze({
@@ -100,6 +132,12 @@ export const ColorKind = Object.freeze({ NAMED: 1, INDEXED: 2, RGB: 3 });
 /** Entries `setColors` takes: palette 0–255, then foreground, background, cursor. */
 export const COLOR_SLOTS = 259;
 
+/** @internal Forces a trap in the instance, to test crash recovery. */
+export function __trapForTest() {
+  // A feed from far outside linear memory traps on the first read.
+  wasm.oxtty_feed(wasm.oxtty_new(2, 1, 0), 0xfffffff0, 64);
+}
+
 /**
  * @param {number} packed
  * @returns {{ kind: 'named' | 'indexed' | 'rgb', value: number }}
@@ -120,22 +158,50 @@ export class Terminal {
   #syncTimer = null;
   #syncTimeoutMs;
   #onSyncFlush;
+  #onCrash;
+  #gen;
+  #scrollback;
+  // Host settings re-applied when the engine starts over after a crash.
+  #clipboard = { read: false, write: false };
+  #colors = null;
 
   /**
-   * @param {{ cols?: number, rows?: number, scrollback?: number, syncTimeoutMs?: number, onSyncFlush?: () => void }} [options]
+   * @param {{ cols?: number, rows?: number, scrollback?: number, syncTimeoutMs?: number, onSyncFlush?: () => void, onCrash?: (error: unknown) => void }} [options]
    */
-  constructor({ cols = 80, rows = 24, scrollback = 1000, syncTimeoutMs = 150, onSyncFlush } = {}) {
+  constructor({ cols = 80, rows = 24, scrollback = 1000, syncTimeoutMs = 150, onSyncFlush, onCrash } = {}) {
     const w = requireWasm();
-    this.#h = w.oxtty_new(cols, rows, scrollback);
-    this.#readSize();
+    this.#scrollback = scrollback;
     this.#syncTimeoutMs = syncTimeoutMs;
     this.#onSyncFlush = onSyncFlush;
-    registry?.register(this, this.#h, this);
+    this.#onCrash = onCrash;
+    this.#open(w, cols, rows);
+  }
+
+  #open(w, cols, rows) {
+    this.#gen = generation;
+    this.#h = w.oxtty_new(cols, rows, this.#scrollback);
+    this.#readSize();
+    registry?.register(this, { h: this.#h, gen: this.#gen }, this);
   }
 
   #handle() {
     if (!this.#h) throw new Error('oxtty: terminal is disposed');
+    if (this.#gen !== generation) this.#restart();
     return this.#h;
+  }
+
+  // The instance was rebuilt after a trap: this terminal's state is gone. Start
+  // over at the same size with the host's settings, and tell the host.
+  #restart() {
+    registry?.unregister(this);
+    if (this.#syncTimer) clearTimeout(this.#syncTimer);
+    this.#syncTimer = null;
+    this.#inPtr = 0;
+    this.#inCap = 0;
+    this.#open(wasm, this.#cols, this.#rows);
+    wasm.oxtty_set_clipboard_access(this.#h, this.#clipboard.read ? 1 : 0, this.#clipboard.write ? 1 : 0);
+    if (this.#colors) this.setColors(this.#colors);
+    this.#onCrash?.(new Error('oxtty: the engine crashed and this terminal was reset'));
   }
 
   /** Feeds program output. Strings are encoded as UTF-8. */
@@ -331,6 +397,7 @@ export class Terminal {
 
   /** Lets the program read and/or write the host clipboards with OSC 52 (both off by default). */
   setClipboardAccess({ read = false, write = false } = {}) {
+    this.#clipboard = { read, write };
     wasm.oxtty_set_clipboard_access(this.#handle(), read ? 1 : 0, write ? 1 : 0);
   }
 
@@ -358,9 +425,13 @@ export class Terminal {
   /** Colours (0xRRGGBB, COLOR_SLOTS of them) that answer OSC 4/10/11/12 queries; null stops answering. */
   setColors(colors) {
     const h = this.#handle();
-    if (!colors) return wasm.oxtty_set_colors(h, 0, 0);
+    if (!colors) {
+      this.#colors = null;
+      return wasm.oxtty_set_colors(h, 0, 0);
+    }
     if (colors.length !== COLOR_SLOTS) throw new RangeError(`oxtty: setColors takes ${COLOR_SLOTS} colours`);
     const words = Uint32Array.from(colors);
+    this.#colors = words;
     wasm.oxtty_set_colors(h, this.#stage(new Uint8Array(words.buffer)), words.byteLength);
   }
 
@@ -382,8 +453,10 @@ export class Terminal {
   dispose() {
     if (!this.#h) return;
     if (this.#syncTimer) clearTimeout(this.#syncTimer);
-    if (this.#inPtr) wasm.oxtty_free(this.#inPtr, this.#inCap);
-    wasm.oxtty_drop(this.#h);
+    if (this.#gen === generation) {
+      if (this.#inPtr) wasm.oxtty_free(this.#inPtr, this.#inCap);
+      wasm.oxtty_drop(this.#h);
+    }
     registry?.unregister(this);
     this.#h = 0;
     this.#inPtr = 0;

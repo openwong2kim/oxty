@@ -213,3 +213,29 @@ test('host policy: colour queries and OSC 52 only with the host, in xterm.js rep
   assert.throws(() => t.setColors([1, 2, 3]), RangeError);
   t.dispose();
 });
+
+test('a trap rebuilds the instance and every terminal starts over at its size with its settings', async () => {
+  const { __trapForTest } = await import('../dist/index.js');
+  const crashes = [];
+  const a = make({ cols: 30, rows: 5, onCrash: (e) => crashes.push(['a', e.message]) });
+  const b = make({ cols: 20, rows: 4, onCrash: (e) => crashes.push(['b', e.message]) });
+  a.write('before');
+  const colors = new Array(COLOR_SLOTS).fill(0);
+  colors[257] = 0x102030;
+  a.setColors(colors);
+  a.setClipboardAccess({ write: true });
+  assert.throws(() => __trapForTest(), WebAssembly.RuntimeError);
+  assert.equal(a.rowText(0), '');
+  assert.deepEqual([a.cols, a.rows, b.cols, b.rows], [30, 5, 20, 4]);
+  // Each terminal starts over on its own next call (here, reading its size).
+  assert.deepEqual(crashes.map((c) => c[0]), ['a', 'b']);
+  a.write('\x1b]11;?\x07\x1b]52;c;aGk=\x07after');
+  assert.equal(a.rowText(0), 'after');
+  assert.equal(new TextDecoder().decode(a.takeReplies()), '\x1b]11;rgb:1010/2020/3030\x1b\\');
+  assert.deepEqual(a.takeClipboardWrite(), { selection: 'c', text: 'hi' });
+  b.write('b ok');
+  assert.equal(b.rowText(0), 'b ok');
+  assert.equal(crashes.length, 2);
+  a.dispose();
+  b.dispose();
+});
