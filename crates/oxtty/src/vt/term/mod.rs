@@ -412,6 +412,10 @@ pub struct Config {
     /// oxtty: whether to read SGR 21 as double underline (xterm.js). vte passes it as bold off (`Attr::CancelBold`).
     /// The default `false` is the original Alacritty behavior. SGR 22 is passed separately by vte, so it is unaffected.
     pub sgr21_double_underline: bool,
+
+    /// oxtty: whether to answer device attributes (DA1 `CSI c`, DA2 `CSI > c`) as xterm.js does (`CSI ? 1 ; 2 c`, `CSI > 0 ; 276 ; 0 c`).
+    /// The default `false` is the original Alacritty behavior (`CSI ? 6 c`, `CSI > 0 ; version ; 1 c`).
+    pub xterm_device_attributes: bool,
 }
 
 impl Default for Config {
@@ -431,6 +435,7 @@ impl Default for Config {
             xterm_wide_leader: false,
             store_tabs: true,
             sgr21_double_underline: false,
+            xterm_device_attributes: false,
         }
     }
 }
@@ -1512,13 +1517,17 @@ impl<T: EventListener> Handler for Term<T> {
         match intermediate {
             None => {
                 trace!("Reporting primary device attributes");
-                let text = String::from("\x1b[?6c");
+                let text = String::from(if self.config.xterm_device_attributes { "\x1b[?1;2c" } else { "\x1b[?6c" });
                 self.event_proxy.send_event(Event::PtyWrite(text));
             },
             Some('>') => {
                 trace!("Reporting secondary device attributes");
                 let version = version_number("0.26.0");
-                let text = format!("\x1b[>0;{version};1c");
+                let text = if self.config.xterm_device_attributes {
+                    String::from("\x1b[>0;276;0c")
+                } else {
+                    format!("\x1b[>0;{version};1c")
+                };
                 self.event_proxy.send_event(Event::PtyWrite(text));
             },
             _ => debug!("Unsupported device attributes intermediate"),

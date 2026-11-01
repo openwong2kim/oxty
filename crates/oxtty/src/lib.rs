@@ -400,6 +400,8 @@ impl Engine {
             xterm_wide_leader: true,
             store_tabs: false,
             sgr21_double_underline: true,
+            // Like xterm.js, device attributes report a VT100 with advanced video (DA1) and xterm 276 (DA2).
+            xterm_device_attributes: true,
             // The engine takes OSC 52 and passes it on only with the host's consent (set_clipboard_access).
             osc52: Osc52::CopyPaste,
             ..Config::default()

@@ -74,6 +74,10 @@ single crate.
   `term::Config::store_tabs` (`false`: a tab no longer writes `'\t'` into the
   first blank cell it passes) and `term::Config::sgr21_double_underline`
   (vte reports SGR 21 as `Attr::CancelBold`; read it as a double underline).
+- `term::Config::xterm_device_attributes`, off (upstream) by default and
+  turned on by `oxtty::Engine`, answers DA1 with `CSI ? 1 ; 2 c` and DA2 with
+  `CSI > 0 ; 276 ; 0 c` as xterm.js does, instead of `CSI ? 6 c` and
+  Alacritty's version.
 - `Term::soft_reset` is DECSTR (`CSI ! p`), which vte drops. It resets what
   xterm.js `softReset` does: cursor shown, IRM/DECOM/DECCKM/DECKPAM, bracketed
   paste and focus reports off, autowrap on, full scroll region, default pen

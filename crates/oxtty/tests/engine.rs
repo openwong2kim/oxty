@@ -218,11 +218,13 @@ fn resize_reflows_all_but_the_cursor_paragraph() {
 }
 
 #[test]
-fn secondary_device_attributes_report_alacritty_version() {
-    // Even after embedding, the DA2 reply is Alacritty 0.26.0 (2600), not the oxtty version.
+fn device_attributes_match_xterm_js() {
+    // The replies @xterm/headless gives, so programs that probe the terminal see what they saw on xterm.js.
     let mut t = term();
+    t.feed(b"\x1b[c\x1b[0c");
+    assert_eq!(t.take_replies(), b"\x1b[?1;2c\x1b[?1;2c");
     t.feed(b"\x1b[>c");
-    assert_eq!(t.take_replies(), b"\x1b[>0;2600;1c");
+    assert_eq!(t.take_replies(), b"\x1b[>0;276;0c");
 }
 
 #[test]
