@@ -1,0 +1,54 @@
+// Borrowed by oxtty: xterm.js src/browser/services/MouseCoordsService.ts @ 08829c7eb6279dda2a9e86df901353a1a89858ca (npm @xterm/xterm 6.1.0-beta.336), MIT license — vendor-xterm/LICENSE
+// Excerpt (original lines cut out as is, see the oxtty note below)
+/**
+ * Copyright (c) 2026 The xterm.js authors. All rights reserved.
+ * @license MIT
+ */
+// oxtty excerpt: lines 9-52 verbatim; the relative imports of lines 6-8 are mapped to the oxtty modules below.
+import { getWindow } from 'browser/Dom';
+import { getCoords, getCoordsRelativeToElement } from 'browser/input/Mouse';
+import { ICharSizeService, IMouseCoordsService, IRenderService } from 'browser/services/MouseServices';
+
+export class MouseCoordsService implements IMouseCoordsService {
+  public serviceBrand: undefined;
+
+  constructor(
+    @ICharSizeService private readonly _charSizeService: ICharSizeService,
+    @IRenderService private readonly _renderService: IRenderService
+  ) {
+  }
+
+  public getCoords(event: {clientX: number, clientY: number}, element: HTMLElement, colCount: number, rowCount: number, isSelection?: boolean): [number, number] | undefined {
+    return getCoords(
+      getWindow(element),
+      event,
+      element,
+      colCount,
+      rowCount,
+      this._charSizeService.hasValidSize,
+      this._renderService.dimensions.css.cell.width,
+      this._renderService.dimensions.css.cell.height,
+      isSelection
+    );
+  }
+
+  public getMouseReportCoords(event: MouseEvent, element: HTMLElement): { col: number, row: number, x: number, y: number } | undefined {
+    const coords = getCoordsRelativeToElement(getWindow(element), event, element);
+    // The coordinates can be NaN, for example when the element was removed from the DOM (the
+    // computed padding is empty) or when the event has no clientX/clientY
+    if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) {
+      return undefined;
+    }
+    if (!this._charSizeService.hasValidSize) {
+      return undefined;
+    }
+    coords[0] = Math.min(Math.max(coords[0], 0), this._renderService.dimensions.css.canvas.width - 1);
+    coords[1] = Math.min(Math.max(coords[1], 0), this._renderService.dimensions.css.canvas.height - 1);
+    return {
+      col: Math.floor(coords[0] / this._renderService.dimensions.css.cell.width),
+      row: Math.floor(coords[1] / this._renderService.dimensions.css.cell.height),
+      x: Math.floor(coords[0]),
+      y: Math.floor(coords[1])
+    };
+  }
+}

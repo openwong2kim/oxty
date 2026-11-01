@@ -8,6 +8,7 @@ import type { ITerminalOptions } from '@xterm/xterm';
 import { BufferNamespace } from './buffer';
 import { LocalEngineView, Viewport } from './engine-view';
 import { InputController } from './input/InputController';
+import { MouseController } from './mouse/MouseController';
 import { CoreService, OptionsService } from './input/services';
 import type { Dimensions, Renderer, RendererOptions, Theme } from './renderer/types';
 import { WebglRenderer } from './renderer/WebglRenderer';
@@ -35,6 +36,11 @@ export interface TerminalOptions extends Omit<Partial<RendererOptions>, 'fontWei
   scrollOnUserInput?: boolean;
   disableStdin?: boolean;
   vtExtensions?: { kittyKeyboard?: boolean };
+  altClickMovesCursor?: boolean;
+  macOptionClickForcesSelection?: boolean;
+  scrollSensitivity?: number;
+  fastScrollSensitivity?: number;
+  mouseEventsRequireAlt?: boolean;
 }
 
 export interface Modes {
@@ -72,6 +78,7 @@ const DEFAULT_OPTIONS: TerminalOptions = {
   fontFamily: 'monospace', fontSize: 15, fontWeight: 'normal', fontWeightBold: 'bold', lineHeight: 1, letterSpacing: 0,
   minimumContrastRatio: 1, allowTransparency: false, theme: {},
   macOptionIsMeta: false, scrollOnUserInput: true, disableStdin: false, vtExtensions: {},
+  altClickMovesCursor: true, macOptionClickForcesSelection: false, scrollSensitivity: 1, fastScrollSensitivity: 5, mouseEventsRequireAlt: false,
 };
 const INIT_ONLY = new Set(['cols', 'rows', 'scrollback']);
 const RENDERER_OPTIONS: Record<keyof RendererOptions, true> = {
@@ -118,6 +125,7 @@ const STYLE = `
 .xterm .xterm-screen canvas { position: absolute; left: 0; top: 0; }
 .xterm .xterm-helpers { position: absolute; top: 0; z-index: 5; }
 .xterm.focus, .xterm:focus { outline: none; }
+.xterm.enable-mouse-events { cursor: default; }
 .xterm .xterm-helper-textarea { padding: 0; border: 0; margin: 0; position: absolute; opacity: 0; left: -9999em; top: 0; width: 0; height: 0; z-index: -5; white-space: nowrap; overflow: hidden; resize: none; }
 .xterm .composition-view { background: #000; color: #FFF; display: none; position: absolute; white-space: nowrap; z-index: 1; }
 .xterm .composition-view.active { display: block; }
@@ -140,6 +148,9 @@ export class Terminal {
   private _element: HTMLElement | undefined;
   private _screen: HTMLElement | undefined;
   private _renderer: Renderer | undefined;
+  private _mouse: MouseController | undefined;
+  /** Kept for `open`, which creates the mouse. */
+  private _customWheelEventHandler: ((event: WheelEvent) => boolean) | undefined;
   /** Renderer and DOM listeners added by `open`. */
   private _openListeners: (() => void)[] = [];
   private _frame = 0;
@@ -256,7 +267,7 @@ export class Terminal {
       applicationKeypadMode: !!(m & Mode.APP_KEYPAD),
       bracketedPasteMode: !!(m & Mode.BRACKETED_PASTE),
       insertMode: !!(m & Mode.INSERT),
-      mouseTrackingMode: m & Mode.MOUSE_MOTION ? 'any' : m & Mode.MOUSE_DRAG ? 'drag' : m & Mode.MOUSE_CLICK ? 'vt200' : 'none',
+      mouseTrackingMode: m & Mode.MOUSE_X10 ? 'x10' : m & Mode.MOUSE_MOTION ? 'any' : m & Mode.MOUSE_DRAG ? 'drag' : m & Mode.MOUSE_CLICK ? 'vt200' : 'none',
       originMode: !!(m & Mode.ORIGIN),
       reverseWraparoundMode: false,
       sendFocusMode: !!(m & Mode.FOCUS_EVENTS),
@@ -309,6 +320,24 @@ export class Terminal {
     const renderer = rendererFactory(screen, this.cols, this.rows, options);
     this._renderer = renderer;
     this._input.open(element, helpers, renderer);
+    const terminal = this;
+    const mouse = new MouseController({
+      element,
+      screenElement: screen,
+      viewport: this._viewport,
+      get dimensions() { return terminal.dimensions; },
+      buffer: this.buffer.active,
+      options: this._options,
+      // Mouse reports are user input, like keys
+      sendData: data => this._coreService.triggerDataEvent(data, true),
+      sendBinary: data => {
+        if (!this._options.disableStdin) this._onBinary.fire(data);
+      },
+      scrollLines: amount => this.scrollLines(amount),
+      focus: () => this.focus(),
+    });
+    mouse.attachCustomWheelEventHandler(this._customWheelEventHandler);
+    this._mouse = mouse;
     // Focus picks the cursor style; the hidden textarea focuses inside the element.
     const onFocusIn = (): void => this._setFocused(true);
     const onFocusOut = (e: FocusEvent): void => this._setFocused(element.contains(e.relatedTarget as Node | null));
@@ -318,6 +347,10 @@ export class Terminal {
     this._openListeners.push(
       () => element.removeEventListener('focusin', onFocusIn),
       () => element.removeEventListener('focusout', onFocusOut),
+      () => {
+        mouse.dispose();
+        this._mouse = undefined;
+      },
       renderer.onDimensionsChange(() => {
         this._syncScreenSize();
         this._onDimensionsChange.fire(renderer.dimensions);
@@ -364,6 +397,7 @@ export class Terminal {
   public reset(): void {
     this._highSurrogate = '';
     this._engine.write('\x1bc');
+    this._mouse?.reset();
     this._handleEvents();
     this._redraw('all');
     this._afterChange();
@@ -447,6 +481,12 @@ export class Terminal {
     this._input.attachCustomKeyEventHandler(handler);
   }
 
+  /** `handler` sees every wheel event first; returning false stops the terminal from handling it. */
+  public attachCustomWheelEventHandler(handler: (event: WheelEvent) => boolean): void {
+    this._customWheelEventHandler = handler;
+    this._mouse?.attachCustomWheelEventHandler(handler);
+  }
+
   /** Drops the kitty keyboard flags the program pushed, on both screens; keys are encoded the legacy way at once. */
   public resetKittyKeyboard(): void {
     this._engine.resetKittyKeyboard();
@@ -487,6 +527,7 @@ export class Terminal {
     if (key === 'clipboard') this._applyClipboard();
     if (key === 'vtExtensions') this._applyVtExtensions();
     this._inputOptions.fire(key);
+    this._mouse?.handleOptionChange(key);
     if (key in RENDERER_OPTIONS && this._renderer) {
       const { width, height } = this._renderer.dimensions.css.cell;
       this._renderer.setOptions({ [key]: value });
@@ -593,6 +634,7 @@ export class Terminal {
     const renderer = this._renderer;
     if (!renderer) return;
     const changed = this._viewport.apply(this._view.takeFrame());
+    this._mouse?.syncModes();
     const dirty = this._hostDirty;
     this._hostDirty = new Set();
     renderer.render(this._viewport, changed, dirty);

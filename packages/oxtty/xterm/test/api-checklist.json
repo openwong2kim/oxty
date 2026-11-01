@@ -69,8 +69,8 @@
       "reason": "Drops keys, pastes and replies to the program like xterm.js; the textarea turns read-only."
     },
     "options.altClickMovesCursor": {
-      "status": "step 2",
-      "reason": "Mouse input."
+      "status": "supported",
+      "reason": "Alt+click sends arrow keys to the clicked cell (xterm.js 6.1 moveToCellSequence)."
     },
     "options.vtExtensions.kittyKeyboard": {
       "status": "supported",
@@ -85,8 +85,8 @@
       "reason": "wmux turns it off for headless parity; the engine follows xterm.js with it off."
     },
     "options.macOptionClickForcesSelection": {
-      "status": "step 4",
-      "reason": "Selection."
+      "status": "supported",
+      "reason": "Option+click is not reported to the program; the selection it then makes is step 4."
     },
     "options.linkHandler": {
       "status": "later",
@@ -166,7 +166,7 @@
     },
     "Terminal.modes": {
       "status": "supported",
-      "reason": "From engine mode bits. Engine gap: X10 mouse (CSI ? 9 h) is not tracked, so mouseTrackingMode never reports x10 (step 2). reverseWraparoundMode and win32InputMode are always false."
+      "reason": "From engine mode bits, X10 mouse included. reverseWraparoundMode and win32InputMode are always false."
     },
     "Terminal.unicode.activeVersion": {
       "status": "supported",
@@ -234,7 +234,7 @@
     },
     "Terminal.onBinary": {
       "status": "supported",
-      "reason": "Event exists; fired by mouse input from step 2, never by output."
+      "reason": "Fired by default-encoding mouse reports, never by output."
     },
     "Terminal.onResize": {
       "status": "supported",
@@ -458,7 +458,7 @@
     },
     "Synthetic mouse events on .xterm-screen": {
       "status": "step 4",
-      "reason": "Selection."
+      "reason": "Mouse reports handle them (listener based); selection from them is step 4."
     },
     "write() from inside parser handlers": {
       "status": "later",

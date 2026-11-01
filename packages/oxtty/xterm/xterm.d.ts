@@ -89,6 +89,16 @@ export interface ITerminalOptions {
   scrollOnUserInput?: boolean;
   /** Drops all input, and the replies to the program, like xterm.js (default false). */
   disableStdin?: boolean;
+  /** Alt+click moves the shell cursor there with arrow keys (default true). */
+  altClickMovesCursor?: boolean;
+  /** macOS: Option+click selects even while the program reports the mouse (default false). */
+  macOptionClickForcesSelection?: boolean;
+  /** Wheel scroll speed multiplier (default 1). */
+  scrollSensitivity?: number;
+  /** Wheel scroll speed multiplier while Alt is held (default 5). */
+  fastScrollSensitivity?: number;
+  /** Mouse reports only while Alt is held; without Alt the mouse selects (default false). */
+  mouseEventsRequireAlt?: boolean;
   /** `kittyKeyboard`: the program may push kitty keyboard flags (`CSI > flags u`), and keys are then encoded that way. */
   vtExtensions?: { kittyKeyboard?: boolean };
 }
@@ -238,6 +248,8 @@ export class Terminal {
   paste(data: string): void;
   /** `customKeyEventHandler` sees every keydown, keypress and keyup first; returning false stops the terminal from handling it. */
   attachCustomKeyEventHandler(customKeyEventHandler: (event: KeyboardEvent) => boolean): void;
+  /** `customWheelEventHandler` sees every wheel event first; returning false stops the terminal from handling it. */
+  attachCustomWheelEventHandler(customWheelEventHandler: (event: WheelEvent) => boolean): void;
   /** oxtty: drops the kitty keyboard flags the program pushed, on both screens, at once. */
   resetKittyKeyboard(): void;
   /**
