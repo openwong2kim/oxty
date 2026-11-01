@@ -43,7 +43,9 @@
   },
   "devDependencies": {
     "@xterm/addon-unicode11": "0.10.0-beta.301",
+    "@xterm/addon-webgl": "0.20.0-beta.329",
     "@xterm/headless": "6.1.0-beta.303",
+    "@xterm/xterm": "6.1.0-beta.336",
     "esbuild": "0.25.10",
     "playwright-core": "1.55.1",
     "typescript": "5.9.3"
