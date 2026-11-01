@@ -400,6 +400,7 @@ pub struct Config {
     pub xterm_line_wrap: bool,
 
     /// oxtty: when overwriting the trailing cell of a wide character leaves the leading cell, whether to turn that cell into a blank with the current pen (xterm.js).
+    /// Also whether erasing, inserting or deleting cells that takes one half of a wide character blanks the other half (xterm.js `BufferLine`).
     /// The default `false` is the original Alacritty behavior (only clears the character and keeps the original colors and attributes).
     pub xterm_wide_leader: bool,
 
@@ -769,6 +770,38 @@ impl<T> Term<T> {
         }
         let last = self.grid.last_column();
         self.grid[previous][last].flags.remove(Flags::WRAPLINE);
+    }
+
+    /// oxtty: the pen as a blank cell, minus the width flags `input` sets on it while writing a
+    /// wide char (xterm.js `getNullCell(curAttr)`).
+    fn pen_blank(&self) -> Cell {
+        let mut blank = self.grid.cursor.template.clone();
+        blank.c = ' ';
+        blank.flags.remove(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER);
+        blank
+    }
+
+    /// oxtty (`xterm_wide_leader`): replaces the cell at `column` with `blank`, keeping the row's
+    /// WRAPLINE if it is the last cell.
+    fn blank_cell(&mut self, line: Line, column: usize, blank: Cell) {
+        let cell = &mut self.grid[line][Column(column)];
+        let wrap = cell.flags & Flags::WRAPLINE;
+        *cell = blank;
+        cell.flags |= wrap;
+    }
+
+    /// oxtty (`xterm_wide_leader`): xterm.js `replaceCells` erases a wide char whole when
+    /// `left..right` takes only one of its halves.
+    fn erase_split_wide(&mut self, line: Line, left: usize, right: usize, bg: Color) {
+        if left > 0 && self.grid[line][Column(left - 1)].flags.contains(Flags::WIDE_CHAR) {
+            self.blank_cell(line, left - 1, bg.into());
+        }
+        if left < right
+            && right < self.columns()
+            && self.grid[line][Column(right - 1)].flags.contains(Flags::WIDE_CHAR)
+        {
+            self.blank_cell(line, right, bg.into());
+        }
     }
 
     /// oxtty: whether `line` continues into the next row (WRAPLINE on its last cell).
@@ -1157,13 +1190,13 @@ impl<T> Term<T> {
             let point = self.grid.cursor.point;
             if wide && point.column < self.last_column() {
                 self.grid[point.line][point.column + 1].flags.remove(Flags::WIDE_CHAR_SPACER);
-            } else if point.column > 0 {
+            } else if point.column > 0
+                && self.grid[point.line][point.column - 1].flags.contains(Flags::WIDE_CHAR)
+            {
+                // oxtty: only a real left half. A wide char a resize clipped in the last column
+                // and a right half an ICH moved away have none (xterm.js `print`).
                 if self.config.xterm_wide_leader {
-                    // The pen, minus the width flags `input` sets on it while writing a wide char.
-                    let mut blank = self.grid.cursor.template.clone();
-                    blank.c = ' ';
-                    blank.flags.remove(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER);
-                    self.grid[point.line][point.column - 1] = blank;
+                    self.grid[point.line][point.column - 1] = self.pen_blank();
                 } else {
                     self.grid[point.line][point.column - 1].clear_wide();
                 }
@@ -1262,10 +1295,27 @@ impl<T: EventListener> Handler for Term<T> {
         if self.mode.contains(TermMode::INSERT) && self.grid.cursor.point.column + width < columns {
             let line = self.grid.cursor.point.line;
             let col = self.grid.cursor.point.column;
+            // oxtty: xterm.js `insertCells` with the pen's blank. A wide char at the cursor or
+            // pushed into the last column loses its other half, so it is blanked whole.
+            let blank = self.config.xterm_wide_leader.then(|| self.pen_blank());
+            if let Some(blank) = &blank {
+                if col.0 > 0 && self.grid[line][col - 1].flags.contains(Flags::WIDE_CHAR) {
+                    self.grid[line][col - 1] = blank.clone();
+                }
+            }
             let row = &mut self.grid[line][..];
 
             for col in (col.0..(columns - width)).rev() {
                 row.swap(col + width, col);
+            }
+            if let Some(blank) = blank {
+                row[col.0..col.0 + width].fill(blank.clone());
+                if row[col.0 + width].flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    row[col.0 + width] = blank.clone();
+                }
+                if row[columns - 1].flags.contains(Flags::WIDE_CHAR) {
+                    self.blank_cell(line, columns - 1, blank);
+                }
             }
         }
 
@@ -1366,6 +1416,10 @@ impl<T: EventListener> Handler for Term<T> {
         let line = cursor.point.line;
         self.damage.damage_line(line.0 as usize, 0, self.columns() - 1);
         let wraps = self.row_wraps(line);
+        // oxtty: xterm.js `insertCells` blanks a wide char whose right half is at the cursor.
+        if self.config.xterm_wide_leader {
+            self.erase_split_wide(line, source.0, source.0, bg);
+        }
 
         let row = &mut self.grid[line][..];
 
@@ -1377,6 +1431,11 @@ impl<T: EventListener> Handler for Term<T> {
         // fill in between source and dest with blanks.
         for cell in &mut row[source.0..destination] {
             *cell = bg.into();
+        }
+        // oxtty: and a wide char pushed into the last column, which lost its right half.
+        let last = row.len() - 1;
+        if self.config.xterm_wide_leader && row[last].flags.contains(Flags::WIDE_CHAR) {
+            self.blank_cell(line, last, bg.into());
         }
         // xterm keeps "the next row continues this one" while cells move.
         if self.config.xterm_line_wrap {
@@ -1734,6 +1793,9 @@ impl<T: EventListener> Handler for Term<T> {
         let line = cursor.point.line;
         self.damage.damage_line(line.0 as usize, start.0, end.0);
         let wraps = self.row_wraps(line);
+        if self.config.xterm_wide_leader {
+            self.erase_split_wide(line, start.0, end.0, bg);
+        }
         let row = &mut self.grid[line];
         for cell in &mut row[start..end] {
             *cell = bg.into();
@@ -1770,6 +1832,14 @@ impl<T: EventListener> Handler for Term<T> {
         let end = columns - count;
         for cell in &mut row[end..] {
             *cell = bg.into();
+        }
+        // oxtty: xterm.js `deleteCells` blanks a right half moved to the cursor without its left
+        // half, and a left half whose right half was deleted.
+        if self.config.xterm_wide_leader {
+            if row[start].flags.contains(Flags::WIDE_CHAR_SPACER) {
+                self.blank_cell(line, start, bg.into());
+            }
+            self.erase_split_wide(line, start, start, bg);
         }
         if self.config.xterm_line_wrap {
             self.set_row_wraps(line, wraps);
@@ -1866,6 +1936,10 @@ impl<T: EventListener> Handler for Term<T> {
         let to_end = right.0 == self.columns();
         let row = &mut self.grid[point.line];
         let keep_wrap = xterm && to_end && row[last].flags.contains(Flags::WRAPLINE);
+        if self.config.xterm_wide_leader {
+            self.erase_split_wide(point.line, left.0, right.0, bg);
+        }
+        let row = &mut self.grid[point.line];
         for cell in &mut row[left..right] {
             *cell = bg.into();
         }
@@ -1989,6 +2063,9 @@ impl<T: EventListener> Handler for Term<T> {
 
                 // Clear up to the current column in the current line.
                 let end = cmp::min(cursor.column + 1, Column(self.columns()));
+                if self.config.xterm_wide_leader {
+                    self.erase_split_wide(cursor.line, 0, end.0, bg);
+                }
                 for cell in &mut self.grid[cursor.line][..end] {
                     *cell = bg.into();
                 }
@@ -2002,6 +2079,9 @@ impl<T: EventListener> Handler for Term<T> {
             },
             ansi::ClearMode::Below => {
                 let cursor = self.grid.cursor.point;
+                if self.config.xterm_wide_leader {
+                    self.erase_split_wide(cursor.line, cursor.column.0, self.columns(), bg);
+                }
                 for cell in &mut self.grid[cursor.line][cursor.column..] {
                     *cell = bg.into();
                 }

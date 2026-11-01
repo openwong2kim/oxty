@@ -52,10 +52,16 @@ single crate.
   it mid-row). IL and DL move the boundary flags as xterm's line splices do.
   vte routes IND and NEL through `linefeed` as well, so they also end a
   continuation there, unlike xterm. `oxtty::Engine` turns it on.
+- Writing over a right half blanks the cell to its left only when that cell
+  is the left half, so a wide char a resize clipped in the last column (or a
+  lone right half) does not take its neighbour with it.
 - Three cell rules from xterm.js are options, each off (upstream) by default
   and turned on by `oxtty::Engine`: `term::Config::xterm_wide_leader`
   (overwriting the right half of a wide char leaves the left half as a blank
-  in the current pen, not a blank that keeps the old colours),
+  in the current pen, not a blank that keeps the old colours; and as in
+  xterm.js `BufferLine`, ECH, EL, ED, DCH, ICH and insert-mode printing that
+  take one half of a wide char blank the other half too, keeping the row's
+  WRAPLINE. ICH at a right half moves it on alone, as xterm.js does),
   `term::Config::store_tabs` (`false`: a tab no longer writes `'\t'` into the
   first blank cell it passes) and `term::Config::sgr21_double_underline`
   (vte reports SGR 21 as `Attr::CancelBold`; read it as a double underline).
