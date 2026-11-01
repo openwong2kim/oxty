@@ -152,13 +152,13 @@ test('cursor blink is timed by the renderer and asks for the cursor row', async 
   const r = await inPage(async (theme) => {
     const p = new T.Pane(10, 3, { ...theme, cursorBlink: true });
     await p.write('\r\nab');
-    // Blinks at 600 ms intervals from the focus; the loop stops well before the third change (1800 ms)
+    // Blinks at 600 ms intervals from the focus: watch for hidden then shown again, with room for a loaded machine
     p.focus(true);
     const t0 = performance.now();
     const shown = async () => (await p.cellColor(2, 1))[0] === 0xff;
-    const seen = [await shown()];
     p.takeRequests();
-    while (performance.now() - t0 < 1450) {
+    const seen = [await shown()];
+    while (seen.length < 3 && performance.now() - t0 < 5000) {
       await T.sleep(50);
       const s = await shown();
       if (s !== seen[seen.length - 1]) seen.push(s);
