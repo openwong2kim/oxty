@@ -14,7 +14,7 @@
   - **Two WebAssembly modules.** The engine (`oxtty.wasm`, raw ABI, no imports, ≤300 KB, its hand-written loader `index.js` kept by owner decision) and the front end (`crates/oxtty-web`, wasm-bindgen, `xterm_web_bg.wasm`, ≤600 KB enforced by `scripts/build-web.sh`). The front end reaches the engine through `index.js`, so an engine crash still rebuilds only the engine instance and the page keeps running; `oxtty/xterm`'s `init()` loads both.
   - **D7 kept**: rendering, input, selection and accessibility read only `Events`/`Frame`/`Viewport` (`crates/oxtty-web/src/engine.rs`).
   - **Rules** (crate docs of `oxtty-web`): no JS calls while a `RefCell` is borrowed (listeners may write, resize or dispose), front-end panics are bugs (`panic = "abort"` stops every terminal on the page), no `Closure::forget`, only macrotask timers, borrowed xterm.js logic credited per file.
-  - **Renderer**: raw WebGL2 through web-sys, glyphs rasterised with Canvas2D `fillText` (same font fallback as xterm.js), the context state machine and 17-context LRU ported from `0510a7d`.
+  - **Renderer**: raw WebGL2 through web-sys, glyphs rasterised with Canvas2D `fillText` (same font fallback as xterm.js). For the memory goal it shares **one WebGL2 context and one glyph atlas per page** across all panes (not one per pane as xterm.js and the old front end did), so 17+ panes neither hit Chrome's ~16-context limit nor multiply GPU memory; hidden panes skip drawing.
   - **Input encoding moves into the engine crate** (`crates/oxtty/src/input`, platform-neutral `KeyInput`/`MouseInput`), pulling M3 forward.
   - The xterm.js parity harnesses come back as JS tests against the new build (`packages/oxtty/test/web`).
 
@@ -70,7 +70,7 @@ xterm.js splits into an **engine layer** (`common`: bytes → screen state) and 
 ### 2.3 Long-term direction
 
 - When wmux moves off Electron to a native Rust app, it will need a terminal engine anyway. oxtty is groundwork for that path.
-- Note: in terms of memory, the largest share in wmux is the agent processes (about 82% in a single sample at peak, 2,309 / 2,819 MiB). oxtty's primary value is **correctness (one engine) and platform independence**, more than memory savings.
+- **Primary goal (owner decision, 2026-11-01): minimal memory with many terminals at once.** wmux fans out 17 terminals in parallel, and the terminal side must not blow up RAM: per-pane cost (cells, scrollback, WebGL context, glyph atlas) is the first design criterion, measured as the memory of 17 concurrent panes against xterm.js. Correctness (one engine) and platform independence come with it. For scale: in a single peak sample the agent processes were about 82% of wmux's memory (2,309 / 2,819 MiB), so the terminal's share is what oxtty can cut.
 
 ---
 
