@@ -155,7 +155,9 @@ impl Terminal {
 }
 
 impl Shared {
-    /// Creates the renderer in `open` (`.xterm-screen` must be set) and sizes the screen to it.
+    /// Creates the renderer in `open` (`.xterm-screen` must be set) and sizes the screen to it. Without WebGL2 (a
+    /// blocklisted GPU, jsdom) the terminal runs without drawing, as xterm.js runs with its DOM renderer: input,
+    /// buffer and events work, `dimensions` stays undefined, and the page is warned once.
     pub(crate) fn create_renderer(self: &Rc<Self>) -> Result<(), JsValue> {
         let mut core = self.core.borrow_mut();
         let (Some(screen), Some(element)) = (core.screen.clone(), core.element.clone()) else {
@@ -170,7 +172,20 @@ impl Shared {
         let engine = core.view.engine();
         let (cols, rows) = (engine.cols(), engine.rows());
         let options = options::parse(&core.options);
-        let renderer = WebglRenderer::new(&screen, &element, cols, rows, &options, wake)?;
+        let renderer = match WebglRenderer::new(&screen, &element, cols, rows, &options, wake) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                drop(core);
+                thread_local!(static WARNED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+                if !WARNED.with(|w| w.replace(true)) {
+                    web_sys::console::warn_2(
+                        &"oxtty/xterm: no renderer, the terminal does not draw:".into(),
+                        &error,
+                    );
+                }
+                return Ok(());
+            }
+        };
         core.renderer = Some(Box::new(renderer));
         drop(core);
         self.sync_screen_size();

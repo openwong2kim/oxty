@@ -110,7 +110,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    10
+    12
 }
 
 #[no_mangle]
@@ -384,6 +384,17 @@ pub extern "C" fn oxtty_take_damage(h: u32) -> i32 {
 #[no_mangle]
 pub extern "C" fn oxtty_take_replies(h: u32) -> u32 {
     with(h, 0, |t| set_out(t.take_replies()))
+}
+
+/// The same replies one by one: returns their count, OUT holds them in order and OUT32 each one's byte length.
+#[no_mangle]
+pub extern "C" fn oxtty_take_reply_list(h: u32) -> u32 {
+    with(h, 0, |t| {
+        let replies = t.take_reply_list();
+        OUT32.with_borrow_mut(|out| *out = replies.iter().map(|r| r.len() as u32).collect());
+        set_out(replies.concat());
+        replies.len() as u32
+    })
 }
 
 /// New title into OUT and its length, or -1 if unchanged.

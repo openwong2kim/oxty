@@ -61,6 +61,35 @@ test('the scrollbar next to xterm.js', { timeout: 120000 }, async (t) => {
       assert.ok(Number.parseFloat(ox.slider[5]) >= 20, 'the slider is at least 20px');
     });
 
+    await t.test('a fresh terminal shows the bar like xterm.js from the first frame, on the theme background', async () => {
+      const state = () => page.evaluate(() => window.made.map((term) => {
+        const root = term.element.querySelector(':scope > .xterm-scrollable-element');
+        const bar = root.querySelector(':scope > .xterm-scrollbar.xterm-vertical');
+        return [bar.className, bar.querySelector(':scope > .xterm-slider').style.height, getComputedStyle(term.element).backgroundColor, getComputedStyle(root).backgroundColor];
+      }));
+      for (const [lines, theme] of [[0, undefined], [100, undefined], [0, { background: '#203040' }], [100, { background: '#203040' }]]) {
+        await setup({ ...OPTIONS, theme });
+        const label = `${lines} lines, theme ${JSON.stringify(theme)}`;
+        const seen = [await state()];
+        await page.evaluate(async (n) => {
+          if (n) await window.lines(n);
+          await window.frames(2);
+        }, lines);
+        seen.push(await state());
+        await wait(150);
+        seen.push(await state());
+        await wait(1000);
+        seen.push(await state());
+        for (const [k, [ox, xt]] of seen.entries()) assert.deepEqual(ox, xt, `${label}, step ${k}`);
+        assert.match(seen[3][0][0], /xterm-invisible/, `${label}: hidden in the end`);
+      }
+      // The background follows a theme change, like xterm.js.
+      await page.evaluate(() => { for (const term of window.made) term.options.theme = { background: '#405060' }; });
+      const [ox, xt] = await state();
+      assert.deepEqual(ox, xt);
+      assert.equal(ox[2], 'rgb(64, 80, 96)');
+    });
+
     await t.test('pointer over the terminal reveals the bar and leaving fades it; a scroll shows it for 500 ms', async () => {
       await setup();
       await page.evaluate(async () => {

@@ -58,6 +58,13 @@ test('npm pack ships the entry points, both WebAssembly modules, the types and t
   assert.deepEqual(paths.filter((p) => !p.startsWith('dist/') && !['package.json', 'README.md', 'LICENSE-APACHE', 'THIRD_PARTY_NOTICES.md'].includes(p)), []);
 });
 
+test('typesVersions maps oxtty/xterm to shipped types for moduleResolution "node", which ignores exports', () => {
+  assert.deepEqual(pkg.typesVersions, { '*': { xterm: ['dist/xterm.d.ts'] } });
+  assert.equal(pkg.exports['./xterm'].types, `./${pkg.typesVersions['*'].xterm[0]}`);
+  const [{ files }] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: pkgDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+  assert.ok(files.some((f) => f.path === pkg.typesVersions['*'].xterm[0]));
+});
+
 test('the shipped types are the source types and do not depend on @xterm/xterm', async () => {
   const types = await readFile(new URL('../../dist/xterm.d.ts', import.meta.url), 'utf8');
   assert.equal(types, await readFile(new URL('../../src/xterm.d.ts', import.meta.url), 'utf8'));

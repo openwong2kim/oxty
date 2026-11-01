@@ -693,26 +693,57 @@ impl Shared {
         let scrollbar = option(&core.options, "scrollbar");
         let show = get(&scrollbar, "showScrollbar").as_bool().unwrap_or(true);
         let width = get(&scrollbar, "width").as_f64().unwrap_or(DEFAULT_WIDTH);
-        match (&core.scrollbar, show) {
+        let created = match (&core.scrollbar, show) {
             (None, true) => {
                 let theme = get(&core.options, "theme");
                 if let Ok(bar) = Scrollbar::new(self, &screen, width) {
                     bar.set_theme(&theme);
                     core.scrollbar = Some(bar);
                 }
-                drop(core);
-                self.schedule_frame();
+                true
             }
-            (Some(bar), true) => bar.set_width(width),
-            (Some(_), false) => core.scrollbar = None,
-            (None, false) => {}
+            (Some(bar), true) => {
+                bar.set_width(width);
+                false
+            }
+            (Some(_), false) => {
+                core.scrollbar = None;
+                false
+            }
+            (None, false) => false,
+        };
+        drop(core);
+        self.apply_background();
+        if created {
+            self.schedule_frame();
         }
     }
 
     pub(crate) fn apply_scrollbar_theme(&self) {
+        {
+            let core = self.core.borrow();
+            if let Some(bar) = &core.scrollbar {
+                bar.set_theme(&get(&core.options, "theme"));
+            }
+        }
+        self.apply_background();
+    }
+
+    /// `Viewport`'s theme listener: the terminal element and the scrollable element take the theme background, so
+    /// the strip beside the canvas (the scrollbar's) shows it rather than the page behind.
+    fn apply_background(&self) {
         let core = self.core.borrow();
+        let css = get(&get(&core.options, "theme"), "background")
+            .as_string()
+            .and_then(|c| css_to_color(&c))
+            .map_or_else(|| "#000000".to_owned(), |c| c.css);
+        if let Some(element) = &core.element {
+            let _ = element.style().set_property("background-color", &css);
+        }
         if let Some(bar) = &core.scrollbar {
-            bar.set_theme(&get(&core.options, "theme"));
+            if let Ok(inner) = bar.inner.try_borrow() {
+                let _ = inner.root.style().set_property("background-color", &css);
+            }
         }
     }
 

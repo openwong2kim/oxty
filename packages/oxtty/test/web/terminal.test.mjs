@@ -50,6 +50,18 @@ test('events are IEvent properties that also work unbound, like xterm.js', async
   t.dispose();
 });
 
+test('several replies in one write fire one onData each, like @xterm/headless', async () => {
+  const data = 'out\x1b[c\x1b[>c\x1b[6n\x1b[5n\x1b[4$p\x1b[?2004$p\r\n';
+  const t = new m.Terminal({ cols: 40, rows: 6 });
+  const x = new xtermHeadless.Terminal({ cols: 40, rows: 6, allowProposedApi: true });
+  const [ox, xt] = [collect(t, 'onData'), collect(x, 'onData')];
+  await Promise.all([write(t, data), write(x, data)]);
+  assert.deepEqual(ox, xt);
+  assert.equal(ox.length, 6);
+  t.dispose();
+  x.dispose();
+});
+
 test('DA1 and DA2 replies are the bytes xterm.js sends', async () => {
   for (const [query, reply] of [['\x1b[c', '\x1b[?1;2c'], ['\x1b[>c', '\x1b[>0;276;0c']]) {
     const t = new m.Terminal();
@@ -76,10 +88,10 @@ test('colour queries answer with the theme, also after it changes at runtime', a
   const t = new m.Terminal({ theme: { foreground: '#123456' } });
   const data = collect(t, 'onData');
   await write(t, '\x1b]10;?\x07\x1b]11;?\x07');
-  assert.deepEqual(data.splice(0), ['\x1b]10;rgb:1212/3434/5656\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\']);
+  assert.deepEqual(data.splice(0), ['\x1b]10;rgb:1212/3434/5656\x1b\\', '\x1b]11;rgb:0000/0000/0000\x1b\\']);
   t.options.theme = { background: '#abcdef', red: 'rgb(1, 2, 3)' };
   await write(t, '\x1b]11;?\x07\x1b]4;1;?\x07');
-  assert.deepEqual(data, ['\x1b]11;rgb:abab/cdcd/efef\x1b\\\x1b]4;1;rgb:0101/0202/0303\x1b\\']);
+  assert.deepEqual(data, ['\x1b]11;rgb:abab/cdcd/efef\x1b\\', '\x1b]4;1;rgb:0101/0202/0303\x1b\\']);
   t.dispose();
 });
 
@@ -199,6 +211,17 @@ test('loadAddon absorbs unicode11 and webgl addons and rejects the rest', () => 
   assert.throws(() => t.loadAddon({ activate(term) { term.registerLinkProvider({}); }, dispose() {} }), /unsupported addon/);
   assert.throws(() => t.loadAddon({ activate() {}, dispose() {} }), /unsupported addon/);
   t.dispose();
+});
+
+test('kittyKeyboardFlags and modes are current right after a write, without any frame', async () => {
+  const t = new m.Terminal({ vtExtensions: { kittyKeyboard: true } });
+  await write(t, '\x1b[>5u\x1b[?2004h');
+  assert.equal(t.kittyKeyboardFlags, 5);
+  assert.equal(t.modes.bracketedPasteMode, true);
+  await write(t, '\x1b[<u');
+  assert.equal(t.kittyKeyboardFlags, 0);
+  t.dispose();
+  assert.equal(t.kittyKeyboardFlags, 0);
 });
 
 test('reset clears the screen at once', async () => {

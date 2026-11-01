@@ -98,6 +98,9 @@ test('replies, title, bell', () => {
   assert.equal(t.takeTitle(), 'build');
   assert.equal(t.takeTitle(), null);
   assert.equal(t.takeBells(), 1);
+  t.write('out\x1b[c\x1b[6n\x1b[4$p\r\n');
+  assert.deepEqual(t.takeReplyList().map((r) => new TextDecoder().decode(r)), ['\x1b[?1;2c', '\x1b[3;10R', '\x1b[4;2$y']);
+  assert.deepEqual(t.takeReplyList(), []);
 });
 
 test('synchronized output: program ends it', () => {

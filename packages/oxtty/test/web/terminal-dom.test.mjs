@@ -95,6 +95,21 @@ test('the opened terminal next to xterm.js', async (t) => {
       });
       assert.ok(rendered[1].length > 0, 'xterm.js rendered');
       assert.deepEqual(rendered[0], rendered[1]);
+      // Writes that change no cell still refresh the cursor row; frames without writes report nothing.
+      const quiet = await page.evaluate(async () => {
+        const out = [];
+        for (const data of ['\x1b[4;5H', '\x1b7\x1b[1;1Hx\x1b8', '\x1b[?25l', '\x1b[?25h', '', null]) {
+          const seen = window.made.map((term) => {
+            const list = [];
+            return [list, term.onRender((e) => list.push([e.start, e.end]))];
+          });
+          if (data !== null) await Promise.all(window.made.map((term) => new Promise((resolve) => term.write(data, resolve))));
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          out.push(seen.map(([list, listener]) => (listener.dispose(), list)));
+        }
+        return out;
+      });
+      for (const [ox, xt] of quiet) assert.deepEqual(ox, xt);
     });
 
     await t.test('a font size change fires onDimensionsChange with the new cell and resizes the screen', async () => {

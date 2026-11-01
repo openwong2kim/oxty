@@ -385,7 +385,7 @@
     },
     "SerializeAddon.serialize": {
       "status": "unsupported",
-      "reason": "loadAddon throws; Terminal.ansiSnapshot() (engine) replaces it. coldFrame's scrollback:0 + excludeModes variant needs an engine option (later)."
+      "reason": "loadAddon throws; Terminal.ansiSnapshot() (engine) replaces it. with the same scrollback and excludeModes options (coldFrame's { scrollback: 0, excludeModes: true }); buffer.test.mjs compares it with the addon."
     },
     "WebLinksAddon": {
       "status": "supported",

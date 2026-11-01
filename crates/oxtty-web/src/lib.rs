@@ -7,8 +7,8 @@
 //! # Rules every module follows
 //!
 //! - **Boundary (PRD D7).** Rendering, input, selection and accessibility read [`engine::Events`],
-//!   [`engine::Frame`] and [`engine::Viewport`] only. The buffer API, search and serialize may call
-//!   [`engine::Engine`]; nothing else does.
+//!   [`engine::Frame`] and [`engine::Viewport`] only. The buffer API, search, serialize and the public getters
+//!   that report engine state (`modes`, `kittyKeyboardFlags`) may call [`engine::Engine`]; nothing else does.
 //! - **Re-entrancy.** Never call JS (event listeners, write callbacks, host handlers) while a `RefCell` borrow is
 //!   held: collect, drop the borrow, then call. A listener may `write`, `resize` or `dispose` the terminal.
 //!   Exported methods take `&self`. Renderers and DOM listeners never call back into the terminal; they queue

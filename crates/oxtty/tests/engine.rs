@@ -110,15 +110,75 @@ fn damage_reports_only_changed_lines() {
         Damage::Lines { lines, .. } => assert!(lines.contains(&2) && lines.len() <= 2, "{lines:?}"),
         Damage::Full => panic!("expected partial damage"),
     }
-    match t.take_damage() {
-        Damage::Lines { lines, .. } => assert!(
-            lines.iter().all(|&l| l == 2),
-            "only the cursor line: {lines:?}"
-        ),
-        Damage::Full => panic!("expected partial damage"),
-    }
+    // Nothing changed: no lines, not even the cursor's.
+    assert_eq!(
+        t.take_damage(),
+        Damage::Lines {
+            scroll: 0,
+            lines: vec![]
+        }
+    );
     t.resize(100, 30);
     assert_eq!(t.take_damage(), Damage::Full);
+}
+
+#[test]
+fn idle_frames_report_no_lines_but_writes_under_a_still_cursor_do() {
+    let lines = |t: &mut Engine| match t.take_damage() {
+        Damage::Lines { lines, .. } => lines,
+        Damage::Full => panic!("expected partial damage"),
+    };
+    let mut t = Engine::new(10, 5, 100);
+    t.feed(b"\x1b[2;1H");
+    t.take_damage();
+    t.feed(b"ab");
+    assert_eq!(lines(&mut t), [1]);
+    assert_eq!(lines(&mut t), [] as [u16; 0]);
+    // A cursor move damages the rows it left and entered.
+    t.feed(b"\x1b[4;3H");
+    assert_eq!(lines(&mut t), [1, 3]);
+    // The cursor does not move: the last column, a combining mark, a cursor style or visibility change.
+    t.feed(b"\x1b[4;10H");
+    lines(&mut t);
+    t.feed(b"X");
+    assert_eq!(lines(&mut t), [3]);
+    t.feed(b"\x1b[5;2Ha");
+    lines(&mut t);
+    t.feed("\u{301}".as_bytes());
+    assert_eq!(lines(&mut t), [4]);
+    t.feed(b"\x1b[?25l\x1b[5 q");
+    assert_eq!(lines(&mut t), [] as [u16; 0]);
+    // Insert mode no longer damages everything on each frame, only the line written to.
+    t.feed(b"\x1b[4h\x1b[1;1Hz");
+    assert_eq!(lines(&mut t), [0, 4]);
+    assert_eq!(lines(&mut t), [] as [u16; 0]);
+}
+
+#[test]
+fn reply_list_keeps_each_reply_whole_and_in_order() {
+    let mut t = term();
+    let mut colors = [0u32; COLOR_SLOTS];
+    colors[257] = 0x1e1e2e;
+    t.set_colors(Some(colors));
+    t.set_focus(Some(false));
+    t.feed(b"out\x1b[c\x1b]11;?\x07\x1b[6n\x1b[?1004h\x1b]11;?\x1b\\\x1b[4$p\r\n");
+    let bg = b"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\".to_vec();
+    assert_eq!(
+        t.take_reply_list(),
+        [
+            b"\x1b[?1;2c".to_vec(),
+            bg.clone(),
+            b"\x1b[1;4R".to_vec(),
+            b"\x1b[O".to_vec(),
+            bg,
+            b"\x1b[4;2$y".to_vec(),
+        ]
+    );
+    assert!(t.take_reply_list().is_empty());
+    // The concatenated form is the same bytes and drops the boundaries too.
+    t.feed(b"\x1b[5n\x1b[6n");
+    assert_eq!(t.take_replies(), b"\x1b[0n\x1b[2;1R");
+    assert!(t.take_reply_list().is_empty());
 }
 
 #[test]
@@ -331,6 +391,40 @@ fn row_extras_carry_combining_underline_colour_and_links() {
         ]
     );
     assert!(!t.row_extras(24, &mut extras));
+}
+
+#[test]
+fn both_halves_of_a_wide_char_carry_its_link() {
+    let mut t = term();
+    t.feed("\x1b]8;id=w;https://oxtty.dev\x1b\\\x1b[58;5;1m漢\x1b]8;;\x1b\\".as_bytes());
+    let mut cells = Vec::new();
+    t.row_cells(0, &mut cells);
+    assert_ne!(cells[1].attrs & attr::WIDE_SPACER, 0);
+    assert_ne!(cells[1].attrs & attr::HYPERLINK, 0);
+    let mut extras = Vec::new();
+    assert!(t.row_extras(0, &mut extras));
+    let link = Some(Hyperlink {
+        id: "w".into(),
+        uri: "https://oxtty.dev".into(),
+    });
+    // The underline colour stays with the left half, which draws the whole glyph.
+    assert_eq!(
+        extras,
+        [
+            CellExtra {
+                col: 0,
+                text: None,
+                underline_color: Some(color::INDEXED | 1),
+                hyperlink: link.clone()
+            },
+            CellExtra {
+                col: 1,
+                text: None,
+                underline_color: None,
+                hyperlink: link
+            },
+        ]
+    );
 }
 
 #[test]

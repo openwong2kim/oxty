@@ -118,8 +118,6 @@ struct Current {
     link: Link,
     underline: bool,
     pointer: bool,
-    /// What the link's rows showed when it was hovered (see [`after_render`]).
-    shown: u64,
 }
 
 /// The providers' replies for the hovered line (xterm.js `_activeProviderReplies`).
@@ -593,13 +591,11 @@ fn handle_new_link(shared: &Rc<Shared>, link: Link) {
         // OSC links always use underline and pointer decorations
         _ => (true, true),
     };
-    let shown = shown(shared, link.range);
     shared.links.existing(|inner| {
         inner.hover.current = Some(Current {
             link: link.clone(),
             underline,
             pointer,
-            shown,
         })
     });
     link_hover(shared, &link, &event, underline, pointer);
@@ -820,27 +816,14 @@ pub(crate) fn after_resize(shared: &Rc<Shared>) {
 
 /// Output changed viewport rows `start..=end`: a hovered link on them is let go and looked up again (xterm.js
 /// `onRenderedViewportChange` while a link is hovered).
-///
-/// The engine reports the cursor row on every frame, and xterm.js re-renders only rows whose content changed: the
-/// link is looked up again only when its rows show something else than when it was hovered.
 pub(crate) fn after_render(shared: &Rc<Shared>, start: u32, end: u32) {
     let hovered = shared
         .links
-        .existing(|inner| {
-            inner
-                .hover
-                .current
-                .as_ref()
-                .map(|c| (c.link.range, c.shown))
-        })
+        .existing(|inner| inner.hover.current.as_ref().map(|c| c.link.range))
         .flatten();
-    let Some((range, before)) = hovered else {
+    let Some([_, sy, _, ey]) = hovered else {
         return;
     };
-    if shown(shared, range) == before {
-        return;
-    }
-    let [_, sy, _, ey] = range;
     let ydisp = f64::from(buffer::active(shared).viewport_y());
     // When start is 0 a scroll most likely occurred, make sure links above the fold also get cleared.
     let start = if start == 0 {
@@ -859,29 +842,6 @@ pub(crate) fn after_render(shared: &Rc<Shared>, start: u32, end: u32) {
             ask_for_link(shared, position, false);
         }
     }
-}
-
-/// A hash (FNV-1a) of the view position and of the viewport cells of a link's rows.
-fn shown(shared: &Shared, [_, sy, _, ey]: [f64; 4]) -> u64 {
-    let Ok(core) = shared.core.try_borrow() else {
-        return 0;
-    };
-    let v = &core.viewport;
-    let top = f64::from(v.history_length) - f64::from(v.display_offset);
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut add = |word: u32| {
-        hash = (hash ^ u64::from(word)).wrapping_mul(0x0100_0000_01b3);
-    };
-    add(v.display_offset);
-    add(v.history_length);
-    let mut y = sy - 1.0 - top;
-    while y <= ey - 1.0 - top {
-        if y >= 0.0 && y < f64::from(v.rows) {
-            v.row(y as u32).iter().for_each(|&word| add(word));
-        }
-        y += 1.0;
-    }
-    hash
 }
 
 pub(crate) fn dispose(shared: &Shared) {
@@ -968,15 +928,9 @@ impl OscLine {
             })
     }
 
-    /// The link of cell `x` (xterm.js `urlId`): its index in `links`. The right half of a wide character has the
-    /// link of its left half, as in xterm.js (the engine keeps it on the left half only).
+    /// The link of cell `x` (xterm.js `urlId`): its index in `links`. The right half of a wide character carries
+    /// the link of its left half in the engine, as in xterm.js.
     fn url_id(&self, x: u32) -> Option<usize> {
-        let spacer = x > 0
-            && self
-                .line
-                .get_cell(x.into(), None)
-                .is_some_and(|c| c.width() == 0);
-        let x = if spacer { x - 1 } else { x };
         self.links.iter().position(|(col, _, _)| *col == x)
     }
 

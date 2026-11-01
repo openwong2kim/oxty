@@ -62,8 +62,9 @@ extern "C" {
     pub fn kitty_flags(this: &Engine) -> Result<u32, JsValue>;
     #[wasm_bindgen(method, catch, js_name = takeDamage)]
     fn take_damage_js(this: &Engine) -> Result<JsValue, JsValue>;
-    #[wasm_bindgen(method, catch, js_name = takeReplies)]
-    pub fn take_replies(this: &Engine) -> Result<Uint8Array, JsValue>;
+    /// An array of `Uint8Array`, one per reply.
+    #[wasm_bindgen(method, catch, js_name = takeReplyList)]
+    pub fn take_reply_list(this: &Engine) -> Result<Array, JsValue>;
     #[wasm_bindgen(method, catch, js_name = takeTitle)]
     pub fn take_title(this: &Engine) -> Result<Option<String>, JsValue>;
     #[wasm_bindgen(method, catch, js_name = takeBells)]
@@ -85,8 +86,9 @@ extern "C" {
     /// `{ backend?: 'conpty' | 'winpty', buildNumber?: number }` or `null`: xterm.js 6.1's Windows PTY rules.
     #[wasm_bindgen(method, catch, js_name = setWindowsPty)]
     pub fn set_windows_pty(this: &Engine, pty: &JsValue) -> Result<(), JsValue>;
+    /// `options` is `{ scrollback?: number, excludeModes?: boolean }` or `undefined`.
     #[wasm_bindgen(method, catch, js_name = ansiSnapshot)]
-    pub fn ansi_snapshot(this: &Engine) -> Result<JsValue, JsValue>;
+    pub fn ansi_snapshot(this: &Engine, options: &JsValue) -> Result<JsValue, JsValue>;
     /// `{ first, rows, text, cells }`: the logical line row `line` is on, as search reads it; `null` outside the
     /// buffer. `cells` maps each UTF-16 unit of `text` to its cell (`row * cols + col` from `first`, bit 31 wide).
     #[wasm_bindgen(method, catch, js_name = searchLine)]
@@ -234,8 +236,8 @@ pub struct ClipboardWrite {
 /// replies flow while the page is hidden.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Events {
-    /// Bytes for the PTY (status reports, OSC 52 and colour query answers): `onData`.
-    pub replies: Vec<u8>,
+    /// Bytes for the PTY (status reports, OSC 52 and colour query answers), one entry per reply: one `onData` each.
+    pub replies: Vec<Vec<u8>>,
     /// New title, or `None` if unchanged: `onTitleChange`.
     pub title: Option<String>,
     pub bells: u32,
@@ -302,7 +304,15 @@ impl EngineView for LocalEngineView {
     fn take_events(&mut self) -> Events {
         let e = &self.engine;
         let mut events = Events {
-            replies: e.take_replies().map(|r| r.to_vec()).unwrap_or_default(),
+            replies: e
+                .take_reply_list()
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|r| r.dyn_into::<Uint8Array>().ok())
+                        .map(|r| r.to_vec())
+                        .collect()
+                })
+                .unwrap_or_default(),
             title: e.take_title().ok().flatten(),
             bells: e.take_bells().unwrap_or(0),
             resets: e.take_resets().unwrap_or(0),

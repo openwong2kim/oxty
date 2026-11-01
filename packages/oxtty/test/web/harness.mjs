@@ -35,7 +35,9 @@ export async function withPage(page, fn, { viewport = { width: 1000, height: 700
     if (path === '/') return res.writeHead(200, { 'content-type': 'text/html' }).end(html);
     if (path.includes('..')) return res.writeHead(404).end();
     try {
-      res.writeHead(200, { 'content-type': TYPES[extname(path)] ?? 'application/octet-stream' }).end(await readFile(join(root, path)));
+      // Read before sending headers, so a missing file is a plain 404 (e.g. a devDependency not installed yet).
+      const body = await readFile(join(root, path));
+      res.writeHead(200, { 'content-type': TYPES[extname(path)] ?? 'application/octet-stream' }).end(body);
     } catch {
       res.writeHead(404).end();
     }

@@ -106,6 +106,17 @@ test('input matches xterm.js', async (t) => {
       }
     });
 
+    await t.test('replies fire one onData each, also several in one write, like xterm.js', async () => {
+      const queries = ['\x1b[c', '\x1b[>c', '\x1b[6n', '\x1b[5n', '\x1b[4$p', '\x1b[?2004$p', '\x1b]10;?\x07', '\x1b]11;?\x1b\\', '\x1b]4;1;?\x07', '\x1b[?1004h'];
+      await setup(page);
+      for (const q of queries) await write(page, q);
+      await write(page, `out${queries.join('')}\x1b]10;?;11;?\x07\r\n`);
+      const sent = await take(page);
+      assert.deepEqual(sent.ox, sent.xt);
+      // Each query once alone, then all of them in one write, the double colour query answered twice.
+      assert.equal(sent.ox.length, 2 * queries.length + 2);
+    });
+
     await t.test('a custom key handler returning false stops the key', async () => {
       await setup(page);
       await page.evaluate(() => {

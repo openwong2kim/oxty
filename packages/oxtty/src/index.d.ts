@@ -173,6 +173,8 @@ export class Terminal {
   takeDamage(): Damage;
   /** Bytes to write back to the PTY (status reports, …). */
   takeReplies(): Uint8Array;
+  /** The same replies one by one, in order: xterm.js fires one `onData` per reply. */
+  takeReplyList(): Uint8Array[];
   /** New window title, or null if unchanged ("" = reset). */
   takeTitle(): string | null;
   takeBells(): number;

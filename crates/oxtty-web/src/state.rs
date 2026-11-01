@@ -25,6 +25,14 @@ export interface IModes {
     readonly wraparoundMode: boolean;
 }
 
+/** What `ansiSnapshot` leaves out, like `@xterm/addon-serialize`'s `serialize` options. */
+export interface AnsiSnapshotOptions {
+    /** Keep only the newest this many history lines (0: the screen alone). All of them by default. */
+    scrollback?: number;
+    /** Leave out the modes and what continues the output, so the bytes only paint the screen. */
+    excludeModes?: boolean;
+}
+
 /** Bytes that rebuild the screen, scrollback included, in a fresh terminal of the same size, or why they cannot. */
 export type AnsiSnapshot =
     | { ok: true; payload: Uint8Array }
@@ -133,11 +141,15 @@ impl Terminal {
     }
 
     /// Bytes that rebuild this screen, scrollback included, in a fresh terminal of the same size (the engine's
-    /// `ansiSnapshot`; replaces `@xterm/addon-serialize`).
+    /// `ansiSnapshot`; replaces `@xterm/addon-serialize`). `{ scrollback: 0, excludeModes: true }` paints just the
+    /// screen it shows (a cold frame), as `serialize` with the same options does.
     #[wasm_bindgen(js_name = ansiSnapshot, unchecked_return_type = "AnsiSnapshot")]
-    pub fn ansi_snapshot(&self) -> Result<JsValue, JsValue> {
+    pub fn ansi_snapshot(
+        &self,
+        #[wasm_bindgen(unchecked_optional_param_type = "AnsiSnapshotOptions")] options: JsValue,
+    ) -> Result<JsValue, JsValue> {
         match self.shared.core.try_borrow() {
-            Ok(core) if !core.disposed => core.view.engine().ansi_snapshot(),
+            Ok(core) if !core.disposed => core.view.engine().ansi_snapshot(&options),
             _ => Err("oxtty/xterm: the terminal is disposed".into()),
         }
     }
