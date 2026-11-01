@@ -40,7 +40,8 @@ test('open, frames, options, fit, crash recovery and dispose drive the renderer 
   assert.deepEqual(facts.fit.dimensionChanges, [12, 10]);
 
   const { crash } = facts;
-  assert.equal(crash.last.dirty, 'all', 'full redraw after the crash');
+  // The full frame may come before or with the frame that draws 'ok'
+  assert.ok(crash.dirty.includes('all'), 'full redraw after the crash');
   assert.deepEqual(crash.selections, [undefined], 'selection cleared');
   assert.equal(crash.line, 'ok');
   assert.equal(crash.last.rows[0], 'ok');

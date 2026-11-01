@@ -156,10 +156,11 @@ async function main(): Promise<Record<string, unknown>> {
     if (String(data) === 'boom') (engine as unknown as { __trapForTest(): void }).__trapForTest();
     feed(data);
   };
+  const beforeCrash = renderer.renders.length;
   await written(t, 'boom');
   await written(t, 'ok');
   await frame();
-  facts.crash = { last: renderer.renders.at(-1), selections: renderer.selections, line: t.buffer.active.getLine(0)!.translateToString(true) };
+  facts.crash = { last: renderer.renders.at(-1), dirty: renderer.renders.slice(beforeCrash).map(r => r.dirty), selections: renderer.selections, line: t.buffer.active.getLine(0)!.translateToString(true) };
 
   const before = renderer.renders.length;
   t.write('late');
