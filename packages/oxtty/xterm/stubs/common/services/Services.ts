@@ -1,10 +1,20 @@
 // [oxtty stub] Replaces xterm.js src/common/services/Services.ts (396 lines, 22 services).
-// Interfaces keeping only the members the copied renderer parts actually call. Implementations are in src/services.ts.
+// Interfaces keeping only the members the copied renderer parts actually call. Implementations are in src/renderer/services.ts.
+import type { ITerminalOptions } from '@xterm/xterm';
 import { IColor } from 'common/Types';
+import { IDisposable } from 'vs/base/common/lifecycle';
 
+export type { ITheme } from '@xterm/xterm';
+
+// ThemeService and CharSizeService take it as a constructor parameter decorator (createDecorator in xterm.js), which does nothing here
+export const IOptionsService = (_target: unknown, _key: string | symbol | undefined, _index: number): void => {};
 export interface IOptionsService {
-  // GlyphRenderer: rescaleOverlappingGlyphs, CellColorResolver: fontSize
-  readonly rawOptions: { readonly rescaleOverlappingGlyphs: boolean, readonly fontSize: number };
+  // GlyphRenderer: rescaleOverlappingGlyphs, CellColorResolver: fontSize, CharSizeService: fontFamily·fontSize, ThemeService: theme
+  readonly rawOptions: Required<ITerminalOptions>;
+  // ThemeService: theme·minimumContrastRatio
+  onSpecificOptionChange<T extends keyof ITerminalOptions>(key: T, listener: (arg1: Required<ITerminalOptions>[T]) => any): IDisposable;
+  // CharSizeService: fontFamily·fontSize
+  onMultipleOptionChange(keys: (keyof ITerminalOptions)[], listener: () => any): IDisposable;
 }
 
 export interface IUnicodeService {
