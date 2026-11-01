@@ -69,6 +69,12 @@ impl History {
         self.len
     }
 
+    /// A number for row `i` that no other row ever gets: rows are never
+    /// changed once stored, and a reflow stores them again under new numbers.
+    pub(crate) fn id(&self, i: usize) -> u64 {
+        self.first + i as u64
+    }
+
     /// Row `i`, 0 being the oldest.
     pub(crate) fn row(&self, i: usize) -> Row<Cell> {
         let abs = self.first + i as u64;

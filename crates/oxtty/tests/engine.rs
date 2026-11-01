@@ -510,3 +510,26 @@ fn replies_stop_growing_when_the_host_never_takes_them() {
     t.feed(b"\x1b[6n");
     assert_eq!(t.take_replies(), b"\x1b[1;1R");
 }
+
+#[test]
+fn cached_history_rows_follow_a_reflow() {
+    let mut packed = Engine::new(40, 5, 500);
+    let mut plain = Engine::new_uncompressed(40, 5, 500);
+    for i in 0..200 {
+        let line = format!("{i:03} {}\r\n", "word ".repeat(i % 13));
+        packed.feed(line.as_bytes());
+        plain.feed(line.as_bytes());
+    }
+    let rows = |t: &Engine| {
+        (1..=t.history_len() as i32)
+            .map(|n| t.row_text(-n))
+            .collect::<Vec<_>>()
+    };
+    // Reading fills the row cache; the reflow must not serve those rows again.
+    assert_eq!(rows(&packed), rows(&plain));
+    for (cols, lines) in [(23, 5), (61, 7), (40, 5)] {
+        packed.resize(cols, lines);
+        plain.resize(cols, lines);
+        assert_eq!(rows(&packed), rows(&plain), "{cols}x{lines}");
+    }
+}

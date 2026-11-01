@@ -20,6 +20,7 @@
 //! [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 0.26
 //! built into this crate as [`vt`] (see `src/vt/PATCHES.md`).
 
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -203,6 +204,10 @@ impl From<ClipboardType> for Clipboard {
 /// foreground, background and cursor, as `0xRRGGBB`.
 pub const COLOR_SLOTS: usize = 259;
 
+/// Decoded compressed-history rows kept for repeated reads (a scrolled-back
+/// view redraws the same rows every frame).
+const ROW_CACHE: usize = 64;
+
 /// Unanswered clipboard reads and untaken writes kept at most (oldest dropped first).
 const CLIPBOARD_QUEUE: usize = 16;
 
@@ -346,8 +351,10 @@ pub struct Engine {
     view_moved: bool,
     // 입력 경계에 걸친 DECSTR(`CSI Ps ! p`)을 찾는 중인 상태.
     decstr: DecstrScan,
-    // 색 질의에 답할 호스트 색. 없으면 질의에 답하지 않는다.
+    // Host colours that answer colour queries; none means queries go unanswered.
     colors: Option<Box<[u32; COLOR_SLOTS]>>,
+    // Recently decoded history rows by their History::id, newest last.
+    row_cache: RefCell<VecDeque<(u64, Row<AlacCell>)>>,
 }
 
 impl Engine {
@@ -411,6 +418,7 @@ impl Engine {
             view_moved: false,
             decstr: DecstrScan::default(),
             colors: None,
+            row_cache: RefCell::new(VecDeque::with_capacity(ROW_CACHE)),
         }
     }
 
@@ -465,8 +473,17 @@ impl Engine {
         let stored = self.stored()?;
         let older = stored.len() as i32;
         if line < -recent && line >= -(recent + older) {
-            let row = stored.row((older + recent + line) as usize);
-            return Some(f(&row));
+            let i = (older + recent + line) as usize;
+            let id = stored.id(i);
+            let mut cache = self.row_cache.borrow_mut();
+            if let Some((_, row)) = cache.iter().find(|(at, _)| *at == id) {
+                return Some(f(row));
+            }
+            if cache.len() == ROW_CACHE {
+                cache.pop_front();
+            }
+            cache.push_back((id, stored.row(i)));
+            return Some(f(&cache.back()?.1));
         }
         None
     }
