@@ -72,7 +72,7 @@ test('titles and bells become events', async () => {
   t.dispose();
 });
 
-test('colour queries answer with the theme, also after it changes at runtime', { todo: 'options.theme' }, async () => {
+test('colour queries answer with the theme, also after it changes at runtime', async () => {
   const t = new m.Terminal({ theme: { foreground: '#123456' } });
   const data = collect(t, 'onData');
   await write(t, '\x1b]10;?\x07\x1b]11;?\x07');
@@ -182,7 +182,7 @@ test('options read back the xterm.js defaults', () => {
   t.dispose();
 });
 
-test('loadAddon absorbs unicode11 and webgl addons and rejects the rest', { todo: 'Terminal.loadAddon, Unicode11Addon (load), WebglAddon (load), FitAddon' }, () => {
+test('loadAddon absorbs unicode11 and webgl addons and rejects the rest', () => {
   const t = new m.Terminal();
   t.loadAddon(new Unicode11Addon());
   t.unicode.activeVersion = '11';
