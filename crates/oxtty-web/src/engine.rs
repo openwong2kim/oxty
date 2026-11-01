@@ -82,6 +82,9 @@ extern "C" {
     /// 259 colours (0xRRGGBB): palette 0–255, foreground, background, cursor; `null` stops answering OSC 4/10/11/12.
     #[wasm_bindgen(method, catch, js_name = setColors)]
     pub fn set_colors(this: &Engine, colors: &JsValue) -> Result<(), JsValue>;
+    /// `{ backend?: 'conpty' | 'winpty', buildNumber?: number }` or `null`: xterm.js 6.1's Windows PTY rules.
+    #[wasm_bindgen(method, catch, js_name = setWindowsPty)]
+    pub fn set_windows_pty(this: &Engine, pty: &JsValue) -> Result<(), JsValue>;
     #[wasm_bindgen(method, catch, js_name = ansiSnapshot)]
     pub fn ansi_snapshot(this: &Engine) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(method)]

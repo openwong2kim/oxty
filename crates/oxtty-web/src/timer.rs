@@ -1,8 +1,8 @@
 //! Timers through the JS globals, so the terminal core also runs in Node (tests). Only macrotasks
 //! (`setTimeout`) and animation frames: the IME and input ordering borrowed from xterm.js depends on it.
 //!
-//! The callback is handed to JS with `Closure::once_into_js`, which frees it after it runs; a timer cancelled
-//! before it fires leaks that one closure (only on dispose).
+//! A timer owns its callback and frees it when dropped, also when cancelled before it fires; dropping it from
+//! inside its own callback is fine (wasm-bindgen frees a running closure once the call returns).
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -32,33 +32,55 @@ pub fn queue(f: impl FnOnce() + 'static) {
 }
 
 /// A `setTimeout` cleared when dropped.
-pub struct Timeout(JsValue);
+pub struct Timeout {
+    id: JsValue,
+    _callback: Closure<dyn FnMut()>,
+}
 
 impl Timeout {
     pub fn new(ms: i32, f: impl FnOnce() + 'static) -> Self {
-        Self(set_timeout(Closure::once_into_js(f).unchecked_ref(), ms))
+        let callback = once(f);
+        Self {
+            id: set_timeout(callback.as_ref().unchecked_ref(), ms),
+            _callback: callback,
+        }
     }
 }
 
 impl Drop for Timeout {
     fn drop(&mut self) {
-        clear_timeout(&self.0);
+        clear_timeout(&self.id);
     }
 }
 
 /// A `requestAnimationFrame` cancelled when dropped; `None` where there are no frames (Node).
-pub struct AnimationFrame(JsValue);
+pub struct AnimationFrame {
+    id: JsValue,
+    _callback: Closure<dyn FnMut()>,
+}
 
 impl AnimationFrame {
     pub fn new(f: impl FnOnce() + 'static) -> Option<Self> {
-        request_animation_frame(Closure::once_into_js(f).unchecked_ref())
-            .ok()
-            .map(Self)
+        let callback = once(f);
+        let id = request_animation_frame(callback.as_ref().unchecked_ref()).ok()?;
+        Some(Self {
+            id,
+            _callback: callback,
+        })
     }
 }
 
 impl Drop for AnimationFrame {
     fn drop(&mut self) {
-        cancel_animation_frame(&self.0);
+        cancel_animation_frame(&self.id);
     }
+}
+
+fn once(f: impl FnOnce() + 'static) -> Closure<dyn FnMut()> {
+    let mut f = Some(f);
+    Closure::new(move || {
+        if let Some(f) = f.take() {
+            f();
+        }
+    })
 }

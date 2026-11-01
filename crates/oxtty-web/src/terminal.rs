@@ -53,6 +53,18 @@ pub(crate) struct Core {
     /// A high surrogate a string `write` ended with, joined to the next one.
     high_surrogate: Option<u16>,
     pub disposed: bool,
+    /// The size when disposed: xterm.js keeps answering `cols`/`rows` after `dispose`.
+    disposed_size: (u32, u32),
+}
+
+impl Core {
+    pub fn size(&self) -> (u32, u32) {
+        if self.disposed {
+            return self.disposed_size;
+        }
+        let engine = self.view.engine();
+        (engine.cols(), engine.rows())
+    }
 }
 
 /// Every xterm.js event the terminal fires. Members are added by the modules that fire them.
@@ -154,6 +166,7 @@ impl Terminal {
                 queue: VecDeque::new(),
                 high_surrogate: None,
                 disposed: false,
+                disposed_size: (0, 0),
             }),
             events: Emitters::default(),
             state: Cell::new(State::default()),
@@ -165,18 +178,19 @@ impl Terminal {
         });
         *slot.borrow_mut() = Rc::downgrade(&shared);
         shared.apply_clipboard();
+        shared.apply_windows_pty();
         shared.state.set(shared.read_state());
         Ok(Terminal { shared })
     }
 
     #[wasm_bindgen(getter)]
     pub fn cols(&self) -> u32 {
-        self.shared.core.borrow().view.engine().cols()
+        self.shared.core.borrow().size().0
     }
 
     #[wasm_bindgen(getter)]
     pub fn rows(&self) -> u32 {
-        self.shared.core.borrow().view.engine().rows()
+        self.shared.core.borrow().size().1
     }
 
     #[wasm_bindgen(getter)]
@@ -386,6 +400,7 @@ impl Terminal {
         if core.disposed {
             return;
         }
+        core.disposed_size = core.size();
         core.disposed = true;
         core.queue.clear();
         // Hook: input, mouse, selection and accessibility remove their listeners here.
@@ -564,8 +579,20 @@ impl Shared {
         if key == "clipboard" {
             self.apply_clipboard();
         }
+        if key == "windowsPty" {
+            self.apply_windows_pty();
+        }
         // Hook: theme (engine colours, renderer), renderer options, input, mouse and accessibility options.
         Ok(())
+    }
+
+    fn apply_windows_pty(&self) {
+        let core = self.core.borrow();
+        let mut pty = get(&core.options, "windowsPty");
+        if !pty.is_object() {
+            pty = JsValue::NULL;
+        }
+        let _ = core.view.engine().set_windows_pty(&pty);
     }
 
     fn apply_clipboard(&self) {

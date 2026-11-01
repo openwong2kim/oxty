@@ -7,5 +7,15 @@ export * from './xterm_web.js';
 
 /** Loads the engine and the front end once. Sources default to the files next to this module. */
 export async function init(engine, frontEnd) {
-  await Promise.all([initEngine(engine), initFrontEnd(frontEnd === undefined ? undefined : { module_or_path: frontEnd })]);
+  await Promise.all([initEngine(engine), initFrontEnd({ module_or_path: frontEnd ?? (await defaultFrontEnd()) })]);
+}
+
+// Node cannot fetch file: URLs; read the file there, like index.js does for the engine.
+async function defaultFrontEnd() {
+  const url = new URL('./xterm_web_bg.wasm', import.meta.url);
+  if (url.protocol !== 'file:') return url;
+  // Keep the name in a variable so browser bundlers do not follow the node: module.
+  const fsModule = 'node:fs/promises';
+  const { readFile } = await import(/* @vite-ignore */ /* webpackIgnore: true */ fsModule);
+  return readFile(url);
 }

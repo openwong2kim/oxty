@@ -17,7 +17,7 @@ test('constructing before init() throws an error that says to await init()', { t
   assert.throws(() => new xterm.Terminal(), /await init\(\)/);
 });
 
-test('init() without arguments loads both modules in Node', { todo: 'init() default source in Node (front end fetches a file: URL)' }, async () => {
+test('init() without arguments loads both modules in Node', async () => {
   await xterm.init();
   const t = new xterm.Terminal({ cols: 10, rows: 2 });
   t.dispose();
@@ -45,7 +45,7 @@ test('the exports map points at built files and oxtty/xterm is dist/xterm.js', (
   assert.equal(require.resolve('oxtty/oxtty.wasm'), `${pkgDir}dist/oxtty.wasm`);
 });
 
-test('both WebAssembly modules can be resolved through the exports map, for init() with bytes', { todo: 'package.json exports "./xterm_web_bg.wasm"' }, () => {
+test('both WebAssembly modules can be resolved through the exports map, for init() with bytes', () => {
   assert.equal(require.resolve('oxtty/xterm_web_bg.wasm'), `${pkgDir}dist/xterm_web_bg.wasm`);
 });
 

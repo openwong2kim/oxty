@@ -232,7 +232,7 @@ test('an engine crash inside a listener settles the queued callbacks in order an
   term.dispose();
 });
 
-test('size and options still read after dispose, like xterm.js', { todo: 'Terminal.cols, Terminal.rows after dispose' }, () => {
+test('size and options still read after dispose, like xterm.js', () => {
   const t = new m.Terminal({ cols: 12, rows: 3 });
   const x = new xtermHeadless.Terminal({ cols: 12, rows: 3, allowProposedApi: true });
   t.dispose();

@@ -201,7 +201,7 @@ test('no leaks over 100 terminals: DOM listeners and elements stay flat', { time
   });
 });
 
-test('no leaks over 100 terminals: both WebAssembly memories stay flat', { todo: 'the front-end memory grows about 320 bytes per opened terminal (crates/oxtty-web open/dispose)', timeout: 120000 }, async () => {
+test('no leaks over 100 terminals: both WebAssembly memories stay flat', { timeout: 120000 }, async () => {
   await withCycles(async (cycle, measure) => {
     const before = await measure();
     await cycle(100);

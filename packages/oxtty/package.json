@@ -14,7 +14,8 @@
       "types": "./dist/xterm.d.ts",
       "default": "./dist/xterm.js"
     },
-    "./oxtty.wasm": "./dist/oxtty.wasm"
+    "./oxtty.wasm": "./dist/oxtty.wasm",
+    "./xterm_web_bg.wasm": "./dist/xterm_web_bg.wasm"
   },
   "files": [
     "dist",
