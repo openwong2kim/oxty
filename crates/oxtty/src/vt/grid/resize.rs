@@ -150,7 +150,9 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         }
 
         // Remove the linewrap special case, by moving the cursor outside of the grid.
-        if self.cursor.input_needs_wrap && reflow {
+        // oxtty: with the xterm.js resize (cursor paragraph kept) also without reflow: xterm leaves the
+        // cursor past the old last column, which the wider grid makes a real column.
+        if self.cursor.input_needs_wrap && (reflow || self.keep_cursor_paragraph) {
             self.cursor.input_needs_wrap = false;
             self.cursor.point.column += 1;
         }

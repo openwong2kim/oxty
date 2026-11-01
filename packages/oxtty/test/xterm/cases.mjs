@@ -198,4 +198,8 @@ export const CASES = [
   }),
   inline('margins', '\x1b[2;4rhello', 20),
   ...Object.entries(KNOWN).map(([name, text]) => inline(`known/${name}`, text, 20)),
+  // Widening with a wrap pending: xterm leaves the cursor past the old last column, which is now a real column.
+  ...[['alt', '\x1b[?1049h'], ['primary', '']].map(([screen, enter]) => replay(`known/${screen}-widen-pending-wrap`, {
+    initial: Buffer.from(`${enter}abcde`), start: { cols: 5, rows: 3 }, end: { cols: 7, rows: 3 }, scrollback: 100, tail: TAIL,
+  })),
 ];
