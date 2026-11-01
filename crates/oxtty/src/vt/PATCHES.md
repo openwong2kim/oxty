@@ -81,6 +81,12 @@ single crate.
 - Private mode 9 (X10 mouse reporting) sets `TermMode::MOUSE_X10`, which is
   part of `TermMode::MOUSE_MODE` so the mouse protocols stay exclusive, and
   DECRQM reports it.
+- Private mode 1016 (SGR mouse reports in pixels) sets
+  `TermMode::SGR_PIXELS_MOUSE`, exclusive with the SGR and UTF-8 encodings,
+  and DECRQM reports it. `term::Config::xterm_mouse_modes`, off (upstream) by
+  default and turned on by `oxtty::Engine`, resets as xterm.js does: resetting
+  any tracking mode (9, 1000, 1002, 1003) turns tracking off, and resetting
+  1006 or 1016 returns to the default encoding.
 - `Term::set_kitty_keyboard` switches the kitty keyboard protocol at runtime
   and drops its flag stacks, as `set_options` does, without re-sending the
   title or damaging the screen.

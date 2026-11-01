@@ -121,7 +121,7 @@ export const Mode = Object.freeze({
   SHOW_CURSOR: 1 << 0, APP_CURSOR: 1 << 1, APP_KEYPAD: 1 << 2, BRACKETED_PASTE: 1 << 3,
   MOUSE_CLICK: 1 << 4, MOUSE_DRAG: 1 << 5, MOUSE_MOTION: 1 << 6, SGR_MOUSE: 1 << 7,
   FOCUS_EVENTS: 1 << 8, ALT_SCREEN: 1 << 9, ALTERNATE_SCROLL: 1 << 10, LINE_WRAP: 1 << 11,
-  INSERT: 1 << 12, ORIGIN: 1 << 13, KITTY_KEYBOARD: 1 << 14, MOUSE_X10: 1 << 15,
+  INSERT: 1 << 12, ORIGIN: 1 << 13, KITTY_KEYBOARD: 1 << 14, MOUSE_X10: 1 << 15, SGR_PIXELS_MOUSE: 1 << 16,
 });
 
 const CURSOR_SHAPES = ['block', 'underline', 'bar'];

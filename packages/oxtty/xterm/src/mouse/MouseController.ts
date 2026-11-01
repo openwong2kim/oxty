@@ -170,7 +170,7 @@ export class MouseController {
   public syncModes(): void {
     const modes = this._host.viewport.modes;
     const protocol = modes & Mode.MOUSE_X10 ? 'X10' : modes & Mode.MOUSE_MOTION ? 'ANY' : modes & Mode.MOUSE_DRAG ? 'DRAG' : modes & Mode.MOUSE_CLICK ? 'VT200' : 'NONE';
-    const encoding = modes & Mode.SGR_MOUSE ? 'SGR' : 'DEFAULT';
+    const encoding = modes & Mode.SGR_PIXELS_MOUSE ? 'SGR_PIXELS' : modes & Mode.SGR_MOUSE ? 'SGR' : 'DEFAULT';
     if (this._mouseStateService.activeProtocol !== protocol) this._mouseStateService.activeProtocol = protocol;
     if (this._mouseStateService.activeEncoding !== encoding) this._mouseStateService.activeEncoding = encoding;
     const alternate = (modes & Mode.ALT_SCREEN) !== 0;

@@ -729,3 +729,31 @@ fn kitty_keyboard_flags_follow_the_program_only_when_enabled() {
     t.set_kitty_keyboard(false);
     assert_eq!(t.kitty_flags(), 0);
 }
+
+#[test]
+fn mouse_mode_resets_follow_xterm_js() {
+    let mut t = term();
+    let tracking = mode::MOUSE_X10 | mode::MOUSE_CLICK | mode::MOUSE_DRAG | mode::MOUSE_MOTION;
+    t.feed(b"\x1b[?1003h\x1b[?1000l");
+    assert_eq!(
+        t.modes() & tracking,
+        0,
+        "any tracking reset turns tracking off"
+    );
+    t.feed(b"\x1b[?1016h");
+    assert_eq!(
+        t.modes() & (mode::SGR_MOUSE | mode::SGR_PIXELS_MOUSE),
+        mode::SGR_PIXELS_MOUSE
+    );
+    t.feed(b"\x1b[?1006h");
+    assert_eq!(
+        t.modes() & (mode::SGR_MOUSE | mode::SGR_PIXELS_MOUSE),
+        mode::SGR_MOUSE
+    );
+    t.feed(b"\x1b[?1016h\x1b[?1006l");
+    assert_eq!(
+        t.modes() & (mode::SGR_MOUSE | mode::SGR_PIXELS_MOUSE),
+        0,
+        "either reset returns to the default encoding"
+    );
+}

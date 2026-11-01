@@ -10,10 +10,10 @@ const css = createRequire(import.meta.url).resolve('@xterm/xterm/css/xterm.css')
 
 const ALT = 1, CTRL = 2, SHIFT = 8;
 const PROTOCOLS = { X10: 9, VT200: 1000, DRAG: 1002, ANY: 1003 };
-const ENCODINGS = { DEFAULT: [], SGR: [1006] };
-// Every mouse mode off. xterm.js turns tracking off on a reset of any one of 9/1000/1002/1003; the engine only
-// clears the mode named, so the tests always reset all of them.
-const MOUSE_OFF = '\x1b[?9;1000;1002;1003;1006l';
+const ENCODINGS = { DEFAULT: [], SGR: [1006], SGR_PIXELS: [1016] };
+// Every mouse mode off: resetting any one tracking mode turns tracking off, and resetting an SGR encoding returns
+// to the default one, in both.
+const MOUSE_OFF = '\x1b[?1000l\x1b[?1006l';
 const BUTTONS = [['left', 1], ['middle', 4], ['right', 2]];
 const MODIFIERS = [0, SHIFT, ALT, CTRL, ALT | CTRL | SHIFT];
 // Cells around the single-byte limits of the default encoding: 95 + 32 = 127, 223 + 32 = 255
@@ -110,7 +110,7 @@ test('button reports match xterm.js across protocol × encoding × button × mod
     }
     return { mismatches, total, reports };
   });
-  assert.equal(total, 4 * 2 * 3 * 5 * CELLS.length);
+  assert.equal(total, 4 * Object.keys(ENCODINGS).length * 3 * 5 * CELLS.length);
   assert.ok(reports > total, `xterm.js reported ${reports} times`);
   assert.deepEqual(mismatches.slice(0, 5), [], `${mismatches.length} of ${total} sequences differ`);
 });
@@ -166,7 +166,7 @@ test('wheel reports, arrows and refused wheels match xterm.js', async () => {
     await run('refuse Ctrl, alternate', [[5, 5]], [0, CTRL]);
     return { mismatches, total, sent };
   });
-  assert.equal(total, (3 + 1 + 1 + 1) * 2 + 2 * 3 + 4 + 2);
+  assert.equal(total, (3 + 1 + 1 + 1) * Object.keys(ENCODINGS).length + 2 * 3 + 4 + 2);
   assert.ok(sent > 100, `xterm.js sent ${sent} times`);
   assert.deepEqual(mismatches.slice(0, 5), [], `${mismatches.length} of ${total} cases differ`);
 });

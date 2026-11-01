@@ -79,6 +79,8 @@ bitflags! {
         const REPORT_ASSOCIATED_TEXT  = 1 << 22;
         /// oxtty: X10 mouse reporting (`CSI ? 9 h`), presses only and no modifiers.
         const MOUSE_X10               = 1 << 23;
+        /// oxtty: SGR mouse reports in pixels (`CSI ? 1016 h`).
+        const SGR_PIXELS_MOUSE        = 1 << 24;
         const MOUSE_MODE              = Self::MOUSE_REPORT_CLICK.bits() | Self::MOUSE_MOTION.bits() | Self::MOUSE_DRAG.bits() | Self::MOUSE_X10.bits();
         const KITTY_KEYBOARD_PROTOCOL = Self::DISAMBIGUATE_ESC_CODES.bits()
                                       | Self::REPORT_EVENT_TYPES.bits()
@@ -415,6 +417,11 @@ pub struct Config {
     /// The default `false` is the original Alacritty behavior. SGR 22 is passed separately by vte, so it is unaffected.
     pub sgr21_double_underline: bool,
 
+    /// oxtty: whether mouse modes reset as in xterm.js: resetting any tracking mode (9, 1000, 1002, 1003) turns tracking
+    /// off, and resetting either SGR encoding (1006, 1016) returns to the default encoding.
+    /// The default `false` is the original Alacritty behavior (each reset clears only its own mode).
+    pub xterm_mouse_modes: bool,
+
     /// oxtty: whether to answer device attributes (DA1 `CSI c`, DA2 `CSI > c`) as xterm.js does (`CSI ? 1 ; 2 c`, `CSI > 0 ; 276 ; 0 c`).
     /// The default `false` is the original Alacritty behavior (`CSI ? 6 c`, `CSI > 0 ; version ; 1 c`).
     pub xterm_device_attributes: bool,
@@ -437,6 +444,7 @@ impl Default for Config {
             xterm_wide_leader: false,
             store_tabs: true,
             sgr21_double_underline: false,
+            xterm_mouse_modes: false,
             xterm_device_attributes: false,
         }
     }
@@ -1163,6 +1171,16 @@ impl<T> Term<T> {
         self.keyboard_mode_stack = Vec::new();
         self.inactive_keyboard_mode_stack = Vec::new();
         self.mode.remove(TermMode::KITTY_KEYBOARD_PROTOCOL);
+    }
+
+    /// oxtty: the modes a reset of mouse tracking mode `mode` clears (all tracking with `xterm_mouse_modes`).
+    fn mouse_reset_mask(&self, mode: TermMode) -> TermMode {
+        if self.config.xterm_mouse_modes { TermMode::MOUSE_MODE } else { mode }
+    }
+
+    /// oxtty: the modes a reset of SGR encoding `mode` clears (both SGR encodings with `xterm_mouse_modes`).
+    fn mouse_encoding_reset_mask(&self, mode: TermMode) -> TermMode {
+        if self.config.xterm_mouse_modes { TermMode::SGR_MOUSE | TermMode::SGR_PIXELS_MOUSE } else { mode }
     }
 
     /// oxtty: whether the kitty keyboard protocol is enabled (see `set_kitty_keyboard`).
@@ -2337,6 +2355,11 @@ impl<T: EventListener> Handler for Term<T> {
                         self.mode.insert(TermMode::MOUSE_X10);
                         self.event_proxy.send_event(Event::MouseCursorDirty);
                     },
+                    // oxtty: SGR pixel reports, exclusive with the other encodings like them.
+                    1016 => {
+                        self.mode.remove(TermMode::SGR_MOUSE | TermMode::UTF8_MOUSE);
+                        self.mode.insert(TermMode::SGR_PIXELS_MOUSE);
+                    },
                     _ => debug!("Ignoring unknown mode {mode} in set_private_mode"),
                 }
                 return;
@@ -2373,11 +2396,11 @@ impl<T: EventListener> Handler for Term<T> {
             NamedPrivateMode::BracketedPaste => self.mode.insert(TermMode::BRACKETED_PASTE),
             // Mouse encodings are mutually exclusive.
             NamedPrivateMode::SgrMouse => {
-                self.mode.remove(TermMode::UTF8_MOUSE);
+                self.mode.remove(TermMode::UTF8_MOUSE | TermMode::SGR_PIXELS_MOUSE);
                 self.mode.insert(TermMode::SGR_MOUSE);
             },
             NamedPrivateMode::Utf8Mouse => {
-                self.mode.remove(TermMode::SGR_MOUSE);
+                self.mode.remove(TermMode::SGR_MOUSE | TermMode::SGR_PIXELS_MOUSE);
                 self.mode.insert(TermMode::UTF8_MOUSE);
             },
             NamedPrivateMode::AlternateScroll => self.mode.insert(TermMode::ALTERNATE_SCROLL),
@@ -2409,9 +2432,10 @@ impl<T: EventListener> Handler for Term<T> {
                     },
                     1048 => self.restore_cursor_position(),
                     9 => {
-                        self.mode.remove(TermMode::MOUSE_X10);
+                        self.mode.remove(self.mouse_reset_mask(TermMode::MOUSE_X10));
                         self.event_proxy.send_event(Event::MouseCursorDirty);
                     },
+                    1016 => self.mode.remove(self.mouse_encoding_reset_mask(TermMode::SGR_PIXELS_MOUSE)),
                     _ => debug!("Ignoring unknown mode {mode} in unset_private_mode"),
                 }
                 return;
@@ -2430,20 +2454,20 @@ impl<T: EventListener> Handler for Term<T> {
             NamedPrivateMode::ShowCursor => self.mode.remove(TermMode::SHOW_CURSOR),
             NamedPrivateMode::CursorKeys => self.mode.remove(TermMode::APP_CURSOR),
             NamedPrivateMode::ReportMouseClicks => {
-                self.mode.remove(TermMode::MOUSE_REPORT_CLICK);
+                self.mode.remove(self.mouse_reset_mask(TermMode::MOUSE_REPORT_CLICK));
                 self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             NamedPrivateMode::ReportCellMouseMotion => {
-                self.mode.remove(TermMode::MOUSE_DRAG);
+                self.mode.remove(self.mouse_reset_mask(TermMode::MOUSE_DRAG));
                 self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             NamedPrivateMode::ReportAllMouseMotion => {
-                self.mode.remove(TermMode::MOUSE_MOTION);
+                self.mode.remove(self.mouse_reset_mask(TermMode::MOUSE_MOTION));
                 self.event_proxy.send_event(Event::MouseCursorDirty);
             },
             NamedPrivateMode::ReportFocusInOut => self.mode.remove(TermMode::FOCUS_IN_OUT),
             NamedPrivateMode::BracketedPaste => self.mode.remove(TermMode::BRACKETED_PASTE),
-            NamedPrivateMode::SgrMouse => self.mode.remove(TermMode::SGR_MOUSE),
+            NamedPrivateMode::SgrMouse => self.mode.remove(self.mouse_encoding_reset_mask(TermMode::SGR_MOUSE)),
             NamedPrivateMode::Utf8Mouse => self.mode.remove(TermMode::UTF8_MOUSE),
             NamedPrivateMode::AlternateScroll => self.mode.remove(TermMode::ALTERNATE_SCROLL),
             NamedPrivateMode::LineWrap => self.mode.remove(TermMode::LINE_WRAP),
@@ -2501,6 +2525,7 @@ impl<T: EventListener> Handler for Term<T> {
                 NamedPrivateMode::ColumnMode => ModeState::NotSupported,
             },
             PrivateMode::Unknown(9) => self.mode.contains(TermMode::MOUSE_X10).into(),
+            PrivateMode::Unknown(1016) => self.mode.contains(TermMode::SGR_PIXELS_MOUSE).into(),
             PrivateMode::Unknown(_) => ModeState::NotSupported,
         };
 

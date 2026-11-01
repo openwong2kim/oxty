@@ -101,6 +101,8 @@ pub mod mode {
     pub const KITTY_KEYBOARD: u32 = 1 << 14;
     /// X10 mouse reporting (`CSI ? 9 h`): button presses only, no modifiers.
     pub const MOUSE_X10: u32 = 1 << 15;
+    /// SGR mouse reports in pixels instead of cells (`CSI ? 1016 h`).
+    pub const SGR_PIXELS_MOUSE: u32 = 1 << 16;
 }
 
 /// Packed colours in [`Cell::fg`] / [`Cell::bg`]: the top byte is the kind,
@@ -407,6 +409,9 @@ impl Engine {
             sgr21_double_underline: true,
             // Like xterm.js, device attributes report a VT100 with advanced video (DA1) and xterm 276 (DA2).
             xterm_device_attributes: true,
+            // Like xterm.js, resetting any mouse tracking mode turns tracking off, and resetting an SGR encoding
+            // returns to the default one.
+            xterm_mouse_modes: true,
             // The engine takes OSC 52 and passes it on only with the host's consent (set_clipboard_access).
             osc52: Osc52::CopyPaste,
             ..Config::default()
@@ -722,6 +727,7 @@ impl Engine {
             (TermMode::INSERT, mode::INSERT),
             (TermMode::ORIGIN, mode::ORIGIN),
             (TermMode::MOUSE_X10, mode::MOUSE_X10),
+            (TermMode::SGR_PIXELS_MOUSE, mode::SGR_PIXELS_MOUSE),
         ];
         let mut bits = map
             .iter()

@@ -143,7 +143,7 @@ export declare const Mode: Readonly<{
   SHOW_CURSOR: number; APP_CURSOR: number; APP_KEYPAD: number; BRACKETED_PASTE: number;
   MOUSE_CLICK: number; MOUSE_DRAG: number; MOUSE_MOTION: number; SGR_MOUSE: number;
   FOCUS_EVENTS: number; ALT_SCREEN: number; ALTERNATE_SCROLL: number; LINE_WRAP: number;
-  INSERT: number; ORIGIN: number; KITTY_KEYBOARD: number; MOUSE_X10: number;
+  INSERT: number; ORIGIN: number; KITTY_KEYBOARD: number; MOUSE_X10: number; SGR_PIXELS_MOUSE: number;
 }>;
 
 export declare const ColorKind: Readonly<{ NAMED: 1; INDEXED: 2; RGB: 3 }>;
