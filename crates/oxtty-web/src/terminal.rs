@@ -23,12 +23,26 @@ const SLICE: u32 = 16 * 1024;
 const INIT_ONLY: [&str; 3] = ["cols", "rows", "scrollback"];
 
 const STYLE_ID: &str = "oxtty-xterm-style";
+/// The accessibility and scrollbar rules are xterm.js 6.1.0-beta.336 `css/xterm.css` lines 133–166 and 218–262
+/// (commit 08829c7eb6279dda2a9e86df901353a1a89858ca, MIT), with the default theme's slider colours.
 const STYLE: &str = "
 .xterm { position: relative; cursor: text; user-select: none; -webkit-user-select: none; }
 .xterm .xterm-screen { position: relative; }
 .xterm .xterm-screen canvas { position: absolute; left: 0; top: 0; }
 .xterm .xterm-helpers { position: absolute; top: 0; z-index: 5; }
 .xterm.focus, .xterm:focus { outline: none; }
+.xterm .xterm-accessibility { position: absolute; left: 0; top: 0; bottom: 0; right: 0; z-index: 10; color: transparent; pointer-events: none; }
+.xterm .xterm-accessibility-tree *::selection { color: transparent; }
+.xterm .xterm-accessibility-tree { font-family: monospace; user-select: text; white-space: pre; }
+.xterm .xterm-accessibility-tree > div { transform-origin: left; width: fit-content; }
+.xterm .live-region { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.xterm .xterm-scrollable-element > .xterm-scrollbar { cursor: default; }
+.xterm .xterm-scrollable-element > .xterm-visible { opacity: 1; background: rgba(0,0,0,0); transition: opacity 100ms linear; z-index: 11; }
+.xterm .xterm-scrollable-element > .xterm-invisible { opacity: 0; pointer-events: none; }
+.xterm .xterm-scrollable-element > .xterm-invisible.xterm-fade { transition: opacity 800ms linear; }
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider { background: #ffffff33; }
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider:hover { background: #ffffff66; }
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider.xterm-active { background: #ffffff80; }
 ";
 
 /// One `write()` waiting for the engine. `data` is a string or a `Uint8Array`.
@@ -48,6 +62,10 @@ pub(crate) struct Core {
     pub screen: Option<HtmlElement>,
     /// Hook: the renderer module creates it in `open`.
     pub renderer: Option<Box<dyn Renderer>>,
+    /// While `options.screenReaderMode` is on.
+    pub a11y: Option<crate::a11y::A11y>,
+    /// While `options.scrollbar.showScrollbar` is not false.
+    pub scrollbar: Option<crate::scrollbar::Scrollbar>,
     pub dirty: Dirty,
     queue: VecDeque<Chunk>,
     /// A high surrogate a string `write` ended with, joined to the next one.
@@ -165,6 +183,8 @@ impl Terminal {
                 element: None,
                 screen: None,
                 renderer: None,
+                a11y: None,
+                scrollbar: None,
                 dirty: Dirty::All,
                 queue: VecDeque::new(),
                 high_surrogate: None,
@@ -277,7 +297,9 @@ impl Terminal {
         core.view.invalidate();
         core.dirty = Dirty::All;
         drop(core);
+        self.shared.apply_scrollbar();
         self.shared.create_renderer()?;
+        self.shared.apply_screen_reader_mode();
         self.shared.schedule_frame();
         Ok(())
     }
@@ -367,6 +389,8 @@ impl Terminal {
         core.disposed = true;
         core.queue.clear();
         // Hook: input, mouse, selection and accessibility remove their listeners here.
+        core.a11y = None;
+        core.scrollbar = None;
         core.renderer = None;
         if let Some(element) = core.element.take() {
             element.remove();
@@ -551,6 +575,12 @@ impl Shared {
         }
         // Hook: theme (engine colours, renderer), renderer options, input, mouse and accessibility options.
         self.apply_renderer_option(key);
+        match key {
+            "screenReaderMode" => self.apply_screen_reader_mode(),
+            "scrollbar" => self.apply_scrollbar(),
+            "theme" => self.apply_scrollbar_theme(),
+            _ => {}
+        }
         Ok(())
     }
 
@@ -641,6 +671,7 @@ impl Shared {
 
     fn render_frame(self: &Rc<Self>) {
         self.handle_renderer_requests();
+        self.apply_scroll_requests();
         let rows = {
             let mut core = self.core.borrow_mut();
             if core.disposed || core.renderer.is_none() {
@@ -650,19 +681,31 @@ impl Shared {
             let changed = core.viewport.apply(frame);
             let dirty = std::mem::replace(&mut core.dirty, Dirty::Rows(Vec::new()));
             let Core {
-                renderer, viewport, ..
+                renderer,
+                viewport,
+                a11y,
+                scrollbar,
+                options,
+                ..
             } = &mut *core;
-            renderer
-                .as_mut()
-                .unwrap()
-                .render(viewport, &changed, &dirty);
+            let renderer = renderer.as_mut().unwrap();
+            renderer.render(viewport, &changed, &dirty);
             // Hook: input reads modes from the frame; selection and links repaint.
-            match dirty {
+            let range = match dirty {
                 Dirty::All => Some((0, viewport.rows.saturating_sub(1))),
                 Dirty::Rows(rows) => changed.iter().chain(&rows).fold(None, |range, &y| {
                     Some(range.map_or((y, y), |(a, b): (u32, u32)| (a.min(y), b.max(y))))
                 }),
+            };
+            let dimensions = renderer.dimensions();
+            if let Some(scrollbar) = scrollbar {
+                scrollbar.sync(viewport, &dimensions);
             }
+            if let Some(a11y) = a11y {
+                let font_size = crate::options::option(options, "fontSize").as_f64();
+                a11y.frame(viewport, range, &dimensions, font_size.unwrap_or(15.0));
+            }
+            range
         };
         if let Some((start, end)) = rows {
             let range = Object::new();

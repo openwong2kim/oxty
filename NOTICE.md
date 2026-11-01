@@ -49,6 +49,20 @@ xterm.js by `packages/oxtty/test/web/gen-input-fixtures.mjs`.
 and `SearchResultTracker.ts`, Copyright (c) 2017 The xterm.js authors, MIT
 license (`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
 
+## xterm.js accessibility and scrollbar
+
+`crates/oxtty-web/src/a11y.rs` (`screenReaderMode`) and
+`crates/oxtty-web/src/scrollbar.rs` are Rust ports of xterm.js 6.1.0-beta.336
+(commit 08829c7eb6279dda2a9e86df901353a1a89858ca): `AccessibilityManager.ts`,
+`TimeBasedDebouncer.ts`, `LocalizableStrings.ts`, `Viewport.ts` and the
+`src/browser/scrollable` files (`scrollbarState.ts`, `scrollable.ts`,
+`scrollbarVisibilityController.ts`, `abstractScrollbar.ts`,
+`verticalScrollbar.ts`, `globalPointerMoveMonitor.ts`, `scrollableElement.ts`),
+and the matching `css/xterm.css` rules in `terminal.rs`. Copyright (c) 2017-2024
+The xterm.js authors; the scrollable files derive from VS Code, Copyright (c)
+Microsoft Corporation. MIT license (`crates/oxtty/LICENSE-XTERM`). Each file
+names its source lines.
+
 ## wmux
 
 The engine integration started in

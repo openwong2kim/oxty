@@ -158,3 +158,18 @@ in https://github.com/openwong2kim/oxtty) is a Rust port of `@xterm/addon-search
 `SearchResultTracker.ts`, Copyright (c) 2017 The xterm.js authors, under the MIT
 license reproduced in the input encoding section above.
 Source: https://github.com/xtermjs/xterm.js
+
+---
+
+## xterm.js 6.1.0-beta.336 — accessibility and scrollbar
+
+`screenReaderMode` and the scrollbar of `dist/xterm_web_bg.wasm`
+(`crates/oxtty-web/src/a11y.rs` and `scrollbar.rs` in
+https://github.com/openwong2kim/oxtty, with their rules from `css/xterm.css`)
+are a Rust port of xterm.js 6.1.0-beta.336 (commit
+08829c7eb6279dda2a9e86df901353a1a89858ca): `src/browser/AccessibilityManager.ts`,
+`TimeBasedDebouncer.ts`, `LocalizableStrings.ts`, `Viewport.ts` and
+`src/browser/scrollable/*`, Copyright (c) 2017-2024 The xterm.js authors; the
+scrollable files derive from VS Code, Copyright (c) Microsoft Corporation. Both
+under the MIT license reproduced in the input encoding section above.
+Source: https://github.com/xtermjs/xterm.js
