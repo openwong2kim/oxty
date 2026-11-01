@@ -139,6 +139,14 @@ const KNOWN = {
   'invalid-utf8': Uint8Array.of(0x61, 0xac, 0x62),
   'decrc-pending-wrap': `${'X'.repeat(20)}\x1b7\x1b8`,
   'alt-return-pending-wrap': `${'X'.repeat(20)}\x1b[?1049h\x1b[?1049l`,
+  'ech-pending-wrap': `${'X'.repeat(20)}\x1b[X`,
+  'dch-pending-wrap': `${'X'.repeat(20)}\x1b[P`,
+  'ich-pending-wrap': `${'X'.repeat(20)}\x1b[@`,
+  'ed0-pending-wrap': `${'X'.repeat(20)}\x1b[J`,
+  'ed0-last-col': `${'X'.repeat(20)}\x1b[1;20H\x1b[J`,
+  'ed1-line-1': 'a\r\nb\x1b[1J',
+  'ed1-line-2': 'a\r\nb\r\nc\x1b[1J',
+  'esc-non-ascii': '\x1b가[',
 };
 
 /**

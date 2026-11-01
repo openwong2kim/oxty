@@ -640,3 +640,35 @@ fn widening_the_alternate_screen_frees_a_pending_wrap() {
     t.feed(b"Z");
     assert_eq!(t.row_text(0).as_deref(), Some("abcdeZ"));
 }
+
+#[test]
+fn ech_dch_and_ich_end_a_pending_wrap() {
+    // xterm.js clamps its cursor, one past the edge, back onto the last column first.
+    for op in ["\x1b[X", "\x1b[P", "\x1b[@"] {
+        let mut t = Engine::new(5, 2, 0);
+        t.feed(format!("12345{op}Z").as_bytes());
+        assert_eq!(t.row_text(0).as_deref(), Some("1234Z"), "{op:?}");
+        assert_eq!(t.row_text(1).as_deref(), Some(""), "{op:?}");
+    }
+}
+
+#[test]
+fn ed0_in_a_pending_wrap_keeps_the_last_column() {
+    let mut t = Engine::new(5, 2, 0);
+    t.feed(b"12345\r\nabc\x1b[1;1H12345\x1b[J");
+    assert_eq!(t.row_text(0).as_deref(), Some("12345"));
+    assert_eq!(t.row_text(1).as_deref(), Some(""));
+    // Not in a pending wrap, it erases from the cursor as before.
+    t.feed(b"\x1b[1;5H\x1b[J");
+    assert_eq!(t.row_text(0).as_deref(), Some("1234"));
+}
+
+#[test]
+fn ed1_from_line_1_erases_line_0() {
+    let mut t = Engine::new(5, 3, 0);
+    t.feed(b"aaa\r\nbbb\x1b[1J");
+    assert_eq!(t.row_text(0).as_deref(), Some(""));
+    assert_eq!(t.row_text(1).as_deref(), Some(""));
+    t.feed(b"\x1b[2;1Hb\x1b[1;1Ha\x1b[2;1H\x1b[1J");
+    assert_eq!(t.row_text(0).as_deref(), Some(""));
+}

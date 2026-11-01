@@ -395,7 +395,8 @@ pub struct Config {
     /// xterm keeps "continued from the previous line" as an attribute of the lower line. Line feeds that move the cursor down without scrolling,
     /// EL0, EL2 and ED0 erasing from the first cell, and ED1 and ED2 (no scroll) erasing up to the first screen line break that mark,
     /// while the mark that an erased line continues into the next line is kept. vte also passes IND and NEL as `linefeed`, so it applies to both
-    /// (xterm does not break it on IND and NEL). A restored cursor (DECRC, `CSI u`, 1048, 1049) also drops its pending wrap.
+    /// (xterm does not break it on IND and NEL). A restored cursor (DECRC, `CSI u`, 1048, 1049) and ECH, DCH and ICH drop a pending wrap,
+    /// ED0 in a pending wrap leaves the cursor row alone, and ED1 from line 1 erases line 0.
     /// The default `false` is the original Alacritty behavior (WRAPLINE on erased cells disappears with them).
     pub xterm_line_wrap: bool,
 
@@ -813,6 +814,14 @@ impl<T> Term<T> {
         if self.config.xterm_line_wrap && cursor.input_needs_wrap {
             cursor.input_needs_wrap = false;
             cursor.point.column = cmp::min(cursor.point.column + 1, last);
+        }
+    }
+
+    /// oxtty (`xterm_line_wrap`): ECH, DCH and ICH first clamp xterm's cursor, which is past the
+    /// last column in a pending wrap, back onto it (`_restrictCursor`), ending the pending wrap.
+    fn end_pending_wrap(&mut self) {
+        if self.config.xterm_line_wrap {
+            self.grid.cursor.input_needs_wrap = false;
         }
     }
 
@@ -1415,6 +1424,7 @@ impl<T: EventListener> Handler for Term<T> {
 
     #[inline]
     fn insert_blank(&mut self, count: usize) {
+        self.end_pending_wrap();
         let cursor = &self.grid.cursor;
         let bg = cursor.template.bg;
 
@@ -1793,6 +1803,7 @@ impl<T: EventListener> Handler for Term<T> {
 
     #[inline]
     fn erase_chars(&mut self, count: usize) {
+        self.end_pending_wrap();
         let cursor = &self.grid.cursor;
 
         trace!("Erasing chars: count={}, col={}", count, cursor.point.column);
@@ -1819,6 +1830,7 @@ impl<T: EventListener> Handler for Term<T> {
 
     #[inline]
     fn delete_chars(&mut self, count: usize) {
+        self.end_pending_wrap();
         let columns = self.columns();
         let cursor = &self.grid.cursor;
         let bg = cursor.template.bg;
@@ -2069,7 +2081,8 @@ impl<T: EventListener> Handler for Term<T> {
                 let cursor = self.grid.cursor.point;
 
                 // If clearing more than one line.
-                if cursor.line > 1 {
+                // oxtty: upstream skips line 0 when the cursor is on line 1; xterm erases it.
+                if cursor.line > 1 || (self.config.xterm_line_wrap && cursor.line == 1) {
                     // Fully clear all lines before the current line.
                     self.grid.reset_region(..cursor.line);
                 }
@@ -2092,11 +2105,16 @@ impl<T: EventListener> Handler for Term<T> {
             },
             ansi::ClearMode::Below => {
                 let cursor = self.grid.cursor.point;
-                if self.config.xterm_wide_leader {
+                // oxtty: in a pending wrap xterm's cursor is past the last column, so ED0 erases
+                // nothing on its row (as EL0 already does).
+                let keep_row = self.config.xterm_line_wrap && self.grid.cursor.input_needs_wrap;
+                if self.config.xterm_wide_leader && !keep_row {
                     self.erase_split_wide(cursor.line, cursor.column.0, self.columns(), bg);
                 }
-                for cell in &mut self.grid[cursor.line][cursor.column..] {
-                    *cell = bg.into();
+                if !keep_row {
+                    for cell in &mut self.grid[cursor.line][cursor.column..] {
+                        *cell = bg.into();
+                    }
                 }
                 if self.config.xterm_line_wrap && cursor.column.0 == 0 {
                     self.unwrap_from_previous(cursor.line);
