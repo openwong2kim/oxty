@@ -17,6 +17,7 @@
   - **Renderer**: raw WebGL2 through web-sys, glyphs rasterised with Canvas2D `fillText` (same font fallback as xterm.js). For the memory goal it shares **one WebGL2 context and one glyph atlas per page** across all panes (not one per pane as xterm.js and the old front end did), so 17+ panes neither hit Chrome's ~16-context limit nor multiply GPU memory; hidden panes skip drawing.
   - **Input encoding moves into the engine crate** (`crates/oxtty/src/input`, platform-neutral `KeyInput`/`MouseInput`), pulling M3 forward.
   - The xterm.js parity harnesses come back as JS tests against the new build (`packages/oxtty/test/web`).
+- **Images in Rust (owner decision, 2026-11-01; answers §10.2 question 1)**: wmux uses `@xterm/addon-image`, so oxtty implements what it supports (sixel and the iTerm2 inline image protocol, OSC 1337) instead of leaving images on the xterm.js path; graphics move from "after 1.0" into the wmux adoption scope. Image memory counts against the primary goal: bounded storage per page, images freed when their cells scroll out or are overwritten.
 
 ### v0.3 change summary
 
