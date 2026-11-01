@@ -220,7 +220,7 @@ export class Terminal {
   /**
    * @param {{ cols?: number, rows?: number, scrollback?: number, syncTimeoutMs?: number, onSyncFlush?: () => void, onCrash?: (error: unknown) => void }} [options]
    */
-  constructor({ cols = 80, rows = 24, scrollback = 1000, syncTimeoutMs = 150, onSyncFlush, onCrash } = {}) {
+  constructor({ cols = 80, rows = 24, scrollback = 1000, syncTimeoutMs = 1000, onSyncFlush, onCrash } = {}) {
     const w = requireWasm();
     this.#scrollback = scrollback;
     this.#syncTimeoutMs = syncTimeoutMs;

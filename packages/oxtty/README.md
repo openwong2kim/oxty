@@ -21,7 +21,7 @@ term.takeReplies();    // bytes to write back to the PTY
 - Works in browsers, bundlers (Vite, webpack) and Node ≥ 18.
 - Synchronized output (`CSI ? 2026 h`) is applied at once, as in xterm.js;
   `syncPending()` tells a renderer to hold its frames until the program ends
-  the update, or `syncTimeoutMs` (default 150) ends it with an `onSyncFlush`
+  the update, or `syncTimeoutMs` (default 1000, as xterm.js) ends it with an `onSyncFlush`
   callback.
 
 **Status: 0.0.1, experimental.** An xterm.js-compatible front end is the next

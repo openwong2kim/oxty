@@ -164,7 +164,7 @@ xterm.js splits into an **engine layer** (`common`: bytes → screen state) and 
 - Platform: IME (DOM textarea on the web, OS IME natively), glyph drawing, receiving OS input events
 
 **D5. The engine has no clock and no threads**
-- The synchronized output (`CSI ? 2026 h`) timeout is managed by the host. 0.0.1 confirmed that vte's default handler dies the moment it calls the clock in wasm.
+- The synchronized output (`CSI ? 2026 h`) timeout is managed by the host. 0.0.1 confirmed that vte's default handler dies the moment it calls the clock in wasm. Since 2026-11-02 the engine applies the output at once as xterm.js does: `syncPending()` reports an open update (renderers hold their frames), `flushSync()` ends it, and the npm wrapper ends a stalled one after xterm.js's 1000 ms.
 - Result: same input → same screen (deterministic), easy to test and reproduce.
 
 **D6. The host decides scrollback ownership**

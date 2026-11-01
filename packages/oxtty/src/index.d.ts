@@ -8,7 +8,7 @@ export interface TerminalOptions {
   rows?: number;
   /** Lines of history to keep (default 1000, max 100000). */
   scrollback?: number;
-  /** End a synchronized update the program never ended after this many ms (default 150). */
+  /** End a synchronized update the program never ended after this many ms (default 1000, as xterm.js). */
   syncTimeoutMs?: number;
   /** Called after such a timed end, so the renderer can redraw. */
   onSyncFlush?: () => void;

@@ -171,6 +171,25 @@ test('hooks inside a synchronized update run where they are, as in xterm.js', as
   assert.deepEqual(ox.log, [['dsr', 'A', true], ['parsed', 'AB'], ['dsr', 'ABC', true], ['parsed', 'ABCD', false]]);
 });
 
+test('handlers inside a synchronized update fire in stream order between replies and text, as in xterm.js', async () => {
+  const [ox, xt] = await compare({ cols: 20, rows: 2 }, async (t, log) => {
+    t.parser.registerOscHandler(133, (data) => { log.push(['osc133', data, text(t)[0]]); return true; });
+    t.parser.registerCsiHandler({ final: 'n' }, (params) => { log.push(['dsr', params, text(t)[0]]); return false; });
+    await write(t, '\x1b[?2026hA\x1b]133;A\x07B\x1b[6nC\x1b]133;B\x07D\x1b[5n');
+    log.push(['parsed', text(t)[0], t.modes.synchronizedOutputMode]);
+  });
+  assert.deepEqual(ox, xt);
+  assert.deepEqual(ox.log, [
+    ['osc133', 'A', 'A'],
+    ['dsr', [6], 'AB'],
+    ['data', '\x1b[1;3R'],
+    ['osc133', 'B', 'ABC'],
+    ['dsr', [5], 'ABCD'],
+    ['data', '\x1b[0n'],
+    ['parsed', 'ABCD', true],
+  ]);
+});
+
 test('an async handler inside a synchronized update holds later writes until it settles; the update times out', async () => {
   const t = new m.Terminal({ cols: 20, rows: 2 });
   let release;
@@ -178,7 +197,7 @@ test('an async handler inside a synchronized update holds later writes until it 
   const parsed = [];
   t.write('\x1b[?2026hA\x1b]1337;x\x07B', () => parsed.push('AB'));
   t.write('C', () => parsed.push('C'));
-  await sleep(250);
+  await sleep(1300);
   assert.deepEqual([text(t)[0], parsed, t.modes.synchronizedOutputMode], ['A', [], false]);
   release(true);
   await write(t, '');

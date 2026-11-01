@@ -63,8 +63,9 @@ pub const MAX_ROWS: u16 = 1000;
 pub const MAX_SCROLLBACK: usize = 100_000;
 
 /// How long a synchronized update (`CSI ? 2026 h`) may hold the host's
-/// frames back before it should call [`Engine::flush_sync`]. Matches Alacritty.
-pub const SYNC_TIMEOUT: Duration = Duration::from_millis(150);
+/// frames back before it should call [`Engine::flush_sync`]. Matches
+/// xterm.js 6.1 (`RenderService` `SYNCHRONIZED_OUTPUT_TIMEOUT_MS`).
+pub const SYNC_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// Cell attribute bits returned in [`Cell::attrs`]. Stable across versions.
 pub mod attr {

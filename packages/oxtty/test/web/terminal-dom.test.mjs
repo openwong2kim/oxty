@@ -137,16 +137,16 @@ test('the opened terminal next to xterm.js', async (t) => {
         await all(' world\x1b[?2026l');
         await raf();
         const ended = [now(), renders()];
-        // An update the program never ends is ended by the timeout (oxtty 150 ms, xterm.js 1000 ms).
+        // An update the program never ends is ended by the timeout (1000 ms, as in xterm.js).
         const [ox] = window.made;
         await new Promise((resolve) => ox.write('\x1b[?2026h!', resolve));
         const held = now()[0];
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 1300));
         await raf();
         return { inside, drawnOpen, ended, held, timedOut: [now()[0], renders()[0]] };
       });
       assert.deepEqual(facts.inside, [['hello', true], ['hello', true]]);
-      // A slow run may hit oxtty's 150 ms timeout before the program ends the update: then that redraws every row.
+      // A slow run may hit the timeout before the program ends the update: then that redraws every row.
       assert.deepEqual(facts.drawnOpen, [false, false]);
       assert.deepEqual(facts.ended, [[['hello world', false], ['hello world', false]], [[false, true], [false, true]]]);
       assert.deepEqual(facts.held, ['hello world!', true]);

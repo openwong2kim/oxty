@@ -240,9 +240,9 @@ what xterm.js and its clipboard addon send.
 rows read the new content) and `sync_pending()` is true until the program ends
 the update, so a renderer holds its frames meanwhile. The engine has no clock
 (`Instant::now()` traps on `wasm32-unknown-unknown`), so the host ends stalled
-updates. The npm wrapper does this for you after 150 ms and calls
-`onSyncFlush`, and `oxtty/xterm` holds its frames on its own; Rust and N-API
-hosts check `sync_pending()` and call `flush_sync()` themselves.
+updates. The npm wrapper does this for you after 1000 ms, as xterm.js does,
+and calls `onSyncFlush`, and `oxtty/xterm` holds its frames on its own; Rust
+and N-API hosts check `sync_pending()` and call `flush_sync()` themselves.
 
 </details>
 
