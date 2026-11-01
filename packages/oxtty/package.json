@@ -20,7 +20,9 @@
   "sideEffects": false,
   "scripts": {
     "build": "bash ../../scripts/build-wasm.sh",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "test:xterm": "node --test xterm/test/*.test.mjs",
+    "typecheck:xterm": "tsc --noEmit -p xterm"
   },
   "keywords": [
     "terminal",
@@ -41,6 +43,9 @@
   },
   "devDependencies": {
     "@xterm/addon-unicode11": "0.10.0-beta.301",
-    "@xterm/headless": "6.1.0-beta.303"
+    "@xterm/headless": "6.1.0-beta.303",
+    "esbuild": "0.25.10",
+    "playwright-core": "1.55.1",
+    "typescript": "5.9.3"
   }
 }
