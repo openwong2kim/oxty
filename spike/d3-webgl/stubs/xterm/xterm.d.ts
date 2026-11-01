@@ -1,5 +1,5 @@
-// [oxtty 스텁] xterm.js typings/xterm.d.ts(1957줄, 공개 API)를 대체한다.
-// 복사한 렌더러 부품이 타입으로 참조하는 멤버만 둔다. 런타임 코드는 없다.
+// [oxtty stub] Replaces xterm.js typings/xterm.d.ts (1957 lines, public API).
+// Keeps only the members the copied renderer parts reference as types. There is no runtime code.
 
 declare module '@xterm/xterm' {
   export type FontWeight = 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900' | number;
@@ -16,7 +16,7 @@ declare module '@xterm/xterm' {
     readonly buffer: { readonly active: { readonly viewportY: number } };
   }
 
-  // CharAtlasUtils.generateConfig가 읽는 옵션
+  // Options read by CharAtlasUtils.generateConfig
   export interface ITerminalOptions {
     customGlyphs?: boolean;
     letterSpacing?: number;

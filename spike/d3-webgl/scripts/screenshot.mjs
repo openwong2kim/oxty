@@ -1,5 +1,5 @@
-// dist/를 로컬 정적 서버로 띄우고 시스템 Chrome으로 열어 screenshot.png를 저장한다.
-// 콘솔 에러·페이지 예외가 하나라도 있으면 exit 1.
+// Serves dist/ from a local static server, opens it in the system Chrome and saves screenshot.png.
+// Exit 1 if there is any console error or page exception.
 import { chromium } from 'playwright-core';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -48,4 +48,4 @@ if (errors.length) {
   console.error(errors.join('\n'));
   process.exit(1);
 }
-console.log('screenshot.png 저장, 콘솔 에러 0');
+console.log('screenshot.png saved, 0 console errors');

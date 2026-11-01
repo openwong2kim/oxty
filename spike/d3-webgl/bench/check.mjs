@@ -1,5 +1,5 @@
-// 증분 렌더 픽셀 검사(check.ts)를 headless Chrome에서 돌린다. 차이가 있거나 에러가 나면 exit 1.
-// 사용: node bench/check.mjs
+// Runs the incremental render pixel check (check.ts) in headless Chrome. Exit 1 on any difference or error.
+// Usage: node bench/check.mjs
 import { createServer } from 'node:http';
 import { readFile, copyFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';

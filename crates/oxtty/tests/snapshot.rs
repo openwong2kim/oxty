@@ -11,7 +11,7 @@ fn find(payload: &[u8], needle: &[u8]) -> usize {
         .unwrap_or_else(|| panic!("{needle:?} not in payload"))
 }
 
-/// 스냅샷을 같은 크기의 새 엔진에 넣었을 때 셀·커서·모드·히스토리가 같은지.
+/// Whether cells, cursor, modes and history match after feeding the snapshot to a new engine of the same size.
 fn assert_round_trip(t: &mut Engine, scrollback: usize) -> Engine {
     let payload = snapshot(t);
     let mut copy = Engine::new(t.cols(), t.rows(), scrollback);
@@ -106,11 +106,11 @@ fn held_sync_is_carried_raw_and_repeatable() {
 #[test]
 fn held_sync_is_judged_on_the_screen_before_it() {
     let mut t = Engine::new(10, 4, 0);
-    // 업데이트가 마진을 풀어도 아직 반영 전이므로 거부한다.
+    // Even if the update clears the margins, it has not been applied yet, so reject.
     t.feed(b"\x1b[2;3r\x1b[?2026h\x1b[r");
     assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::Margins));
     assert!(t.sync_pending());
-    // 반대로 업데이트 안의 마진·긴 미완 시퀀스는 원문으로 넘어가므로 거부 사유가 아니다.
+    // Conversely, margins and long incomplete sequences inside the update are carried over as raw bytes, so they are not grounds for rejection.
     t.feed(b"\x1b[?2026l\x1b[?2026h\x1b[2;3rX\x1b]0;");
     t.feed(&[b'a'; 5000]);
     t.feed(b"\x07\x1b[3");
@@ -146,7 +146,7 @@ fn snapshot_leaves_the_live_engine_untouched() {
     t.feed(b"before\x1b[?2026h\x1b[2Hframe");
     t.take_damage();
     let first = snapshot(&mut t);
-    // 커서 줄(0)은 vt가 늘 damage로 낸다.
+    // vt always reports the cursor line (0) as damaged.
     let none = Damage::Lines {
         scroll: 0,
         lines: vec![0],
@@ -185,10 +185,10 @@ fn rows(e: &Engine) -> Vec<String> {
         .collect()
 }
 
-/// 동기화 경계를 쪼개는 모든 지점에서 스냅샷을 찍어도 엔진은 그대로이고, 받은 쪽은 같은 업데이트 안에 있다.
+/// Taking a snapshot at every split point across sync boundaries leaves the engine unchanged, and the receiver is inside the same update.
 #[test]
 fn snapshot_at_every_split_of_synchronized_output() {
-    // ESU 바로 뒤 BSU(한 번에 넣으면 vte가 새 BSU부터 버퍼에 남긴다), 동기화 안의 넓은 글자·미완 CSI.
+    // BSU right after ESU (fed at once, vte keeps everything from the new BSU in its buffer), a wide character and an incomplete CSI inside sync.
     let input =
         "pre\r\n\x1b[?2026hA\x1b[31mB\x1b[?2026l\x1b[?2026hC한\x1b[4\x1b[?2026lD\x1b[?2026hE"
             .as_bytes();
@@ -263,7 +263,7 @@ fn tab_cell_is_written_as_space() {
     t.feed(b"a\tb");
     let payload = snapshot(&mut t);
     assert!(!payload.contains(&b'\t'));
-    // 엔진은 탭 칸에 '\t'를 저장하므로(알려진 차이) 셀 대신 글자 위치와 커서를 본다.
+    // The engine stores '\t' in tab cells (a known difference), so check character positions and the cursor instead of cells.
     let mut copy = Engine::new(20, 4, 0);
     copy.feed(&payload);
     assert_eq!(copy.row_text(0).unwrap(), "a       b");
@@ -289,7 +289,7 @@ fn control_inside_unfinished_sequence_is_not_replayed() {
 
 #[test]
 fn leftover_alt_screen_does_not_refuse_after_exit() {
-    // 대체 화면에서 잘린 넓은 글자가 남아도, 나온 뒤에는 기본 화면만 직렬화하므로 거부하면 안 된다.
+    // Even if a cut wide character remains on the alternate screen, only the primary screen is serialized after leaving, so it must not be rejected.
     let mut t = Engine::new(4, 3, 10);
     t.feed("\x1b[?1049hab한".as_bytes());
     t.resize(3, 3);

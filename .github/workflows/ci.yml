@@ -16,7 +16,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - run: cargo fmt -p oxtty -p oxtty-wasm -p oxtty-node --check  # src/vt는 #[rustfmt::skip]
+      - run: cargo fmt -p oxtty -p oxtty-wasm -p oxtty-node --check  # src/vt is #[rustfmt::skip]
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p oxtty
 

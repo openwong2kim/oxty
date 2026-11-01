@@ -224,7 +224,7 @@ struct TermDamageState {
     /// Old terminal cursor point.
     last_cursor: Point,
 
-    /// oxtty: 마지막 reset 이후 화면 전체가 위로 스크롤된 줄 수(`Config::scroll_damage`).
+    /// oxtty: number of lines the whole screen scrolled up since the last reset (`Config::scroll_damage`).
     scrolled: usize,
 }
 
@@ -269,9 +269,9 @@ impl TermDamageState {
         self.lines.iter_mut().for_each(|line| line.reset(num_cols));
     }
 
-    /// oxtty: 화면 전체 스크롤을 전체 damage 대신 기록한다. 줄 damage는 내용과 함께 위로 옮기고,
-    /// 새로 생긴 아래 줄은 damage로 표시한다. 이전 커서 자리도 내용을 따라 옮겨,
-    /// 렌더러가 옮겨진 자리에서 지우게 한다.
+    /// oxtty: records a whole-screen scroll instead of full damage. Line damage moves up with the content,
+    /// and the newly exposed bottom lines are marked as damaged. The previous cursor position also moves with the content,
+    /// so the renderer clears it at its moved position.
     fn scroll_up(&mut self, lines: usize, num_cols: usize) {
         let len = self.lines.len();
         self.lines.rotate_left(lines);
@@ -374,41 +374,41 @@ pub struct Config {
     /// OSC52 support mode.
     pub osc52: Osc52,
 
-    /// oxtty: 리사이즈 때 커서가 있는 문단도 reflow할지(xterm.js `reflowCursorLine`).
-    /// 기본값 `true`는 Alacritty 원래 동작이다.
+    /// oxtty: whether to also reflow the paragraph holding the cursor on resize (xterm.js `reflowCursorLine`).
+    /// The default `true` is the original Alacritty behavior.
     pub reflow_cursor_line: bool,
 
-    /// oxtty: 화면 전체 스크롤을 전체 damage 대신 줄 이동으로 기록할지.
-    /// 켜면 [`Term::damage_scrolled`]만큼 렌더러가 기존 줄을 위로 옮긴 뒤 damage 줄만 다시 그린다.
-    /// 기본값 `false`는 Alacritty 원래 동작(스크롤마다 전체 damage)이다.
+    /// oxtty: whether to record a whole-screen scroll as a line shift instead of full damage.
+    /// When on, the renderer moves existing lines up by [`Term::damage_scrolled`] and then redraws only the damaged lines.
+    /// The default `false` is the original Alacritty behavior (full damage on every scroll).
     pub scroll_damage: bool,
 
-    /// oxtty: RIS(`ESC c`)가 커서 숨김(DECTCEM)을 유지할지(xterm.js 동작).
-    /// 기본값 `false`는 Alacritty 원래 동작(RIS가 커서를 다시 보이게 함)이다.
+    /// oxtty: whether RIS (`ESC c`) keeps the cursor hidden (DECTCEM) (xterm.js behavior).
+    /// The default `false` is the original Alacritty behavior (RIS makes the cursor visible again).
     pub ris_keeps_cursor_visibility: bool,
 
-    /// oxtty: 주 화면 ED2(`CSI 2 J`)가 화면 줄을 히스토리로 밀지(xterm.js `scrollOnEraseInDisplay`).
-    /// 기본값 `true`는 Alacritty 원래 동작이다. `false`면 대체 화면처럼 화면만 지운다.
+    /// oxtty: whether ED2 (`CSI 2 J`) on the primary screen pushes screen lines into history (xterm.js `scrollOnEraseInDisplay`).
+    /// The default `true` is the original Alacritty behavior. If `false`, it only clears the screen, like the alternate screen.
     pub scroll_on_erase_in_display: bool,
 
-    /// oxtty: 줄바꿈과 줄·화면 지우기(EL, ED)가 줄 이어짐을 xterm.js 규칙대로 바꿀지.
-    /// xterm은 "앞줄에서 이어졌다"를 아랫줄 속성으로 둔다. 스크롤 없이 커서를 내리는 줄바꿈,
-    /// 첫 칸부터 지우는 EL0·EL2·ED0, 화면 첫 줄까지 지우는 ED1·ED2(스크롤 없음)에서 그 표시를 끊고,
-    /// 지운 줄이 아랫줄로 이어지는 표시는 남긴다. vte가 IND·NEL도 `linefeed`로 넘기므로 둘에도 적용된다
-    /// (xterm은 IND·NEL에서는 끊지 않는다).
-    /// 기본값 `false`는 Alacritty 원래 동작(지운 칸의 WRAPLINE이 함께 사라짐)이다.
+    /// oxtty: whether line feeds and line/screen erases (EL, ED) change line wrapping per xterm.js rules.
+    /// xterm keeps "continued from the previous line" as an attribute of the lower line. Line feeds that move the cursor down without scrolling,
+    /// EL0, EL2 and ED0 erasing from the first cell, and ED1 and ED2 (no scroll) erasing up to the first screen line break that mark,
+    /// while the mark that an erased line continues into the next line is kept. vte also passes IND and NEL as `linefeed`, so it applies to both
+    /// (xterm does not break it on IND and NEL).
+    /// The default `false` is the original Alacritty behavior (WRAPLINE on erased cells disappears with them).
     pub xterm_line_wrap: bool,
 
-    /// oxtty: 와이드 문자의 뒷칸을 덮어써 앞칸이 남을 때 그 칸을 현재 펜의 빈칸으로 바꿀지(xterm.js).
-    /// 기본값 `false`는 Alacritty 원래 동작(글자만 지우고 원래 색·속성을 남김)이다.
+    /// oxtty: when overwriting the trailing cell of a wide character leaves the leading cell, whether to turn that cell into a blank with the current pen (xterm.js).
+    /// The default `false` is the original Alacritty behavior (only clears the character and keeps the original colors and attributes).
     pub xterm_wide_leader: bool,
 
-    /// oxtty: 탭이 처음 지나간 빈칸에 `'\t'`를 남길지. xterm.js는 빈칸으로 둔다.
-    /// 기본값 `true`는 Alacritty 원래 동작이다(복사할 때 탭을 되살리려고 남긴다).
+    /// oxtty: whether to leave `'\t'` in the first blank cell a tab passes over. xterm.js leaves it blank.
+    /// The default `true` is the original Alacritty behavior (kept to restore tabs when copying).
     pub store_tabs: bool,
 
-    /// oxtty: SGR 21을 이중 밑줄로 읽을지(xterm.js). vte는 굵게 해제(`Attr::CancelBold`)로 넘긴다.
-    /// 기본값 `false`는 Alacritty 원래 동작이다. SGR 22는 vte가 따로 넘기므로 영향이 없다.
+    /// oxtty: whether to read SGR 21 as double underline (xterm.js). vte passes it as bold off (`Attr::CancelBold`).
+    /// The default `false` is the original Alacritty behavior. SGR 22 is passed separately by vte, so it is unaffected.
     pub sgr21_double_underline: bool,
 }
 
@@ -554,9 +554,9 @@ impl<T> Term<T> {
         TermDamage::Partial(TermDamageIterator::new(&self.damage.lines, display_offset))
     }
 
-    /// oxtty: 마지막 [`Term::reset_damage`] 이후 화면 전체가 위로 스크롤된 줄 수.
-    /// [`Config::scroll_damage`]가 켜져 있고 damage가 부분일 때만 의미가 있다.
-    /// 렌더러는 그린 줄을 이만큼 위로 옮긴 뒤 damage 줄만 다시 그린다.
+    /// oxtty: number of lines the whole screen scrolled up since the last [`Term::reset_damage`].
+    /// Meaningful only when [`Config::scroll_damage`] is on and the damage is partial.
+    /// The renderer moves its drawn lines up by this much and then redraws only the damaged lines.
     pub fn damage_scrolled(&self) -> usize {
         self.damage.scrolled
     }
@@ -730,10 +730,10 @@ impl<T> Term<T> {
         &mut self.grid
     }
 
-    /// oxtty: DECSTR(`CSI ! p`) 소프트 리셋. vte는 이 시퀀스를 버리므로 `oxtty::Engine`이 입력에서 찾아 부른다.
-    /// xterm.js `softReset`과 같은 항목을 되돌린다: 커서를 보이게, 삽입·원점·응용 커서·응용 키패드·
-    /// bracketed paste·포커스 보고를 끄고 자동 줄바꿈을 켠다. 스크롤 영역은 화면 전체로, 펜과 문자 집합은
-    /// 기본값으로, 저장한 커서는 왼쪽 위·기본 펜으로. 커서 위치와 화면 내용은 그대로다.
+    /// oxtty: DECSTR (`CSI ! p`) soft reset. vte drops this sequence, so `oxtty::Engine` finds it in the input and calls this.
+    /// Resets the same items as xterm.js `softReset`: makes the cursor visible, turns off insert, origin, application cursor, application keypad,
+    /// bracketed paste and focus reporting, and turns on auto-wrap. The scroll region becomes the whole screen, the pen and character sets
+    /// go back to defaults, and the saved cursor goes to the top left with the default pen. The cursor position and screen content are unchanged.
     pub fn soft_reset(&mut self) {
         self.mode.insert(TermMode::SHOW_CURSOR | TermMode::LINE_WRAP);
         self.mode.remove(
@@ -761,7 +761,7 @@ impl<T> Term<T> {
         &mut self.inactive_grid
     }
 
-    /// oxtty: xterm.js처럼 `line`이 앞줄에서 이어졌다는 표시(앞줄 마지막 칸의 WRAPLINE)를 지운다.
+    /// oxtty: like xterm.js, clears the mark that `line` continues from the previous line (WRAPLINE on the last cell of the previous line).
     fn unwrap_from_previous(&mut self, line: Line) {
         let previous: Line = line - 1;
         if previous.0 < -(self.grid.history_size() as i32) {
@@ -934,7 +934,7 @@ impl<T> Term<T> {
             *line = cmp::max(*line - lines, top);
         }
 
-        // oxtty: 맨 아래를 보고 있을 때 화면 전체가 스크롤되면 damage를 내용과 함께 옮긴다.
+        // oxtty: when the whole screen scrolls while viewing the bottom, move the damage along with the content.
         let whole_screen =
             region.start == Line(0) && region.end == Line(self.screen_lines() as i32);
         if self.config.scroll_damage
@@ -2177,9 +2177,9 @@ impl<T: EventListener> Handler for Term<T> {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
                 match mode {
-                    // oxtty: vte 테이블에 없는 xterm 모드. 47/1047은 1049처럼 대체 화면으로 가되
-                    // 커서를 저장하지 않는다(xterm.js setModePrivate). swap_alt가 덮은 저장 커서를 되돌리고,
-                    // ?1049l로 나오면 xterm.js는 그 저장 커서로 돌아가므로 주 화면 커서도 저장 커서로 둔다.
+                    // oxtty: xterm modes missing from the vte table. 47/1047 switch to the alternate screen like 1049 but
+                    // do not save the cursor (xterm.js setModePrivate). Restore the saved cursor that swap_alt overwrote, and
+                    // since xterm.js returns to that saved cursor when leaving via ?1049l, set the primary screen cursor to the saved cursor too.
                     47 | 1047 => if !self.mode.contains(TermMode::ALT_SCREEN) {
                         let saved_cursor = self.grid.saved_cursor.clone();
                         self.swap_alt();
@@ -2252,7 +2252,7 @@ impl<T: EventListener> Handler for Term<T> {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
                 match mode {
-                    // oxtty: xterm.js activateNormalBuffer처럼 주 화면 커서가 대체 화면 커서를 이어받는다.
+                    // oxtty: like xterm.js activateNormalBuffer, the primary screen cursor inherits the alternate screen cursor.
                     47 | 1047 => if self.mode.contains(TermMode::ALT_SCREEN) {
                         self.swap_alt();
                         self.grid.cursor = self.inactive_grid.cursor.clone();

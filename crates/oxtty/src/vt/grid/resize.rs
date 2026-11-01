@@ -127,7 +127,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
     /// Grow number of columns in each row, reflowing if necessary.
     fn grow_columns(&mut self, reflow: bool, columns: usize) {
-        // oxtty: 커서 문단 유지가 꺼져 있으면 None → Alacritty 원래 reflow.
+        // oxtty: None when cursor paragraph preservation is off → original Alacritty reflow.
         let cursor_paragraph = self.keep_cursor_paragraph.then(|| self.cursor_paragraph());
         // Check if a row needs to be wrapped.
         let should_reflow = |row: &Row<T>| -> bool {
@@ -278,7 +278,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
     /// Shrink number of columns in each row, reflowing if necessary.
     fn shrink_columns(&mut self, reflow: bool, columns: usize) {
-        // oxtty: 커서 문단 유지가 꺼져 있으면 None → Alacritty 원래 reflow.
+        // oxtty: None when cursor paragraph preservation is off → original Alacritty reflow.
         let cursor_paragraph = self.keep_cursor_paragraph.then(|| self.cursor_paragraph());
         let (old_len, old_cursor_line) = (self.raw.len(), self.cursor.point.line);
         self.columns = columns;
@@ -409,9 +409,9 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Reverse iterator and use it as the new grid storage.
         let mut reversed: Vec<Row<T>> = new_raw.drain(..).rev().collect();
         if reflow && self.keep_cursor_paragraph {
-            // oxtty: xterm.js _reflowSmaller는 늘어난 줄마다, 히스토리가 비어 있고 커서가 맨 아랫줄이
-            // 아니면 맨 아랫줄을 버리고 커서를 내린다. 그 밖에는 히스토리로 밀고 커서 행은 그대로다.
-            // 문단이 커서 아래에 있어도 같다.
+            // oxtty: for each added line, xterm.js _reflowSmaller drops the bottom line and moves the cursor down
+            // if the history is empty and the cursor is not on the bottom line. Otherwise it pushes into history and the cursor row stays.
+            // The same holds even when the paragraph is below the cursor.
             let added = reversed.len() - old_len;
             let kept = if old_len == self.lines {
                 min(added, self.lines - 1 - old_cursor_line.0 as usize)

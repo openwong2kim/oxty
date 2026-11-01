@@ -74,7 +74,7 @@ test('rowCellsView matches rowCells without copying', () => {
   for (const y of [0, 1, t.rows - 1]) assert.deepEqual(Array.from(t.rowCellsView(y)), Array.from(t.rowCells(y)));
   assert.equal(t.rowCellsView(t.rows), null);
   const view = t.rowCellsView(0);
-  t.rowCells(1); // 다음 호출이 같은 메모리를 덮는다
+  t.rowCells(1); // the next call overwrites the same memory
   assert.equal(view[0], 's'.codePointAt(0));
 });
 

@@ -1,16 +1,16 @@
-// 차등 하네스 입력. 데이터와 wmux 재생 순서만 둔다.
-// 출처: wmux(오너 작성, MIT) 3bfef3aac41bcb5c4a156abec0027fb3a4978b29
+// Differential harness inputs. Holds only the data and the wmux replay order.
+// Origin: wmux (written by the owner, MIT) 3bfef3aac41bcb5c4a156abec0027fb3a4978b29
 //   bench/rust-terminal-core.ts `fixtures` → TEXT(25), bench/rust-snapshot-parity.ts `cases` → ANSI(29),
-//   같은 파일의 resize seed 공식(24)·partial-utf8(1)·margins 거부 입력, core/harness/corpus/* → ./corpus/*(그대로 복사).
-//   TEXT·ANSI 배열 줄은 원문을 그대로 붙였다.
+//   the resize seed formula (24), partial-utf8 (1) and margins refusal inputs from the same file, core/harness/corpus/* → ./corpus/* (copied as is).
+//   The TEXT and ANSI array lines were pasted verbatim.
 //
-// wmux 91건 대조 (corpus 6은 두 벤치가 같은 입력이라 한 번만 돈다 → 고유 입력 85 = 25 + 29 + 6 + 24 + 1)
-// | wmux 벤치                     | 건수                                   | 이 파일 id                                   |
-// | rust-terminal-core.ts (텍스트) | 25 + corpus 6 = 31                     | text/<name>, corpus/<name>                   |
-// | rust-snapshot-parity.ts (ANSI) | 29 + corpus 6 + seed 24 + utf8 1 = 60  | ansi/<i>, corpus/<name>, seed/<n>, partial-utf8 |
-// | 같은 파일, 집계 밖 margins 거부 | 1                                      | margins                                      |
-// | oxtty: 알려진 차이 재현·회귀     | —                                      | known/<name>                                 |
-// wmux 텍스트 벤치에는 이어쓰기 단계가 없었다. 여기서는 모든 케이스가 같은 tail 규칙(wmux ANSI 벤치)으로 이어쓴다.
+// Mapping of the 91 wmux cases (corpus 6 is the same input in both benches, so it runs once → 85 unique inputs = 25 + 29 + 6 + 24 + 1)
+// | wmux bench                                     | count                                 | id in this file                                 |
+// | rust-terminal-core.ts (text)                   | 25 + corpus 6 = 31                    | text/<name>, corpus/<name>                      |
+// | rust-snapshot-parity.ts (ANSI)                 | 29 + corpus 6 + seed 24 + utf8 1 = 60 | ansi/<i>, corpus/<name>, seed/<n>, partial-utf8 |
+// | same file, uncounted margins refusal           | 1                                     | margins                                         |
+// | oxtty: known difference repros and regressions | —                                     | known/<name>                                    |
+// The wmux text bench had no continuation step. Here every case continues with the same tail rule (wmux ANSI bench).
 
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -18,22 +18,22 @@ import { readFileSync, existsSync } from 'node:fs';
  * @typedef {import('./screen.mjs').Event} Event
  * @typedef {{
  *   id: string,
- *   cols: number, rows: number, scrollback: number,   // 시작 geometry. 최종 geometry는 input의 resize에서 나온다
+ *   cols: number, rows: number, scrollback: number,   // starting geometry. The final geometry comes from the resizes in input
  *   input: Event[],
- *   bytes: number,        // input에 실려야 할 바이트 수(원천에서 따로 셈). 실제로 쓴 수와 다르면 inconclusive
- *   tail: Uint8Array,     // 이어쓰기. 첫 출력 문자가 pending wrap을, 꼬리가 끊긴 시퀀스 이어붙기를 드러낸다
- *   missing?: string,     // 입력 파일이 없으면 이유 — 결과는 inconclusive(실패)
+ *   bytes: number,        // number of bytes input must carry (counted separately at the source). Inconclusive if it differs from the count actually written
+ *   tail: Uint8Array,     // continuation. The first printed character reveals pending wrap; the tail reveals resumption of split sequences
+ *   missing?: string,     // the reason, if the input file is missing — the result is inconclusive (failure)
  * }} Case
  */
 
-/** 검사용: 그룹별 케이스 수. 91 = 31 + 60과 맞물린다. */
+/** For checks: case count per group. Ties in with 91 = 31 + 60. */
 export const WMUX_COUNTS = { text: 25, ansi: 29, corpus: 6, seed: 24, 'partial-utf8': 1 };
 
 const enc = new TextEncoder();
 const TAIL = enc.encode('\x1b[?2026lZ한\r\nnext');
 const CSI_TAIL = enc.encode('44mTAIL\x1b[0m');
 const UTF8_TAIL = Uint8Array.of(0x98, 0x80, 0x21);
-// 끊긴 CSI는 파라미터를 잇는다. 시퀀스 안의 C0(LF)가 끝에 있어도 같다.
+// A split CSI resumes its parameters. Same even when a C0 (LF) inside the sequence is at the end.
 const tailFor = (text) => (/\x1b\[31;\n?$/.test(text) ? CSI_TAIL : TAIL);
 
 // wmux bench/rust-snapshot-parity.ts `cases`: [text, cols], rows 6, scrollback 100
@@ -58,7 +58,7 @@ const ANSI = [
   [Array.from({ length: 50 }, (_, i) => `\x1b[3${i % 8}mline${i}\x1b[0m`).join('\r\n'), 20],
 ];
 
-// wmux bench/rust-terminal-core.ts `fixtures`: 기본 40x6, scrollback 100. chunks는 최종 resize 뒤에 쓴다
+// wmux bench/rust-terminal-core.ts `fixtures`: default 40x6, scrollback 100. chunks are written after the final resize
 const TEXT = [
   { name: 'empty', text: '' },
   { name: 'colored-log', text: '\x1b[1;31mERROR\x1b[0m boom\r\nsecond line\r\n' },
@@ -87,11 +87,11 @@ const TEXT = [
   { name: 'resize-narrow', text: 'abc한글0123456789\r\nlast', cols: 8, rows: 4, geometry: { start: { cols: 16, rows: 4 }, changes: [] } },
 ];
 
-// 알려진 차이를 하나씩 재현하는 최소 입력(20x6). known-differences.json 항목과 짝이고, 엔진이 고쳐지면 stale로 실패한다.
-// 차이가 없음을 고정하는 회귀 입력도 둔다(osc8-underline, tab-pending-wrap, decscusr, deccolm,
-// 직렬화기 수정의 B 회귀 tab-cell, origin-mode, c0-inside-csi).
+// Minimal inputs (20x6) reproducing one known difference each. Paired with known-differences.json entries; once the engine is fixed they fail as stale.
+// Also holds regression inputs pinning that there is no difference (osc8-underline, tab-pending-wrap, decscusr, deccolm,
+// and the B regressions from serializer fixes: tab-cell, origin-mode, c0-inside-csi).
 const KNOWN = {
-  // 감긴 줄 지우기: xterm은 isWrapped를 줄 속성으로 두고 지우기마다 정해진 규칙으로 바꾼다.
+  // Erasing wrapped lines: xterm keeps isWrapped as a line attribute and changes it by fixed rules on each erase.
   'el0-col0-wrapped': `${'X'.repeat(25)}\r\x1b[K`,
   'el0-wrapping-row': `${'X'.repeat(25)}\x1b[1;5H\x1b[K`,
   'el0-pending-wrap': `${'X'.repeat(20)}\x1b[K`,
@@ -133,7 +133,7 @@ const KNOWN = {
 };
 
 /**
- * wmux feedAtRecordedSizes 순서: initial을 changes 위치에서 잘라 resize를 끼우고, 최종 geometry로 맞춘 뒤 chunks를 잇는다.
+ * wmux feedAtRecordedSizes order: cut initial at the changes positions and insert resizes, match the final geometry, then append chunks.
  * @returns {Case}
  */
 function replay(id, { initial, start, end, changes = [], chunks = [], scrollback, tail }) {
@@ -148,7 +148,7 @@ function replay(id, { initial, start, end, changes = [], chunks = [], scrollback
   return { id, cols: start.cols, rows: start.rows, scrollback, input, bytes, tail };
 }
 
-/** ./corpus/<name>/{recording.bin, events.jsonl}. 파일이 없으면 missing(inconclusive). @returns {Case} */
+/** ./corpus/<name>/{recording.bin, events.jsonl}. If the files are missing, missing (inconclusive). @returns {Case} */
 export function corpus(name, root = new URL('./corpus/', import.meta.url)) {
   const id = `corpus/${name}`;
   const dir = new URL(`${name}/`, root);

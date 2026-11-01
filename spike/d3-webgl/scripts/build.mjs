@@ -1,4 +1,4 @@
-// 스파이크 빌드: 타입 검사 → esbuild 번들 → dist/에 index.html·oxtty.wasm 복사
+// Spike build: type check → esbuild bundle → copy index.html and oxtty.wasm into dist/
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -10,7 +10,7 @@ const repo = join(here, '..', '..');
 const oxttyDist = join(repo, 'packages', 'oxtty', 'dist');
 const dist = join(here, 'dist');
 
-// oxtty wasm이 아직 없으면 저장소 빌드 스크립트로 만든다
+// If the oxtty wasm does not exist yet, build it with the repository build script
 if (!existsSync(join(oxttyDist, 'oxtty.wasm'))) {
   execFileSync('bash', [join(repo, 'scripts', 'build-wasm.sh')], { stdio: 'inherit' });
 }

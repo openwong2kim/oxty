@@ -139,17 +139,17 @@ pub struct Grid<T> {
     /// Maximum number of lines in history.
     max_scroll_limit: usize,
 
-    /// oxtty: 리사이즈 때 커서가 있는 문단을 reflow하지 않는다(xterm.js `reflowCursorLine: false`).
-    /// 기본값 `false`는 Alacritty 원래 동작이다.
+    /// oxtty: do not reflow the paragraph holding the cursor on resize (xterm.js `reflowCursorLine: false`).
+    /// The default `false` is the original Alacritty behavior.
     #[cfg_attr(feature = "serde", serde(skip))]
     keep_cursor_paragraph: bool,
 
-    /// oxtty: 히스토리가 꽉 차서 버려질 줄을 받는 곳(oxtty는 압축해 보관한다).
-    /// `None`이면 Alacritty 원래 동작대로 버린다.
+    /// oxtty: receives lines that would be dropped because the history is full (oxtty keeps them compressed).
+    /// If `None`, they are dropped as in the original Alacritty behavior.
     #[cfg_attr(feature = "serde", serde(skip))]
     history_sink: Option<Arc<Mutex<dyn HistorySink<T>>>>,
 
-    /// oxtty: 지금까지 위로 스크롤된 줄 수. `display_offset`을 올리는 것과 같은 조건으로 센다.
+    /// oxtty: number of lines scrolled up so far. Counted under the same conditions that raise `display_offset`.
     #[cfg_attr(feature = "serde", serde(skip))]
     scrolled_lines: u64,
 }
@@ -220,7 +220,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         older
     }
 
-    /// oxtty: 리사이즈 때 커서 문단을 reflow하지 않을지 정한다(xterm.js `reflowCursorLine: false`).
+    /// oxtty: sets whether to skip reflowing the cursor paragraph on resize (xterm.js `reflowCursorLine: false`).
     pub fn set_keep_cursor_paragraph(&mut self, keep: bool) {
         self.keep_cursor_paragraph = keep;
     }

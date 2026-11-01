@@ -1,10 +1,10 @@
-// oxtty ⇄ xterm.js 화면 동등성. `npm ci && npm test`(packages/oxtty)에서 돈다.
-//   증명 A: 같은 이벤트 → oxtty 레코드 == xterm 레코드 (wmux 렌더러가 엔진 교체 뒤 읽을 바로 그 데이터)
-//   증명 B: 같은 이벤트 → oxtty ansiSnapshot() → 새 xterm에 쓴 화면 == xterm 원본 (wmux가 패인을 복원할 때 보는 화면)
-// 단계마다 비교한다: initial → continued(case.tail) → returned(xterm이 대체 화면이면 ?1049lX).
-// 같음이 아닌 결과는 known-differences.json에 이유와 함께 있어야 하고, 그 항목은 실제로 나타나야 한다.
-// 비교기가 실패할 수 있음을 케이스보다 먼저 보인다: 모든 비교 필드에 그 필드를 바꾸는 입력(레버)이 있어야 한다.
-// OXTTY_SWAP_GATE=1이면 엔진 교체를 막는 항목(blocksSwap)이 하나라도 있을 때 실패한다(PRD G3).
+// oxtty ⇄ xterm.js screen equivalence. Runs under `npm ci && npm test` (packages/oxtty).
+//   Proof A: same events → oxtty record == xterm record (exactly the data the wmux renderer will read after the engine swap)
+//   Proof B: same events → oxtty ansiSnapshot() → screen written to a new xterm == the original xterm (the screen wmux sees when restoring a pane)
+// Compares at each step: initial → continued (case.tail) → returned (?1049lX if xterm is on the alternate screen).
+// Any result other than equal must be in known-differences.json with a reason, and that entry must actually occur.
+// Shows that the comparator can fail before running the cases: every compared field must have an input (lever) that changes it.
+// With OXTTY_SWAP_GATE=1, fails if any entry blocks the engine swap (blocksSwap) (PRD G3).
 
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,7 +18,7 @@ const ORACLE = oracleMismatch();
 
 before(async () => { await init(); });
 
-/** 20x6 빈 화면에 events를 적용한 두 레코드. */
+/** The two records from applying events to an empty 20x6 screen. */
 async function screens(events) {
   const x = xterm(20, 6, 100);
   const o = new Terminal({ cols: 20, rows: 6, scrollback: 100 });
@@ -73,7 +73,7 @@ test('B lever: one byte added to or dropped from the payload is a difference', a
   assert.ok(dropped.diffs.some((d) => d.field === 'lines.cells.chars'), 'dropped byte');
 });
 
-// ── 판정 ─────────────────────────────────────────────────────────────────────────
+// ── Verdict ──────────────────────────────────────────────────────────────────────
 
 /**
  * @typedef {(import('./xterm/screen.mjs').Diff & { step: string })} StepDiff
@@ -81,7 +81,7 @@ test('B lever: one byte added to or dropped from the payload is a difference', a
  *   | { kind: 'inconclusive', why: string }} Outcome
  */
 
-/** 기록한 레코드를 Outcome으로. 쓴 바이트 수가 케이스와 다르거나 줄이 0개면 비교한 것이 아니다. @returns {Outcome} */
+/** Turns recorded records into an Outcome. If the written byte count differs from the case or there are 0 lines, nothing was compared. @returns {Outcome} */
 function compare(c, written, records) {
   if (written !== c.bytes) return { kind: 'inconclusive', why: `wrote ${written} bytes, case declares ${c.bytes}` };
   const empty = records.find(([, x, o]) => !Object.keys(x.lines).length || !Object.keys(o.lines).length);
@@ -110,7 +110,7 @@ async function proveA(c) {
 }
 
 /**
- * 복원 xterm은 원본의 최종 크기로 만든다. edit는 B 레버가 payload를 바꿀 때만 쓴다.
+ * The restored xterm is created at the original's final size. edit is used only when a B lever changes the payload.
  * @returns {Promise<Outcome>}
  */
 async function proveB(c, edit = (payload) => payload) {
@@ -141,8 +141,8 @@ async function proveB(c, edit = (payload) => payload) {
 const show = (v) => (JSON.stringify(v) ?? 'undefined').slice(0, 60);
 
 /**
- * 순수 판정. 항목 field와 같거나 그 하위('lines'가 'lines.cells.fg'를 덮음)인 diff는 문서화된 것이다.
- * 이 케이스·증명에 걸린 항목은 각각 하나 이상 맞아야 한다(stale 방지).
+ * Pure verdict. A diff equal to or under an entry's field ('lines' covers 'lines.cells.fg') is documented.
+ * Each entry attached to this case and proof must match at least once (prevents staleness).
  * @returns {{ pass: true } | { pass: false, message: string }}
  */
 function judge(caseId, proof, outcome, known) {
@@ -223,7 +223,7 @@ test('known-differences: every entry has a reason, blocksSwap, real cases and re
 test('wmux ANSI 60 = 59 same + seed/14 refused: no other B entry touches them', () => {
   const ansi60 = CASES.filter((c) => /^(ansi|corpus|seed)\/|^partial-utf8$/.test(c.id)).map((c) => c.id);
   assert.equal(ansi60.length, 60);
-  // 케이스마다 B 테스트가 항목 없이 통과하면 같음이다. 그래서 여기서는 B 항목이 seed/14 거부 하나뿐임을 고정한다.
+  // Per case, a B test passing without entries means equal. So here we pin that the only B entry is the seed/14 refusal.
   const touching = KNOWN.filter((e) => e.proofs.includes('B') && e.cases.some((id) => ansi60.includes(id)))
     .map((e) => [e.id, e.refusal, e.cases.filter((id) => ansi60.includes(id))]);
   assert.deepEqual(touching, [['resize-seed-14', 'unsupported-wide-edge', ['seed/14']]]);
@@ -235,7 +235,7 @@ test('swap gate: OXTTY_SWAP_GATE=1 fails while a known difference blocks the eng
   assert.deepEqual(blockers, [], `${blockers.length} known differences block the swap:\n  ${blockers.join('\n  ')}`);
 });
 
-// ── 케이스 × 증명 ────────────────────────────────────────────────────────────────
+// ── Cases × proofs ───────────────────────────────────────────────────────────────
 for (const c of CASES) {
   test(`A ${c.id}`, async () => {
     const why = ORACLE ?? c.missing;

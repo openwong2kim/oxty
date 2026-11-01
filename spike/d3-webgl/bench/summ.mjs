@@ -1,4 +1,4 @@
-// run.mjs 결과 JSON을 시나리오·백엔드별 중앙값으로 요약한다. 사용: node bench/summ.mjs A.json [B.json ...]
+// Summarizes run.mjs result JSON as medians per scenario and backend. Usage: node bench/summ.mjs A.json [B.json ...]
 import { readFileSync } from 'node:fs';
 const med = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 for (const f of process.argv.slice(2)) {

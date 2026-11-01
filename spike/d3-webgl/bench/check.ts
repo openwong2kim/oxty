@@ -1,4 +1,4 @@
-// 증분 렌더(청크마다 render) 결과와 같은 바이트를 한 번에 넣고 처음 그린 결과의 픽셀을 비교한다.
+// Compares the pixels of an incremental render (render per chunk) against a first render of the same bytes fed all at once.
 import { init, Terminal as Oxtty } from '../../../packages/oxtty/dist/index.js';
 import { OxttyWebglRenderer } from '../src/OxttyWebglRenderer';
 const enc = new TextEncoder();
@@ -30,7 +30,7 @@ async function main() {
     let diff = 0; for (let i = 0; i < pa.length; i++) if (pa[i] !== pb[i]) diff++;
     results[`chunk${chunk}`] = diff;
   }
-  // 감도 확인: 한 글자만 달라도 차이가 잡혀야 한다
+  // Sensitivity check: even a single differing character must be caught
   const c = new Oxtty({ cols: 120, rows: 40, scrollback: 1000 }), rc = new OxttyWebglRenderer(c as any, document.body, true);
   const d = new Oxtty({ cols: 120, rows: 40, scrollback: 1000 }), rd = new OxttyWebglRenderer(d as any, document.body, true);
   c.write(s); rc.render(); d.write(s); d.write('X'); rd.render();
