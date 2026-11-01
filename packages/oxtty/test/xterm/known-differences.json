@@ -37,5 +37,8 @@
     "reason": "ICH at the right half of a wide char blanks the left half and moves the right half on alone (xterm.js insertCells; oxtty does the same). Printed text cannot rebuild a lone right half, so the snapshot is refused" },
   { "id": "invalid-utf8", "proofs": ["A", "B"], "cases": ["known/invalid-utf8"], "blocksSwap": false,
     "fields": ["cursor.x", "lines.cells.chars", "lines.cells.width"],
-    "reason": "For bytes that are not UTF-8 (a lone continuation byte here) vte writes a U+FFFD cell and xterm writes nothing. The snapshot carries the U+FFFD, so the restored xterm has it too. Programs do not write invalid UTF-8 in normal output" }
+    "reason": "For bytes that are not UTF-8 (a lone continuation byte here) vte writes a U+FFFD cell and xterm writes nothing. The snapshot carries the U+FFFD, so the restored xterm has it too. Programs do not write invalid UTF-8 in normal output" },
+  { "id": "esc-non-ascii", "proofs": ["A", "B"], "cases": ["known/esc-non-ascii"], "blocksSwap": false,
+    "fields": ["cursor.x", "lines.cells.chars", "lines.cells.width"],
+    "reason": "After ESC, a non-ASCII character (here U+AC00 then '[') ends the escape in xterm, which prints the '['. vte ignores the UTF-8 bytes inside the escape and reads ESC [ as the start of a CSI, so the '[' is not printed. The snapshot carries the oxtty screen. Programs do not follow ESC with non-ASCII text" }
 ]
