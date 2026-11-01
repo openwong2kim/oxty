@@ -166,7 +166,7 @@
     },
     "Terminal.modes": {
       "status": "supported",
-      "reason": "From engine mode bits; mouseTrackingMode never reports x10, reverseWraparoundMode and win32InputMode are always false."
+      "reason": "From engine mode bits. Engine gap: X10 mouse (CSI ? 9 h) is not tracked, so mouseTrackingMode never reports x10 (step 2). reverseWraparoundMode and win32InputMode are always false."
     },
     "Terminal.unicode.activeVersion": {
       "status": "supported",
