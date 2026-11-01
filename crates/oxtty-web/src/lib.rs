@@ -34,6 +34,7 @@ pub mod fit;
 mod input;
 pub mod markers;
 pub mod options;
+pub mod parser;
 pub mod render;
 pub mod search;
 pub mod state;
