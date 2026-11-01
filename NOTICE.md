@@ -13,6 +13,15 @@ xterm.js cursor-paragraph resize behaviour, SGR blink, and removal of the
 PTY/event-loop modules and their dependencies so the code builds for
 `wasm32-unknown-unknown`.
 
+## vte 0.15.0
+
+`crates/oxtty/src/vt/vte/ansi.rs` is the `ansi` module of the published `vte`
+0.15.0 crate by Joe Wilm, Christian Duerr and the Alacritty contributors,
+licensed under the Apache License 2.0 or the MIT license (used under the Apache
+License 2.0, `crates/oxtty/LICENSE-APACHE`). It is modified so parsing can stop
+at sequences the host hooked; the changes are listed in
+`crates/oxtty/src/vt/PATCHES.md`.
+
 ## xterm.js Unicode 11 width table
 
 `crates/oxtty/src/vt/wmux_unicode11.rs` is generated from the

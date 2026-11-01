@@ -159,6 +159,26 @@ single crate.
   `env!("CARGO_PKG_VERSION")` pinned to `"0.26.0"` so the secondary device
   attributes reply keeps reporting Alacritty's version instead of oxtty's.
 - The module is `#[rustfmt::skip]` so it stays byte-close to upstream.
+- `vte/ansi.rs` is the `ansi` module of the published `vte` 0.15.0 crate
+  (Apache-2.0 OR MIT), built in so parsing can stop at a sequence the host
+  hooked (`vte/mod.rs` re-exports the crate's `Parser`, `Params` and
+  `Perform`, which stay the published ones). Mechanical changes: the no-std
+  `Processor` and `std` feature gates are gone and `crate::` paths point at
+  `super::`. Parser hooks (marked `oxtty` in the code): `Processor::set_hook`
+  registers CSI and DCS sequences by `hook_id` (intermediates, private marker
+  first, then the final byte) and OSC by number; the `Performer` keeps a
+  hooked sequence as `Processor::pending_hook` instead of dispatching it and
+  stops `advance_until_terminated` after it (`advance_until_hook`). A DCS
+  payload is collected for its hook; a payload past xterm.js's 10 MB limit is
+  not stopped at, and CAN/SUB aborting an OSC or DCS runs no hook (the OSC
+  still applies, as vte does). `finish_hook` runs the default action (a CSI
+  is parsed again from its parameters, as vte's `Params` cannot be built) or
+  drops it. Applying an ending synchronized update parses from a `Replay`
+  that a hook can pause; the next `advance_until_hook` goes on with it.
+  `Processor::sync_bytes` exposes the held bytes, and `advance`/`stop_sync`
+  run hook defaults themselves, as before hooks existed. One `debug!`
+  argument lost a borrow for a newer clippy. To upgrade, diff this file
+  against the old crate's `src/ansi.rs` and apply that to the new one.
 
 These changes are compatibility policy, not upstream behaviour.
 

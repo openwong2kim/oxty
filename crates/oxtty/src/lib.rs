@@ -41,8 +41,10 @@ use crate::vt::grid::{Dimensions, Grid, Row, Scroll};
 use crate::vt::index::Line;
 use crate::vt::term::cell::{Cell as AlacCell, Flags};
 use crate::vt::term::{ClipboardType, Config, Osc52, Term, TermDamage, TermMode};
+use crate::vt::vte::ansi::Hook as VtHook;
 use crate::vt::vte::ansi::Rgb;
 use crate::vt::vte::ansi::{Color, CursorShape as AlacCursorShape, Processor, Timeout};
+pub use crate::vt::vte::ansi::{HookKind, hook_id};
 
 /// Smallest and largest accepted dimensions.
 pub const MIN_COLS: u16 = 2;
@@ -211,6 +213,22 @@ impl From<ClipboardType> for Clipboard {
     }
 }
 
+/// A sequence the host hooked ([`Engine::set_hook`]) that parsing stopped at, before its default action
+/// ([`Engine::finish_hook`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hook {
+    pub kind: HookKind,
+    /// [`hook_id`] for CSI and DCS, the number before the first `;` for OSC.
+    pub id: u32,
+    /// CSI and DCS parameters, each followed by its sub-parameters (an empty parameter is 0, values stop at 65535).
+    pub params: Vec<Vec<u16>>,
+    /// OSC: everything after the first `;`. DCS: the payload.
+    pub data: Vec<u8>,
+}
+
+/// DECSTR (`CSI ! p`) as [`hook_id`] names it.
+const DECSTR_HOOK: u32 = (b'!' as u32) << 8 | b'p' as u32;
+
 /// Colours that answer OSC 4/10/11/12 queries: the 256 palette entries, then
 /// foreground, background and cursor, as `0xRRGGBB`.
 pub const COLOR_SLOTS: usize = 259;
@@ -350,8 +368,6 @@ pub struct Engine {
     parser: Processor<HostTimeout>,
     inbox: Listener,
     tail: snapshot::RawTail,
-    // A copy of vte's synchronized-update buffer. vte reports only its length, not its contents.
-    held: Vec<u8>,
     // Compressed history. When on, Alacritty keeps only the newest TermHistory::RECENT rows and hands
     // older ones here.
     history: Option<TermHistory>,
@@ -370,6 +386,8 @@ pub struct Engine {
     history_seen: usize,
     // Scanner state for a DECSTR (`CSI Ps ! p`) split across feeds.
     decstr: DecstrScan,
+    // A DECSTR has been parsed, but a pending hook holds back its soft reset.
+    decstr_owed: bool,
     // Host colours that answer colour queries; none means queries go unanswered.
     colors: Option<Box<[u32; COLOR_SLOTS]>>,
     // Recently decoded history rows by their History::id, newest last.
@@ -434,7 +452,6 @@ impl Engine {
             parser: Processor::new(),
             inbox,
             tail: Default::default(),
-            held: Vec::new(),
             history,
             scrollback,
             offset: 0,
@@ -445,6 +462,7 @@ impl Engine {
             history_seen: 0,
             view_moved: false,
             decstr: DecstrScan::default(),
+            decstr_owed: false,
             colors: None,
             row_cache: RefCell::new(VecDeque::with_capacity(ROW_CACHE)),
         }
@@ -533,38 +551,133 @@ impl Engine {
     }
 
     /// Interprets bytes written by the program (UTF-8 and escape sequences
-    /// may be split across calls).
-    pub fn feed(&mut self, mut bytes: &[u8]) {
-        // vte drops DECSTR, so the input is split where it ends and the engine soft-resets.
-        // As in xterm.js, DECSTR also ends a synchronized update.
-        while let Some(end) = self.decstr.find(bytes) {
-            let (head, rest) = bytes.split_at(end);
-            self.advance(head);
-            self.flush_sync();
-            self.term.soft_reset();
-            bytes = rest;
+    /// may be split across calls). Hooked sequences run their default action.
+    pub fn feed(&mut self, bytes: &[u8]) {
+        let mut fed = 0;
+        loop {
+            while self.parser.pending_hook().is_some() {
+                self.finish_hook(true);
+            }
+            fed += self.feed_until_hook(&bytes[fed..]);
+            if fed == bytes.len() && self.parser.pending_hook().is_none() {
+                break;
+            }
         }
-        self.advance(bytes);
     }
 
-    fn advance(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+    /// Stops parsing at sequences of `kind` with `id` (`on`), or no longer does: [`hook_id`] of the intermediates (a
+    /// private marker such as `?` first) and final byte for CSI and DCS, the number before the first `;` for OSC.
+    /// Off for everything by default.
+    pub fn set_hook(&mut self, kind: HookKind, id: u32, on: bool) {
+        self.parser.set_hook(kind, id, on);
+    }
+
+    /// Like [`Engine::feed`], but stops right after a hooked sequence and returns how many bytes it took. The
+    /// sequence's default action has not run: read it with [`Engine::pending_hook`], call [`Engine::finish_hook`],
+    /// then call this again with the bytes it did not take — even none, as it first goes on with output parsing
+    /// stopped in. Takes nothing while a hook is pending.
+    ///
+    /// The output held by a synchronized update is parsed when the update ends, so its hooks are met by the call
+    /// that ends it (which then takes all of its bytes) or by [`Engine::flush_sync`].
+    pub fn feed_until_hook(&mut self, bytes: &[u8]) -> usize {
+        if self.parser.pending_hook().is_some() {
+            return 0;
+        }
+        // What parsing stopped in: the rest of a synchronized update being applied, then a DECSTR's reset.
+        self.advance(&[]);
+        self.settle();
+        let mut fed = 0;
+        while fed < bytes.len() && self.parser.pending_hook().is_none() {
+            // vte drops DECSTR, so the input is split where it ends and the engine soft-resets.
+            let rest = &bytes[fed..];
+            let mut scan = self.decstr;
+            let end = scan.find(rest);
+            let head = &rest[..end.unwrap_or(rest.len())];
+            let n = self.advance(head);
+            fed += n;
+            if n == head.len() {
+                self.decstr = scan;
+                self.decstr_owed = end.is_some();
+                self.settle();
+            } else {
+                // Stopped before the DECSTR's end, so the scanner only moves over what was parsed.
+                let found = self.decstr.find(&head[..n]);
+                debug_assert!(found.is_none());
+            }
+        }
+        fed
+    }
+
+    /// The hooked sequence parsing stopped at.
+    pub fn pending_hook(&self) -> Option<Hook> {
+        Some(match self.parser.pending_hook()? {
+            VtHook::Csi { id, params } => Hook {
+                kind: HookKind::Csi,
+                id: *id,
+                params: params.clone(),
+                data: Vec::new(),
+            },
+            VtHook::Osc { id, params, .. } => Hook {
+                kind: HookKind::Osc,
+                id: *id,
+                params: Vec::new(),
+                data: params[1..].join(&b';'),
+            },
+            VtHook::Dcs { id, params, data } => Hook {
+                kind: HookKind::Dcs,
+                id: *id,
+                params: params.clone(),
+                data: data.clone(),
+            },
+        })
+    }
+
+    /// Runs the pending hook's default action (`run_default`) or drops it. Parsing goes on with the next
+    /// [`Engine::feed_until_hook`].
+    pub fn finish_hook(&mut self, run_default: bool) {
+        let Some(hook) = self.parser.pending_hook() else {
+            return;
+        };
+        if !run_default
+            && matches!(
+                hook,
+                VtHook::Csi {
+                    id: DECSTR_HOOK,
+                    ..
+                }
+            )
+        {
+            self.decstr_owed = false;
+        }
+        self.parser.finish_hook(&mut self.term, run_default);
+        self.after_parse();
+    }
+
+    /// Parses `bytes` up to a hooked sequence; returns how many it took.
+    fn advance(&mut self, bytes: &[u8]) -> usize {
+        let n = self.parser.advance_until_hook(&mut self.term, bytes);
+        self.tail.push(&bytes[..n]);
+        self.after_parse();
+        n
+    }
+
+    fn after_parse(&mut self) {
         self.answer_color_queries();
         self.follow_scroll();
         self.count_trimmed();
-        self.tail.push(bytes);
-        // vte's synchronized-update buffer is always a contiguous tail of the input, so its length is
-        // enough to keep the copy in step.
-        let n = self.parser.sync_bytes_count();
-        if n <= bytes.len() {
-            self.held.clear();
-            self.held.extend_from_slice(&bytes[bytes.len() - n..]);
-        } else {
-            let drop = (self.held.len() + bytes.len()).saturating_sub(n);
-            self.held.drain(..drop);
-            self.held.extend_from_slice(bytes);
+    }
+
+    /// The soft reset of a parsed DECSTR, once no hook holds it back. As in xterm.js, DECSTR also ends a
+    /// synchronized update, which may stop at a hook first.
+    fn settle(&mut self) {
+        if !self.decstr_owed || self.parser.pending_hook().is_some() {
+            return;
         }
-        debug_assert_eq!(self.held.len(), n);
+        self.flush_sync();
+        if self.parser.pending_hook().is_none() {
+            self.term.soft_reset();
+            self.decstr_owed = false;
+        }
     }
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].
@@ -956,13 +1069,12 @@ impl Engine {
         self.parser.sync_timeout().pending_timeout()
     }
 
-    /// Ends a pending synchronized update and applies the held output.
+    /// Ends a pending synchronized update and applies the held output. A hooked sequence in it stops parsing as
+    /// in [`Engine::feed_until_hook`], which applies the rest after [`Engine::finish_hook`].
     pub fn flush_sync(&mut self) {
         if self.sync_pending() {
-            self.parser.stop_sync(&mut self.term);
-            self.answer_color_queries();
-            self.held.clear();
-            self.follow_scroll();
+            self.parser.stop_sync_until_hook(&mut self.term);
+            self.after_parse();
         }
     }
 
@@ -984,7 +1096,7 @@ impl Engine {
     /// On a [`SnapshotRefusal`] these bytes could not reproduce the screen;
     /// replay the raw output instead.
     pub fn ansi_snapshot(&self) -> Result<Vec<u8>, SnapshotRefusal> {
-        let held = self.sync_pending().then_some(self.held.as_slice());
+        let held = self.sync_pending().then_some(self.parser.sync_bytes());
         let history = self.history.as_ref().map(TermHistory::lock);
         snapshot::ansi(&self.term, held, &self.tail, history.as_deref())
     }

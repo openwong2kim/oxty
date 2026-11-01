@@ -15,7 +15,7 @@ categories = ["command-line-interface", "wasm"]
 
 [features]
 # serde support for the vt module (embedded Alacritty). Off by default.
-serde = ["dep:serde", "bitflags/serde", "vte/serde"]
+serde = ["dep:serde", "bitflags/serde"]
 
 [dependencies]
 # Dependencies of the vt module (embedded Alacritty) — only these, since PTY and the event loop were removed.
@@ -24,5 +24,8 @@ bitflags = "2.4.1"
 log = "0.4"
 regex-automata = "0.4.3"
 unicode-width = "0.2.0"
-vte = { version = "0.15.0", default-features = false, features = ["std", "ansi"] }
+vte = { version = "0.15.0", default-features = false, features = ["std"] }
+# Dependencies of vte's `ansi` module, which is built into the vt module (vt/vte).
+cursor-icon = { version = "1.0.0", default-features = false }
+memchr = { version = "2.7.4", default-features = false }
 serde = { version = "1", features = ["derive", "rc"], optional = true }

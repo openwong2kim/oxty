@@ -1,7 +1,7 @@
 // oxtty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 8;
+const ABI = 9;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 // Input buffer: smallest allocation, and the largest one kept between writes.
@@ -125,6 +125,7 @@ export const Mode = Object.freeze({
 });
 
 const CURSOR_SHAPES = ['block', 'underline', 'bar'];
+const HOOK_KINDS = ['csi', 'osc', 'dcs'];
 
 /** Packed colour kinds (`rowCells` words 1 and 2). */
 export const ColorKind = Object.freeze({ NAMED: 1, INDEXED: 2, RGB: 3 });
@@ -165,6 +166,9 @@ export class Terminal {
   #clipboard = { read: false, write: false };
   #kittyKeyboard = false;
   #colors = null;
+  #hooks = new Set();
+  // Bytes of a write that stopped at a hook, fed by finishHook.
+  #rest = null;
 
   /**
    * @param {{ cols?: number, rows?: number, scrollback?: number, syncTimeoutMs?: number, onSyncFlush?: () => void, onCrash?: (error: unknown) => void }} [options]
@@ -203,6 +207,11 @@ export class Terminal {
     wasm.oxtty_set_clipboard_access(this.#h, this.#clipboard.read ? 1 : 0, this.#clipboard.write ? 1 : 0);
     if (this.#kittyKeyboard) wasm.oxtty_set_kitty_keyboard(this.#h, 1);
     if (this.#colors) this.setColors(this.#colors);
+    this.#rest = null;
+    for (const key of this.#hooks) {
+      const [kind, id] = key.split(':');
+      wasm.oxtty_set_hook(this.#h, HOOK_KINDS.indexOf(kind), Number(id), 1);
+    }
     this.#onCrash?.(new Error('oxtty: the engine crashed and this terminal was reset'));
   }
 
@@ -221,6 +230,80 @@ export class Terminal {
     }
     this.#shrinkInput();
     this.#armSync();
+  }
+
+  /**
+   * Stops parsing at sequences of `kind` with `id`, or no longer does (`on` false): for CSI and DCS the id is the
+   * intermediates (a private marker such as `?` first) and final byte, one byte each from the most significant;
+   * for OSC the number before the first `;`.
+   * @param {'csi' | 'osc' | 'dcs'} kind
+   */
+  setHook(kind, id, on) {
+    const k = HOOK_KINDS.indexOf(kind);
+    if (k < 0) throw new RangeError(`oxtty: unknown hook kind ${kind}`);
+    const h = this.#handle();
+    if (on) this.#hooks.add(`${kind}:${id}`);
+    else this.#hooks.delete(`${kind}:${id}`);
+    wasm.oxtty_set_hook(h, k, id, on ? 1 : 0);
+  }
+
+  /**
+   * Like `write`, but stops right after a hooked sequence, before its default action. Returns true when all of
+   * `data` was parsed; false when stopped: read `pendingHook()`, run or skip the default with `finishHook()`, then
+   * `resume()`. Throws until then.
+   */
+  writeUntilHook(data) {
+    const h = this.#handle();
+    if (this.#rest || wasm.oxtty_pending_hook(h) >= 0) throw new Error('oxtty: a hook is pending; call finishHook() first');
+    let ptr;
+    let len;
+    if (typeof data === 'string') {
+      ptr = this.#reserve(data.length * 3);
+      len = encoder.encodeInto(data, new Uint8Array(wasm.memory.buffer, ptr, data.length * 3)).written;
+    } else {
+      ptr = this.#stage(data);
+      len = data.length;
+    }
+    return this.#feedUntilHook(h, ptr, len);
+  }
+
+  /** @returns {{ kind: 'csi' | 'osc' | 'dcs', id: number, params: number[][], data: Uint8Array } | null} */
+  pendingHook() {
+    const kind = wasm.oxtty_pending_hook(this.#handle());
+    if (kind < 0) return null;
+    const out = new Uint32Array(wasm.memory.buffer, wasm.oxtty_out32_ptr());
+    const [id, count] = out;
+    const words = out.subarray(2);
+    const params = [];
+    for (let i = 0, at = 0; i < count; i++) {
+      const n = words[at];
+      params.push(Array.from(words.subarray(at + 1, at + 1 + n)));
+      at += n + 1;
+    }
+    return { kind: HOOK_KINDS[kind], id, params, data: bytesOut(wasm.oxtty_out_len()) };
+  }
+
+  /** Runs the pending hook's default action (`runDefault`) or skips it; `resume()` parses on. */
+  finishHook(runDefault) {
+    wasm.oxtty_finish_hook(this.#handle(), runDefault ? 1 : 0);
+  }
+
+  /** Parses the rest of the stopped write (or flush) after `finishHook`; false when it stopped at the next hook. */
+  resume() {
+    const h = this.#handle();
+    if (wasm.oxtty_pending_hook(h) >= 0) return false;
+    const rest = this.#rest ?? new Uint8Array(0);
+    this.#rest = null;
+    return this.#feedUntilHook(h, this.#stage(rest), rest.length);
+  }
+
+  #feedUntilHook(h, ptr, len) {
+    // Called with nothing too: the engine first goes on with what it stopped in.
+    const n = wasm.oxtty_feed_until_hook(h, ptr, len);
+    if (n < len) this.#rest = new Uint8Array(wasm.memory.buffer, ptr + n, len - n).slice();
+    this.#shrinkInput();
+    this.#armSync();
+    return n === len && wasm.oxtty_pending_hook(h) < 0;
   }
 
   // The reusable input buffer in linear memory, grown to at least `len` bytes.
@@ -466,9 +549,12 @@ export class Terminal {
     return wasm.oxtty_sync_pending(this.#handle()) === 1;
   }
 
+  /** Applies the output a synchronized update holds. Returns false when it stopped at a hook (see `writeUntilHook`). */
   flushSync() {
-    wasm.oxtty_flush_sync(this.#handle());
+    const h = this.#handle();
+    wasm.oxtty_flush_sync(h);
     this.#armSync();
+    return wasm.oxtty_pending_hook(h) < 0;
   }
 
   /** Bytes that rebuild this screen in a fresh xterm.js, or why they cannot. */
