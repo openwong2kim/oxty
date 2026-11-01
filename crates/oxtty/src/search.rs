@@ -125,7 +125,9 @@ impl Text {
 
 /// Whether xterm.js would hold nothing in this cell (an erased or never written blank), which ends of lines drop.
 fn is_empty(cell: &AlacCell) -> bool {
-    cell.c == ' ' && cell.zerowidth().is_none_or(|marks| marks.is_empty())
+    cell.c == ' '
+        && !cell.flags.contains(Flags::TYPED_SPACE)
+        && cell.zerowidth().is_none_or(|marks| marks.is_empty())
 }
 
 /// Appends a row's characters; returns the length the text keeps if the logical line ends here.

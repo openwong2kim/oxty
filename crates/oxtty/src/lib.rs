@@ -88,6 +88,9 @@ pub mod attr {
     /// The blank last cell of a wrapped row whose wide character did not fit and moved to the next row (xterm.js
     /// leaves the same blank); it is not text, unlike a space the program wrote.
     pub const LEADING_WIDE_SPACER: u32 = 1 << 17;
+    /// A space the program printed. Other blank cells were erased or never written: xterm.js reads them as empty,
+    /// so trimming the end of a line drops them but keeps typed spaces.
+    pub const TYPED_SPACE: u32 = 1 << 18;
 }
 
 /// Terminal mode bits returned by [`Engine::modes`]. Stable across versions.
@@ -789,6 +792,31 @@ impl Engine {
         })
     }
 
+    /// Text of one row as xterm.js `translateToString` gives it: wide characters once, combining marks kept, empty
+    /// cells (erased or never written) as spaces. With `trim_right` the empty cells at the end are dropped and typed
+    /// spaces ([`attr::TYPED_SPACE`]) stay. `None` if `line` is out of range.
+    pub fn row_string(&self, line: i32, trim_right: bool) -> Option<String> {
+        self.with_row(line, |row| {
+            let mut text = String::with_capacity(row.len());
+            let mut content = 0;
+            for cell in &row[..] {
+                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    continue;
+                }
+                text.push(if cell.c == '\t' { ' ' } else { cell.c });
+                let marks = cell.zerowidth().unwrap_or_default();
+                text.extend(marks);
+                if cell.c != ' ' || cell.flags.contains(Flags::TYPED_SPACE) || !marks.is_empty() {
+                    content = text.len();
+                }
+            }
+            if trim_right {
+                text.truncate(content);
+            }
+            text
+        })
+    }
+
     /// Whether `line` continues on the next line (soft wrap).
     pub fn row_wrapped(&self, line: i32) -> bool {
         self.with_row(line, |row| {
@@ -1211,6 +1239,7 @@ fn flatten(cell: &AlacCell) -> Cell {
         (Flags::WIDE_CHAR, attr::WIDE),
         (Flags::WIDE_CHAR_SPACER, attr::WIDE_SPACER),
         (Flags::LEADING_WIDE_CHAR_SPACER, attr::LEADING_WIDE_SPACER),
+        (Flags::TYPED_SPACE, attr::TYPED_SPACE),
     ];
     let mut attrs = pairs
         .iter()

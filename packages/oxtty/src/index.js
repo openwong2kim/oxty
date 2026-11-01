@@ -157,6 +157,7 @@ export const Attr = Object.freeze({
   DOUBLE_UNDERLINE: 1 << 4, CURLY_UNDERLINE: 1 << 5, DOTTED_UNDERLINE: 1 << 6, DASHED_UNDERLINE: 1 << 7,
   INVERSE: 1 << 8, HIDDEN: 1 << 9, STRIKEOUT: 1 << 10, BLINK: 1 << 11,
   WIDE: 1 << 12, WIDE_SPACER: 1 << 13, COMBINING: 1 << 14, UNDERLINE_COLOR: 1 << 15, HYPERLINK: 1 << 16, LEADING_WIDE_SPACER: 1 << 17,
+  TYPED_SPACE: 1 << 18,
 });
 
 /** Terminal mode bits (`modes()`). */

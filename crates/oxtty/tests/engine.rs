@@ -805,3 +805,39 @@ fn a_wide_char_pushed_to_the_next_row_leaves_a_marked_blank() {
         "written spaces are text"
     );
 }
+
+#[test]
+fn typed_spaces_are_text_and_erased_cells_are_not() {
+    // xterm.js translateToString(true) of the same output (checked against @xterm/headless): typed trailing spaces
+    // stay; cells erased by EL and ECH, skipped by a cursor move or left by a wide char moved to the next row go
+    let mut t = Engine::new(10, 7, 100);
+    t.feed("typed   \r\nab\x1b[5Ccd\r\nxyz\x1b[2D\x1b[K\r\n12345\x1b[3D\x1b[2X\r\n\x1b[44m  \x1b[0m\x1b[44m\x1b[K\x1b[0m\r\n123456789가".as_bytes());
+    let rows: Vec<String> = (0..6).map(|y| t.row_string(y, true).unwrap()).collect();
+    assert_eq!(
+        rows,
+        ["typed   ", "ab     cd", "x", "12  5", "  ", "123456789"]
+    );
+    assert_eq!(t.row_string(1, false).unwrap(), "ab     cd ");
+    assert_eq!(
+        t.row_text(0).unwrap(),
+        "typed",
+        "row_text still drops every trailing blank"
+    );
+    let mut cells = Vec::new();
+    t.row_cells(0, &mut cells);
+    let typed: Vec<bool> = cells
+        .iter()
+        .map(|c| c.attrs & attr::TYPED_SPACE != 0)
+        .collect();
+    assert_eq!(
+        typed,
+        [
+            false, false, false, false, false, true, true, true, false, false
+        ]
+    );
+    // A tab writes nothing, and the blank a wide char moved off is empty too
+    t.feed(b"\x1b[2J\x1b[Ha\tb");
+    assert_eq!(t.row_string(0, true).unwrap(), "a       b");
+    t.row_cells(0, &mut cells);
+    assert!(cells.iter().all(|c| c.attrs & attr::TYPED_SPACE == 0));
+}

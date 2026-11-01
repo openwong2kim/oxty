@@ -9,7 +9,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { init, Terminal } from '../dist/index.js';
+import { init, Terminal, Attr } from '../dist/index.js';
 import { xterm, play, xtermScreen, oxttyScreen, diffScreens, fieldsOf, oracleMismatch, LEVERS, OXTTY_CONSTANT } from './xterm/screen.mjs';
 import { CASES, WMUX_COUNTS, corpus } from './xterm/cases.mjs';
 
@@ -250,3 +250,44 @@ for (const c of CASES) {
     assert.ok(verdict.pass, verdict.message);
   });
 }
+
+// ── Empty cells ──────────────────────────────────────────────────────────────────
+// xterm.js keeps a typed space apart from an erased or never written cell (empty: getChars() ''); oxtty marks typed
+// spaces (Attr.TYPED_SPACE). The records above compare blanks as ' ', so this compares which cells are empty, after
+// every case's input and tail, skipping the cases whose characters or lines already differ (known entries).
+test('A: the same cells are empty as in xterm.js, in every case', async () => {
+  if (ORACLE) return assert.fail(ORACLE);
+  const differ = ['lines.cells.chars', 'lines', 'baseY'];
+  const charsDiffer = new Set(KNOWN.filter((e) => e.proofs.includes('A') && e.fields?.some((f) => differ.includes(f))).flatMap((e) => e.cases));
+  const empties = (x, o) => {
+    const out = [];
+    const b = x.buffer.active;
+    for (let y = 0; y < b.length; y++) {
+      const line = b.getLine(y);
+      const cells = o.rowCells(y - o.historyLength);
+      const extras = new Set(o.rowExtras(y - o.historyLength).map((e) => e.col));
+      for (let col = 0; col < x.cols; col++) {
+        if (line.getCell(col).getWidth() === 0) continue;
+        const xterm = line.getCell(col).getChars() === '';
+        const [ch, , , attrs] = cells.subarray(col * 4, col * 4 + 4);
+        const oxtty = ch === 32 && !extras.has(col) && !(attrs & Attr.TYPED_SPACE);
+        if (xterm !== oxtty) out.push(`line ${y} col ${col}: xterm ${xterm ? 'empty' : 'text'}`);
+      }
+    }
+    return out;
+  };
+  let compared = 0;
+  for (const c of CASES.filter((c) => !c.missing && !charsDiffer.has(c.id))) {
+    const x = xterm(c.cols, c.rows, c.scrollback);
+    const o = new Terminal({ cols: c.cols, rows: c.rows, scrollback: c.scrollback });
+    for (const events of [c.input, [c.tail]]) {
+      await play(events, x, o);
+      o.flushSync();
+      assert.deepEqual(empties(x, o), [], c.id);
+    }
+    compared++;
+    o.dispose();
+    x.dispose();
+  }
+  assert.ok(compared > 80, `${compared} cases`);
+});

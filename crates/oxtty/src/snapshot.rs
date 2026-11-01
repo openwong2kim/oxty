@@ -329,41 +329,151 @@ fn cursor(out: &mut String, grid: &Grid<Cell>) {
     }
 }
 
-/// `older` is the compressed history older than this grid (primary screen only).
-fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
-    let mut previous_style = String::new();
-    let mut previous_link: Option<Hyperlink> = None;
-    let mut row = |out: &mut String, line: &Row<Cell>, last: bool| {
+/// A blank that was erased or never written, with at most a background: xterm.js holds nothing there, so it is not
+/// printed (a printed space would be text). A blank with more attributes is printed, as an erase keeps only the
+/// background.
+fn erased(cell: &Cell) -> bool {
+    cell.c == ' '
+        && cell.fg == Color::Named(NamedColor::Foreground)
+        && (cell.flags - Flags::WRAPLINE - Flags::LEADING_WIDE_CHAR_SPACER).is_empty()
+        && cell.extra.is_none()
+}
+
+/// Writes rows one after another, keeping the pen and link between them.
+struct Rows {
+    previous_style: String,
+    previous_link: Option<Hyperlink>,
+    columns: usize,
+}
+
+impl Rows {
+    fn pen(&mut self, out: &mut String, cell: &Cell) {
+        let next_style = style(cell);
+        if next_style != self.previous_style {
+            out.push_str(&next_style);
+            self.previous_style = next_style;
+        }
+    }
+
+    /// The blank pen of background `bg`, which an erase (ECH) fills cells with.
+    fn blank_pen(&mut self, out: &mut String, bg: Color) {
+        let blank = Cell {
+            bg,
+            ..Cell::default()
+        };
+        self.pen(out, &blank);
+    }
+
+    /// Moves over `n` erased cells of background `bg` without printing them, erasing them when coloured.
+    fn skip(&mut self, out: &mut String, n: usize, bg: Color) {
+        if bg != Color::Named(NamedColor::Background) {
+            self.blank_pen(out, bg);
+            let _ = write!(out, "\x1b[{n}X");
+        }
+        let _ = write!(out, "\x1b[{n}C");
+    }
+
+    /// `next` is the first cell of the row below, which a wrapped row runs on into.
+    fn row(&mut self, out: &mut String, line: &Row<Cell>, next: Option<&Cell>, last: bool) {
+        // Erased cells not written yet, all with the same background
+        let (mut gap, mut gap_bg) = (0, Color::Named(NamedColor::Background));
+        let mut used = 0;
         for cell in &line[..] {
             if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                used += 1;
                 continue;
             }
-            let next_style = style(cell);
-            if next_style != previous_style {
-                out.push_str(&next_style);
-                previous_style = next_style;
+            if erased(cell) {
+                if gap > 0 && cell.bg != gap_bg {
+                    self.skip(out, gap, gap_bg);
+                    used += gap;
+                    gap = 0;
+                }
+                gap += 1;
+                gap_bg = cell.bg;
+                continue;
             }
+            if gap > 0 {
+                self.skip(out, gap, gap_bg);
+                used += gap;
+                gap = 0;
+            }
+            self.pen(out, cell);
             let next_link = cell.hyperlink();
-            if next_link != previous_link {
+            if next_link != self.previous_link {
                 link(out, next_link.as_ref());
-                previous_link = next_link;
+                self.previous_link = next_link;
             }
             glyph(out, cell);
+            used += 1;
         }
-        if !last && !line[grid.last_column()].flags.contains(Flags::WRAPLINE) {
-            // Clear attributes before scrolling. Otherwise a colored blank template
-            // paints cells outside the serialized content.
-            out.push_str("\x1b[0m\r\n");
-            previous_style.clear();
+        let wrapped = line[Column(self.columns - 1)]
+            .flags
+            .contains(Flags::WRAPLINE);
+        if last || !wrapped {
+            // Erased cells at the end are only written for their colour
+            if gap > 0 && gap_bg != Color::Named(NamedColor::Background) {
+                self.blank_pen(out, gap_bg);
+                let _ = write!(out, "\x1b[{gap}X");
+            }
+            if !last {
+                // Clear attributes before scrolling. Otherwise a colored blank template
+                // paints cells outside the serialized content.
+                out.push_str("\x1b[0m\r\n");
+                self.previous_style.clear();
+            }
+            return;
         }
+        if gap == 0 && !next.is_some_and(erased) {
+            // The next row's first character wraps on its own
+            return;
+        }
+        // Only printing past the last column wraps, so print over the erased end and one more cell, then erase
+        // what was printed (xterm.js SerializeAddon `_rowEnd` does the same)
+        if self.previous_link.is_some() {
+            link(out, None);
+            self.previous_link = None;
+        }
+        self.pen(out, &Cell::default());
+        out.push_str(&"-".repeat(gap + 1));
+        out.push_str("\x1b[D");
+        let next_bg = next.map_or(Color::Named(NamedColor::Background), |c| c.bg);
+        self.blank_pen(out, next_bg);
+        out.push_str("\x1b[X");
+        if gap > 0 {
+            let _ = write!(out, "\x1b[A\x1b[{}G", used + 1);
+            self.blank_pen(out, gap_bg);
+            let _ = write!(out, "\x1b[{gap}X\x1b[B\r");
+        }
+    }
+}
+
+/// `older` is the compressed history older than this grid (primary screen only).
+fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
+    let mut rows = Rows {
+        previous_style: String::new(),
+        previous_link: None,
+        columns: grid.columns(),
     };
-    for i in 0..older.map_or(0, History::len) {
-        row(out, &older.expect("len is 0 without history").row(i), false);
+    let older_len = older.map_or(0, History::len);
+    let total = older_len + grid.history_size() + grid.screen_lines();
+    let fetch = |i: usize| match older {
+        Some(older) if i < older_len => older.row(i),
+        _ => grid[Line((i - older_len) as i32 - grid.history_size() as i32)].clone(),
+    };
+    // One row ahead: a wrapped row looks at how the next one starts
+    let mut next = (total > 0).then(|| fetch(0));
+    for i in 0..total {
+        let Some(line) = next.take() else { break };
+        next = (i + 1 < total).then(|| fetch(i + 1));
+        rows.row(
+            out,
+            &line,
+            next.as_ref().map(|r| &r[Column(0)]),
+            i + 1 == total,
+        );
     }
-    for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
-        row(out, &grid[Line(y)], y == grid.screen_lines() as i32 - 1);
-    }
-    if previous_link.is_some() {
+    if rows.previous_link.is_some() {
         link(out, None);
     }
 }
@@ -410,6 +520,11 @@ fn serialize<T: EventListener>(
         screen(&mut out, term.inactive_grid(), older);
         cursor(&mut out, term.inactive_grid());
         out.push_str("\x1b[?1049h\x1b[0m\x1b[H");
+        // Entering clears the alternate screen with the primary pen's background; erased cells are not printed
+        // over, so clear it again with the default one.
+        if term.inactive_grid().cursor.template.bg != Color::Named(NamedColor::Background) {
+            out.push_str("\x1b[2J");
+        }
         // SGR 0 leaves an OSC 8 link open; the primary pen's link is saved with 1049 and must not spill.
         if term.inactive_grid().cursor.template.hyperlink().is_some() {
             link(&mut out, None);

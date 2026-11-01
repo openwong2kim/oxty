@@ -237,6 +237,8 @@ export declare const Attr: Readonly<{
   WIDE: number; WIDE_SPACER: number; COMBINING: number; UNDERLINE_COLOR: number; HYPERLINK: number;
   /** Blank end of a wrapped row whose wide character moved to the next row; not text. */
   LEADING_WIDE_SPACER: number;
+  /** A space the program printed. Other blanks were erased or never written (xterm.js empty cells). */
+  TYPED_SPACE: number;
 }>;
 
 export declare const Mode: Readonly<{

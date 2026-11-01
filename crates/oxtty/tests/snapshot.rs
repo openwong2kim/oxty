@@ -311,3 +311,47 @@ fn leftover_alt_screen_does_not_refuse_after_exit() {
     t.feed(b"\x1b[?1049lok");
     assert_round_trip(&mut t, 10);
 }
+
+#[test]
+fn erased_cells_stay_empty_and_typed_spaces_stay_text() {
+    let mut t = Engine::new(8, 4, 20);
+    // Typed trailing spaces, a gap a cursor move left, a coloured erase, and wrapped rows ending and starting with
+    // erased cells (the snapshot has to force those wraps)
+    t.feed(b"ab  \r\nx\x1b[3Cy\r\n\x1b[41mq\x1b[K\x1b[0m\r\n");
+    t.feed(b"12345678\x1b[3D\x1b[3X9z\x1b[1;3H\x1b[5;1H");
+    t.feed(b"abcdefgh\x1b[2X\x1b[1;2H\x1b[5;1H\r\n\x1b[48;5;3m\x1b[K\x1b[0m");
+    let copy = assert_round_trip(&mut t, 20);
+    let mut cells = Vec::new();
+    copy.row_cells(-(copy.history_len() as i32), &mut cells);
+    let typed: Vec<bool> = cells
+        .iter()
+        .map(|c| c.attrs & oxtty::attr::TYPED_SPACE != 0)
+        .collect();
+    assert_eq!(
+        typed,
+        [false, false, true, true, false, false, false, false]
+    );
+}
+
+#[test]
+fn the_blank_a_wide_char_left_comes_back_empty() {
+    let mut t = Engine::new(8, 3, 20);
+    t.feed("abcdefg가".as_bytes());
+    let mut copy = Engine::new(8, 3, 20);
+    copy.feed(&snapshot(&mut t));
+    let mut cells = Vec::new();
+    copy.row_cells(0, &mut cells);
+    // Not the LEADING_WIDE_SPACER mark (xterm.js has none either), but not a typed space
+    assert_eq!(cells[7].attrs, 0);
+    assert!(copy.row_wrapped(0));
+    assert_eq!(copy.row_text(1).unwrap(), "가");
+}
+
+#[test]
+fn alternate_screen_is_cleared_with_the_default_background() {
+    // Entering it clears it with the pen's background (the primary pen is blue here); its erased cells, back to the
+    // default background, are not printed over
+    let mut t = Engine::new(6, 3, 20);
+    t.feed(b"\x1b[44mblue\x1b[?1049h\x1b[0m\x1b[2J\x1b[Halt");
+    assert_round_trip(&mut t, 20);
+}
