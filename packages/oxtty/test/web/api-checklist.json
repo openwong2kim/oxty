@@ -1,0 +1,467 @@
+{
+  "about": "Every xterm.js member wmux uses (non-test src/renderer at the wt-wmux-base checkout, @xterm/xterm 6.1.0-beta.336 and its addons) and its status in the Rust front end (crates/oxtty-web). Restored from 0510a7d, where the TypeScript front end reached the old statuses; reasons still describe that front end until each member is redone.",
+  "statuses": {
+    "todo": "Supported by the TypeScript front end at 0510a7d; not yet in the Rust front end.",
+    "supported": "Implemented in crates/oxtty-web (in the generated .d.ts).",
+    "later": "Planned after the parity work.",
+    "unsupported": "Not planned; the reason says what replaces it."
+  },
+  "members": {
+    "init": {
+      "status": "todo",
+      "reason": "Re-exported from oxtty/xterm; `await init()` once is the only extra step, constructing before it throws."
+    },
+    "Terminal.constructor": {
+      "status": "todo",
+      "reason": "Synchronous like xterm.js."
+    },
+    "options.cols": {
+      "status": "todo",
+      "reason": "Init-only, like xterm.js; change with resize()."
+    },
+    "options.rows": {
+      "status": "todo",
+      "reason": "Init-only, like xterm.js; change with resize()."
+    },
+    "options.scrollback": {
+      "status": "todo",
+      "reason": "Constructor only: the engine fixes it at creation, a runtime change throws (wmux only reads it)."
+    },
+    "options.cursorBlink": {
+      "status": "todo",
+      "reason": "Renderer option."
+    },
+    "options.cursorStyle": {
+      "status": "todo",
+      "reason": "Renderer option."
+    },
+    "options.fontSize": {
+      "status": "todo",
+      "reason": "Renderer option, get/set at runtime; fires onDimensionsChange when the cell changes."
+    },
+    "options.fontFamily": {
+      "status": "todo",
+      "reason": "Renderer option."
+    },
+    "options.theme": {
+      "status": "todo",
+      "reason": "Renderer option; also pushed to the engine (setColors) so OSC 4/10/11/12 queries answer the real colours."
+    },
+    "options.minimumContrastRatio": {
+      "status": "todo",
+      "reason": "Renderer option."
+    },
+    "options.scrollbar": {
+      "status": "todo",
+      "reason": "Only the width the fit keeps free (xterm.js 14px default); no scrollbar is drawn yet."
+    },
+    "options.allowProposedApi": {
+      "status": "todo",
+      "reason": "Accepted, no effect: there is no proposed-API gate."
+    },
+    "options.scrollOnUserInput": {
+      "status": "todo",
+      "reason": "Keys, IME and paste scroll a scrolled-back view to the bottom (xterm.js default true; wmux passes false)."
+    },
+    "options.disableStdin": {
+      "status": "todo",
+      "reason": "Drops keys, pastes and replies to the program like xterm.js; the textarea turns read-only."
+    },
+    "options.altClickMovesCursor": {
+      "status": "todo",
+      "reason": "Alt+click sends arrow keys to the clicked cell (xterm.js 6.1 moveToCellSequence)."
+    },
+    "options.vtExtensions.kittyKeyboard": {
+      "status": "todo",
+      "reason": "Turns the engine's kitty protocol on (setKittyKeyboard); keys go through the copied xterm.js 6.1 kitty encoder with the flags of the last frame. Turning it off drops the pushed flags."
+    },
+    "options.vtExtensions.colorSchemeQuery": {
+      "status": "unsupported",
+      "reason": "wmux turns it off for headless parity; the engine has no colour-scheme query reply."
+    },
+    "options.vtExtensions.kittySgrBoldFaintControl": {
+      "status": "unsupported",
+      "reason": "wmux turns it off for headless parity; the engine follows xterm.js with it off."
+    },
+    "options.macOptionClickForcesSelection": {
+      "status": "todo",
+      "reason": "Option+click is not reported to the program and selects (xterm.js SelectionService.shouldForceSelection)."
+    },
+    "options.linkHandler": {
+      "status": "later",
+      "reason": "Links step (OSC 8 + regex detection)."
+    },
+    "options.screenReaderMode": {
+      "status": "later",
+      "reason": "Accessibility."
+    },
+    "options.windowsPty": {
+      "status": "later",
+      "reason": "xterm.js ConPTY heuristics; needs a decision for the Windows build."
+    },
+    "options.convertEol": {
+      "status": "unsupported",
+      "reason": "Always false (wmux passes false); omit it."
+    },
+    "options.windowOptions": {
+      "status": "unsupported",
+      "reason": "The engine answers no window operations; wmux only saves and restores it around the image addon."
+    },
+    "Terminal.open": {
+      "status": "todo",
+      "reason": "Builds div.terminal.xterm > div.xterm-screen > (div.xterm-helpers, canvas); a second open moves the element."
+    },
+    "Terminal.write": {
+      "status": "todo",
+      "reason": "Strings and Uint8Array, callback after parse, write(\"\", cb) as a parse barrier; time-sliced like xterm.js."
+    },
+    "Terminal.writeln": {
+      "status": "todo",
+      "reason": "write(data) then write(\"\\r\\n\", callback)."
+    },
+    "Terminal.resize": {
+      "status": "todo",
+      "reason": "Fires onResize; no-op for the same size."
+    },
+    "Terminal.reset": {
+      "status": "todo",
+      "reason": "RIS applied at once (clears scrollback, like xterm.js reset)."
+    },
+    "Terminal.refresh": {
+      "status": "todo",
+      "reason": "Marks the rows for the next frame."
+    },
+    "Terminal.dispose": {
+      "status": "todo",
+      "reason": "Drops pending writes and timers, disposes addons, renderer and engine."
+    },
+    "Terminal.loadAddon": {
+      "status": "todo",
+      "reason": "Fit addons are activated; webgl and unicode11 are absorbed; anything else throws."
+    },
+    "Terminal.scrollToLine": {
+      "status": "todo",
+      "reason": "Engine scrollDisplay."
+    },
+    "Terminal.scrollToBottom": {
+      "status": "todo",
+      "reason": "Engine scrollToBottom."
+    },
+    "Terminal.element": {
+      "status": "todo",
+      "reason": "Set by open()."
+    },
+    "Terminal.rows": {
+      "status": "todo",
+      "reason": "From the engine."
+    },
+    "Terminal.cols": {
+      "status": "todo",
+      "reason": "From the engine."
+    },
+    "Terminal.dimensions": {
+      "status": "todo",
+      "reason": "Renderer dimensions; replaces the _core._renderService.dimensions workaround."
+    },
+    "Terminal.modes": {
+      "status": "todo",
+      "reason": "From engine mode bits, X10 mouse included. reverseWraparoundMode and win32InputMode are always false."
+    },
+    "Terminal.unicode.activeVersion": {
+      "status": "todo",
+      "reason": "Always \"11\" (engine tables); setting another version throws."
+    },
+    "Terminal.focus": {
+      "status": "todo",
+      "reason": "Focuses the hidden textarea."
+    },
+    "Terminal.textarea": {
+      "status": "todo",
+      "reason": "The hidden textarea in .xterm-helpers, set by open()."
+    },
+    "Terminal.attachCustomKeyEventHandler": {
+      "status": "todo",
+      "reason": "Sees every keydown, keypress and keyup first; false stops the key (the copied xterm.js arbitration)."
+    },
+    "Terminal.getSelection": {
+      "status": "todo",
+      "reason": "xterm.js SelectionService.selectionText: wrapped rows joined, wide characters once. Typed trailing spaces are dropped like erased cells (the engine does not tell them apart)."
+    },
+    "Terminal.hasSelection": {
+      "status": "todo",
+      "reason": "xterm.js SelectionService.hasSelection."
+    },
+    "Terminal.clearSelection": {
+      "status": "todo",
+      "reason": "xterm.js SelectionService.clearSelection."
+    },
+    "Terminal.select": {
+      "status": "todo",
+      "reason": "xterm.js SelectionService.setSelection; does nothing before open() (xterm.js throws)."
+    },
+    "Terminal.parser.registerOscHandler": {
+      "status": "later",
+      "reason": "Needs an engine hook. OSC 52 is covered by the clipboard option; OSC 133/7792 and the viewer OSC 4/10/11/12 handlers are not."
+    },
+    "Terminal.parser.registerCsiHandler": {
+      "status": "later",
+      "reason": "Needs an engine hook (replyParity, shellPromptModeReset, viewerParser)."
+    },
+    "Terminal.parser.registerDcsHandler": {
+      "status": "later",
+      "reason": "Needs an engine hook (viewerParser DECRQSS)."
+    },
+    "Terminal.registerLinkProvider": {
+      "status": "later",
+      "reason": "Links step."
+    },
+    "Terminal.registerMarker": {
+      "status": "later",
+      "reason": "Markers need line tracking through scrollback trimming."
+    },
+    "Terminal.markers": {
+      "status": "later",
+      "reason": "With registerMarker."
+    },
+    "IMarker.id/line/dispose/onDispose": {
+      "status": "later",
+      "reason": "With registerMarker."
+    },
+    "Terminal.onData": {
+      "status": "todo",
+      "reason": "Engine replies after every write drain (no frame needed); input from step 2."
+    },
+    "Terminal.onBinary": {
+      "status": "todo",
+      "reason": "Fired by default-encoding mouse reports, never by output."
+    },
+    "Terminal.onResize": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "Terminal.onScroll": {
+      "status": "todo",
+      "reason": "Fires when buffer.active.viewportY changes (scroll calls, output, resize)."
+    },
+    "Terminal.onRender": {
+      "status": "todo",
+      "reason": "Rows drawn by each frame."
+    },
+    "Terminal.onCursorMove": {
+      "status": "todo",
+      "reason": "Checked after each write drain, scroll and resize."
+    },
+    "Terminal.onWriteParsed": {
+      "status": "todo",
+      "reason": "After each write drain."
+    },
+    "Terminal.onTitleChange": {
+      "status": "todo",
+      "reason": "OSC 0/2 after each write drain."
+    },
+    "Terminal.onBell": {
+      "status": "todo",
+      "reason": "Once per BEL after each write drain."
+    },
+    "Terminal.onDimensionsChange": {
+      "status": "todo",
+      "reason": "Font option changes and renderer-reported changes (late fonts, devicePixelRatio)."
+    },
+    "Terminal.onSelectionChange": {
+      "status": "todo",
+      "reason": "Fires where xterm.js fires: mouse up, API calls, and clears by user input, resize or an alternate screen switch (not when trimming moves or drops it, like xterm.js)."
+    },
+    "buffer.onBufferChange": {
+      "status": "todo",
+      "reason": "Fires when the alternate screen is entered or left."
+    },
+    "buffer.active.type": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "buffer.active.baseY": {
+      "status": "todo",
+      "reason": "Engine historyLength."
+    },
+    "buffer.active.viewportY": {
+      "status": "todo",
+      "reason": "historyLength - displayOffset."
+    },
+    "buffer.active.cursorX": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "buffer.active.cursorY": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "buffer.active.length": {
+      "status": "todo",
+      "reason": "historyLength + rows."
+    },
+    "buffer.active.getLine": {
+      "status": "todo",
+      "reason": "A copy of the line at call time (xterm.js returns a live view)."
+    },
+    "buffer.active.getNullCell": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "IBufferLine.translateToString": {
+      "status": "todo",
+      "reason": "Matches xterm.js except that trimRight also drops trailing typed spaces (the engine does not tell them from erased cells)."
+    },
+    "IBufferLine.isWrapped": {
+      "status": "todo",
+      "reason": "xterm.js meaning: continues the previous line."
+    },
+    "IBufferLine.length": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "IBufferLine.getCell": {
+      "status": "todo",
+      "reason": "The reuse argument is accepted and ignored."
+    },
+    "IBufferCell.getChars": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "IBufferCell.getWidth": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "IBufferCell.isDim": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "FitAddon.fit": {
+      "status": "todo",
+      "reason": "Built-in FitAddon export, and @xterm/addon-fit 0.12 works as is (it reads only public members)."
+    },
+    "FitAddon.proposeDimensions": {
+      "status": "todo",
+      "reason": "Same formula as @xterm/addon-fit 0.12."
+    },
+    "FitAddon.dispose": {
+      "status": "todo",
+      "reason": "As xterm.js."
+    },
+    "FitAddon subclass (FixedGeometryFitAddon)": {
+      "status": "todo",
+      "reason": "super.fit/proposeDimensions work; its _core._renderService.dimensions read moves to terminal.dimensions."
+    },
+    "WebglAddon (load)": {
+      "status": "todo",
+      "reason": "Absorbed: the WebGL renderer is built in, the addon is never activated."
+    },
+    "WebglAddon.onContextLoss": {
+      "status": "todo",
+      "reason": "Absorbed; never fires because the renderer restores a lost context itself."
+    },
+    "WebglAddon.dispose": {
+      "status": "todo",
+      "reason": "Absorbed; no-op (there is no DOM renderer to fall back to)."
+    },
+    "WebglAddon.clearTextureAtlas": {
+      "status": "todo",
+      "reason": "Absorbed; full redraw."
+    },
+    "Unicode11Addon (load)": {
+      "status": "todo",
+      "reason": "Absorbed: activate() is run against a stand-in that only has unicode.register and must register version 11."
+    },
+    "SearchAddon.findNext/findPrevious/clearDecorations": {
+      "status": "later",
+      "reason": "Search moves into the engine; loadAddon throws until then."
+    },
+    "SerializeAddon.serialize": {
+      "status": "unsupported",
+      "reason": "loadAddon throws; Terminal.ansiSnapshot() (engine) replaces it. coldFrame's scrollback:0 + excludeModes variant needs an engine option (later)."
+    },
+    "WebLinksAddon": {
+      "status": "later",
+      "reason": "Links step (OSC 8 + regex detection); loadAddon throws until then."
+    },
+    "ImageAddon": {
+      "status": "later",
+      "reason": "PRD §10 open question; loadAddon throws."
+    },
+    "_core._renderService.dimensions": {
+      "status": "todo",
+      "reason": "Use terminal.dimensions."
+    },
+    "_core._charSizeService.measure/onCharSizeChange": {
+      "status": "todo",
+      "reason": "Use onDimensionsChange; a loaded fit addon refits by itself (charSizeRefit goes away)."
+    },
+    "_core._renderService.setRenderer/handleResize, _core._createRenderer, _core._store": {
+      "status": "unsupported",
+      "reason": "webglTeardown: there is no DOM renderer fallback; the WebGL renderer restores its context."
+    },
+    "_core.coreService.kittyKeyboard": {
+      "status": "todo",
+      "reason": "oxtty API: xtermKittyFlags(term) becomes term.kittyKeyboardFlags (the flags the encoder uses, from the last frame) and resetXtermKitty(term) becomes term.resetKittyKeyboard() (both screens, applied at once). Resetting in stream order at OSC 133;A still needs registerOscHandler (later)."
+    },
+    "_core.coreService.onUserInput": {
+      "status": "todo",
+      "reason": "oxtty API: term.onUserInput fires just before onData for keys, IME and paste, never for replies to the program; userInputGate subscribes to it instead."
+    },
+    "_core._compositionHelper": {
+      "status": "unsupported",
+      "reason": "deadInputWatchdog reads _isComposing/_isSendingComposition only for a log line and logs '?' without them; the copied CompositionHelper stays internal."
+    },
+    "WebglAddon._renderer._gl": {
+      "status": "unsupported",
+      "reason": "Context loss is handled inside the renderer."
+    },
+    "WebglAddon._renderer._charAtlas": {
+      "status": "unsupported",
+      "reason": "Atlas health checks belong inside the renderer (atlasGuard goes away)."
+    },
+    "ImageAddon._handlers": {
+      "status": "later",
+      "reason": "With the image addon."
+    },
+    "DOM .xterm": {
+      "status": "todo",
+      "reason": "Root element classes terminal xterm."
+    },
+    "DOM .xterm-screen": {
+      "status": "todo",
+      "reason": "Holds the canvas, sized to it."
+    },
+    "DOM .xterm-helpers": {
+      "status": "todo",
+      "reason": "Holds the textarea and the composition view."
+    },
+    "DOM .xterm-helper-textarea": {
+      "status": "todo",
+      "reason": "Built like xterm.js (class, aria and autocomplete attributes, tabindex 0) and moved to the cursor cell after each frame."
+    },
+    "DOM .composition-view": {
+      "status": "todo",
+      "reason": "The copied CompositionHelper fills it while composing and places it at the cursor (style.left/top)."
+    },
+    "DOM .xterm-scrollable-element .scrollbar": {
+      "status": "later",
+      "reason": "No scrollbar is drawn yet."
+    },
+    "CSS @xterm/xterm/css/xterm.css": {
+      "status": "unsupported",
+      "reason": "open() injects its own styles; drop the import."
+    },
+    "Element reparenting (park and re-append)": {
+      "status": "todo",
+      "reason": "The element can be moved; open() again also moves it."
+    },
+    "Synthetic mouse events on .xterm-screen": {
+      "status": "todo",
+      "reason": "Mouse reports and selection both listen on the element, so dispatched events (plainDragSelect replays) select and report like real ones."
+    },
+    "write() from inside parser handlers": {
+      "status": "later",
+      "reason": "With the parser hooks."
+    }
+  }
+}

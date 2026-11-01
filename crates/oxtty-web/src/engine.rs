@@ -1,0 +1,439 @@
+//! The one boundary between the engine and everything drawn or typed on the page (PRD D7).
+//!
+//! The engine is the `oxtty` package's own WebAssembly instance, reached through its JS binding
+//! (`packages/oxtty/src/index.js`): a crash there rebuilds only that instance and this terminal starts over
+//! (`onCrash`), while the front end keeps running. The renderer, input and selection read only [`Events`],
+//! [`Frame`] and [`Viewport`], never [`Engine`], so the engine can later move to a Web Worker and these become
+//! messages. Only the buffer API (`buffer.active.getLine()`), search and serialize call [`Engine`] directly; a
+//! Worker build needs a main-thread mirror for those.
+use std::collections::HashMap;
+
+use js_sys::{Array, Object, Reflect, Uint32Array, Uint8Array};
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen(raw_module = "./index.js")]
+extern "C" {
+    /// `Terminal` of the engine binding. Every method that runs engine code is `catch`: a crash throws once from
+    /// the call that hit it, and a JS exception must never unwind through Rust frames holding borrows.
+    #[wasm_bindgen(js_name = Terminal)]
+    pub type Engine;
+
+    #[wasm_bindgen(constructor, js_class = "Terminal", catch)]
+    pub fn new(options: &Object) -> Result<Engine, JsValue>;
+    /// `data` is a string or a `Uint8Array`, passed through without copying it into this instance.
+    #[wasm_bindgen(method, catch)]
+    pub fn write(this: &Engine, data: &JsValue) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, catch)]
+    pub fn resize(this: &Engine, cols: u32, rows: u32) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, getter)]
+    pub fn cols(this: &Engine) -> u32;
+    #[wasm_bindgen(method, getter)]
+    pub fn rows(this: &Engine) -> u32;
+    #[wasm_bindgen(method, getter, js_name = historyLength)]
+    pub fn history_length(this: &Engine) -> u32;
+    #[wasm_bindgen(method, getter, js_name = trimmedLines)]
+    pub fn trimmed_lines(this: &Engine) -> f64;
+    #[wasm_bindgen(method, getter, js_name = displayOffset)]
+    pub fn display_offset(this: &Engine) -> u32;
+    #[wasm_bindgen(method, catch, js_name = rowText)]
+    pub fn row_text(this: &Engine, line: i32) -> Result<Option<String>, JsValue>;
+    /// A view into the engine's memory, valid until the next call into any engine terminal: copy it at once.
+    #[wasm_bindgen(method, catch, js_name = rowCellsView)]
+    pub fn row_cells_view(this: &Engine, line: i32) -> Result<Option<Uint32Array>, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = rowWrapped)]
+    pub fn row_wrapped(this: &Engine, line: i32) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = cellText)]
+    pub fn cell_text(this: &Engine, line: i32, col: u32) -> Result<Option<String>, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = rowExtras)]
+    pub fn row_extras(this: &Engine, line: i32) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = cursor)]
+    fn cursor_js(this: &Engine) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = scrollDisplay)]
+    pub fn scroll_display(this: &Engine, delta: i32) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, catch, js_name = scrollToBottom)]
+    pub fn scroll_to_bottom(this: &Engine) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, catch)]
+    pub fn modes(this: &Engine) -> Result<u32, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = setKittyKeyboard)]
+    pub fn set_kitty_keyboard(this: &Engine, enabled: bool) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, catch, js_name = resetKittyKeyboard)]
+    pub fn reset_kitty_keyboard(this: &Engine) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, catch, js_name = kittyFlags)]
+    pub fn kitty_flags(this: &Engine) -> Result<u32, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = takeDamage)]
+    fn take_damage_js(this: &Engine) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = takeReplies)]
+    pub fn take_replies(this: &Engine) -> Result<Uint8Array, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = takeTitle)]
+    pub fn take_title(this: &Engine) -> Result<Option<String>, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = takeBells)]
+    pub fn take_bells(this: &Engine) -> Result<u32, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = takeResets)]
+    pub fn take_resets(this: &Engine) -> Result<u32, JsValue>;
+    /// `{ read?: boolean, write?: boolean }`.
+    #[wasm_bindgen(method, catch, js_name = setClipboardAccess)]
+    pub fn set_clipboard_access(this: &Engine, access: &Object) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, catch, js_name = takeClipboardWrite)]
+    fn take_clipboard_write_js(this: &Engine) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = takeClipboardRead)]
+    pub fn take_clipboard_read(this: &Engine) -> Result<Option<String>, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = replyClipboard)]
+    pub fn reply_clipboard(this: &Engine, selection: &str, text: &str) -> Result<bool, JsValue>;
+    /// 259 colours (0xRRGGBB): palette 0–255, foreground, background, cursor; `null` stops answering OSC 4/10/11/12.
+    #[wasm_bindgen(method, catch, js_name = setColors)]
+    pub fn set_colors(this: &Engine, colors: &JsValue) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, catch, js_name = ansiSnapshot)]
+    pub fn ansi_snapshot(this: &Engine) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(method)]
+    pub fn dispose(this: &Engine);
+}
+
+/// `Mode` bits of the engine binding (`modes()`).
+pub mod mode {
+    pub const SHOW_CURSOR: u32 = 1;
+    pub const APP_CURSOR: u32 = 1 << 1;
+    pub const APP_KEYPAD: u32 = 1 << 2;
+    pub const BRACKETED_PASTE: u32 = 1 << 3;
+    pub const MOUSE_CLICK: u32 = 1 << 4;
+    pub const MOUSE_DRAG: u32 = 1 << 5;
+    pub const MOUSE_MOTION: u32 = 1 << 6;
+    pub const SGR_MOUSE: u32 = 1 << 7;
+    pub const FOCUS_EVENTS: u32 = 1 << 8;
+    pub const ALT_SCREEN: u32 = 1 << 9;
+    pub const ALTERNATE_SCROLL: u32 = 1 << 10;
+    pub const LINE_WRAP: u32 = 1 << 11;
+    pub const INSERT: u32 = 1 << 12;
+    pub const ORIGIN: u32 = 1 << 13;
+    pub const KITTY_KEYBOARD: u32 = 1 << 14;
+    pub const MOUSE_X10: u32 = 1 << 15;
+    pub const SGR_PIXELS_MOUSE: u32 = 1 << 16;
+}
+
+/// `Attr` bits of a cell's fourth word.
+pub mod attr {
+    pub const BOLD: u32 = 1;
+    pub const DIM: u32 = 1 << 1;
+    pub const ITALIC: u32 = 1 << 2;
+    pub const UNDERLINE: u32 = 1 << 3;
+    pub const DOUBLE_UNDERLINE: u32 = 1 << 4;
+    pub const CURLY_UNDERLINE: u32 = 1 << 5;
+    pub const DOTTED_UNDERLINE: u32 = 1 << 6;
+    pub const DASHED_UNDERLINE: u32 = 1 << 7;
+    pub const INVERSE: u32 = 1 << 8;
+    pub const HIDDEN: u32 = 1 << 9;
+    pub const STRIKEOUT: u32 = 1 << 10;
+    pub const BLINK: u32 = 1 << 11;
+    pub const WIDE: u32 = 1 << 12;
+    pub const WIDE_SPACER: u32 = 1 << 13;
+    pub const COMBINING: u32 = 1 << 14;
+    pub const UNDERLINE_COLOR: u32 = 1 << 15;
+    pub const HYPERLINK: u32 = 1 << 16;
+    pub const LEADING_WIDE_SPACER: u32 = 1 << 17;
+    pub const EXTRAS: u32 = COMBINING | UNDERLINE_COLOR | HYPERLINK;
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CursorShape {
+    #[default]
+    Block,
+    Underline,
+    Bar,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Cursor {
+    /// Viewport row in a [`Frame`]; engine screen line from [`Engine::cursor`].
+    pub line: i32,
+    pub col: u32,
+    pub visible: bool,
+    pub shape: CursorShape,
+    pub blink: bool,
+    /// The program chose `shape` and `blink` (DECSCUSR); otherwise the host's own cursor style applies.
+    pub styled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hyperlink {
+    pub id: String,
+    pub uri: String,
+}
+
+/// What a cell carries beyond its four words.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CellExtra {
+    pub col: u32,
+    /// Full cell text when it has combining marks.
+    pub text: Option<String>,
+    /// SGR 58, packed like the cell colours.
+    pub underline_color: Option<u32>,
+    pub hyperlink: Option<Hyperlink>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClipboardWrite {
+    /// `'c'` or `'p'`.
+    pub selection: char,
+    pub text: String,
+}
+
+/// What the program asked of the host since the last call. Taken after every write drain, not per frame, so
+/// replies flow while the page is hidden.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Events {
+    /// Bytes for the PTY (status reports, OSC 52 and colour query answers): `onData`.
+    pub replies: Vec<u8>,
+    /// New title, or `None` if unchanged: `onTitleChange`.
+    pub title: Option<String>,
+    pub bells: u32,
+    /// Full resets (RIS): drop host state such as the selection.
+    pub resets: u32,
+    pub clipboard_writes: Vec<ClipboardWrite>,
+    /// `'c'` or `'p'` per read, in order.
+    pub clipboard_reads: Vec<char>,
+}
+
+/// Everything a renderer needs to bring its picture up to date.
+#[derive(Clone, Debug, Default)]
+pub struct Frame {
+    pub cols: u32,
+    pub rows: u32,
+    /// The picture must be rebuilt (resize, view scroll, engine crash): every row is in `lines`.
+    pub full: bool,
+    /// Viewport rows whose cells changed, ascending. Row `lines[k]` is `cells[k * cols * 4..]`.
+    pub lines: Vec<u32>,
+    /// `[codepoint, fg, bg, attrs]` per cell for `lines`.
+    pub cells: Vec<u32>,
+    /// Extras of the rows in `lines` that have any, by viewport row.
+    pub extras: HashMap<u32, Vec<CellExtra>>,
+    /// Cursor in viewport rows; `visible` is false while it is scrolled out of view.
+    pub cursor: Cursor,
+    pub display_offset: u32,
+    pub history_length: u32,
+    /// Lines dropped off the top of the scrollback so far: the selection keeps its text in place.
+    pub trimmed_lines: f64,
+    /// Bitwise OR of [`mode`] bits; input encoding reads them from here (one frame late in a Worker build).
+    pub modes: u32,
+    /// Active kitty keyboard flags, read by key encoding like `modes`.
+    pub kitty_flags: u32,
+}
+
+pub trait EngineView {
+    fn take_events(&mut self) -> Events;
+    fn take_frame(&mut self) -> Frame;
+}
+
+/// [`EngineView`] over an engine on the same thread.
+pub struct LocalEngineView {
+    engine: Engine,
+    full: bool,
+}
+
+impl LocalEngineView {
+    pub fn new(engine: Engine) -> Self {
+        Self { engine, full: true }
+    }
+
+    /// For the buffer API, search and serialize only (module docs).
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    /// The next frame rebuilds everything (after an engine crash or a renderer restart).
+    pub fn invalidate(&mut self) {
+        self.full = true;
+    }
+}
+
+impl EngineView for LocalEngineView {
+    fn take_events(&mut self) -> Events {
+        let e = &self.engine;
+        let mut events = Events {
+            replies: e.take_replies().map(|r| r.to_vec()).unwrap_or_default(),
+            title: e.take_title().ok().flatten(),
+            bells: e.take_bells().unwrap_or(0),
+            resets: e.take_resets().unwrap_or(0),
+            ..Events::default()
+        };
+        while let Ok(write) = e.take_clipboard_write_js() {
+            if write.is_null() || write.is_undefined() {
+                break;
+            }
+            events.clipboard_writes.push(ClipboardWrite {
+                selection: selection_char(&get(&write, "selection")),
+                text: get(&write, "text").as_string().unwrap_or_default(),
+            });
+        }
+        while let Ok(Some(selection)) = e.take_clipboard_read() {
+            events
+                .clipboard_reads
+                .push(selection_char(&JsValue::from(selection)));
+        }
+        events
+    }
+
+    fn take_frame(&mut self) -> Frame {
+        let e = &self.engine;
+        let (cols, rows, display_offset) = (e.cols(), e.rows(), e.display_offset());
+        let damage = e.take_damage_js().unwrap_or(JsValue::NULL);
+        let full = self.full
+            || damage.is_null()
+            || get(&damage, "full").is_truthy()
+            || get(&damage, "scroll").as_f64().unwrap_or(0.0) > 0.0;
+        self.full = false;
+        let lines: Vec<u32> = if full {
+            (0..rows).collect()
+        } else {
+            Array::from(&get(&damage, "lines"))
+                .iter()
+                .filter_map(|y| y.as_f64())
+                .map(|y| y as u32)
+                .filter(|&y| y < rows)
+                .collect()
+        };
+        let stride = cols as usize * 4;
+        let mut cells = vec![0; lines.len() * stride];
+        let mut extras = HashMap::new();
+        for (k, &y) in lines.iter().enumerate() {
+            let line = y as i32 - display_offset as i32;
+            let row = &mut cells[k * stride..(k + 1) * stride];
+            let Ok(Some(view)) = e.row_cells_view(line) else {
+                continue;
+            };
+            let n = (view.length() as usize).min(stride);
+            view.subarray(0, n as u32).copy_to(&mut row[..n]);
+            if row.chunks_exact(4).any(|cell| cell[3] & attr::EXTRAS != 0) {
+                extras.insert(
+                    y,
+                    parse_extras(&e.row_extras(line).unwrap_or(JsValue::NULL)),
+                );
+            }
+        }
+        let mut cursor = self.cursor();
+        cursor.line += display_offset as i32;
+        if cursor.line >= rows as i32 {
+            cursor.visible = false;
+        }
+        Frame {
+            cols,
+            rows,
+            full,
+            lines,
+            cells,
+            extras,
+            cursor,
+            display_offset,
+            history_length: e.history_length(),
+            trimmed_lines: e.trimmed_lines(),
+            modes: e.modes().unwrap_or(0),
+            kitty_flags: e.kitty_flags().unwrap_or(0),
+        }
+    }
+}
+
+impl LocalEngineView {
+    /// Cursor in engine screen lines.
+    pub fn cursor(&self) -> Cursor {
+        let Ok(c) = self.engine.cursor_js() else {
+            return Cursor::default();
+        };
+        Cursor {
+            line: get(&c, "line").as_f64().unwrap_or(0.0) as i32,
+            col: get(&c, "col").as_f64().unwrap_or(0.0) as u32,
+            visible: get(&c, "visible").is_truthy(),
+            shape: match get(&c, "shape").as_string().as_deref() {
+                Some("underline") => CursorShape::Underline,
+                Some("bar") => CursorShape::Bar,
+                _ => CursorShape::Block,
+            },
+            blink: get(&c, "blink").is_truthy(),
+            styled: get(&c, "styled").is_truthy(),
+        }
+    }
+}
+
+/// The visible rows as of the last frame. The renderer redraws from here when the host changes something the
+/// engine does not know about (selection, cursor blink, theme), and selection reads visible text from it.
+#[derive(Clone, Debug, Default)]
+pub struct Viewport {
+    pub cols: u32,
+    pub rows: u32,
+    pub cells: Vec<u32>,
+    pub extras: HashMap<u32, Vec<CellExtra>>,
+    pub cursor: Cursor,
+    pub display_offset: u32,
+    pub history_length: u32,
+    pub trimmed_lines: f64,
+    pub modes: u32,
+    pub kitty_flags: u32,
+}
+
+impl Viewport {
+    /// Copies a frame in and returns the rows that changed (all of them when `frame.full`).
+    pub fn apply(&mut self, frame: Frame) -> Vec<u32> {
+        let stride = frame.cols as usize * 4;
+        if frame.cols != self.cols || frame.rows != self.rows {
+            self.cols = frame.cols;
+            self.rows = frame.rows;
+            self.cells = vec![0; frame.rows as usize * stride];
+            self.extras.clear();
+        }
+        if frame.full {
+            self.extras.clear();
+        }
+        let mut extras = frame.extras;
+        for (k, &y) in frame.lines.iter().enumerate() {
+            let at = y as usize * stride;
+            self.cells[at..at + stride].copy_from_slice(&frame.cells[k * stride..(k + 1) * stride]);
+            match extras.remove(&y) {
+                Some(row) => self.extras.insert(y, row),
+                None => self.extras.remove(&y),
+            };
+        }
+        self.cursor = frame.cursor;
+        self.display_offset = frame.display_offset;
+        self.history_length = frame.history_length;
+        self.trimmed_lines = frame.trimmed_lines;
+        self.modes = frame.modes;
+        self.kitty_flags = frame.kitty_flags;
+        frame.lines
+    }
+
+    /// `[codepoint, fg, bg, attrs]` per cell of viewport row `y`.
+    pub fn row(&self, y: u32) -> &[u32] {
+        let stride = self.cols as usize * 4;
+        &self.cells[y as usize * stride..(y as usize + 1) * stride]
+    }
+}
+
+pub(crate) fn get(target: &JsValue, key: &str) -> JsValue {
+    Reflect::get(target, &JsValue::from_str(key)).unwrap_or(JsValue::UNDEFINED)
+}
+
+fn selection_char(value: &JsValue) -> char {
+    if value.as_string().as_deref() == Some("p") {
+        'p'
+    } else {
+        'c'
+    }
+}
+
+fn parse_extras(value: &JsValue) -> Vec<CellExtra> {
+    if !Array::is_array(value) {
+        return Vec::new();
+    }
+    Array::from(value)
+        .iter()
+        .map(|extra| {
+            let hyperlink = get(&extra, "hyperlink");
+            CellExtra {
+                col: get(&extra, "col").as_f64().unwrap_or(0.0) as u32,
+                text: get(&extra, "text").as_string(),
+                underline_color: get(&extra, "underlineColor").as_f64().map(|c| c as u32),
+                hyperlink: hyperlink.is_object().then(|| Hyperlink {
+                    id: get(&hyperlink, "id").as_string().unwrap_or_default(),
+                    uri: get(&hyperlink, "uri").as_string().unwrap_or_default(),
+                }),
+            }
+        })
+        .collect()
+}

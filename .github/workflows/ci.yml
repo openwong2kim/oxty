@@ -16,7 +16,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - run: cargo fmt -p oxtty -p oxtty-wasm -p oxtty-node --check  # src/vt is #[rustfmt::skip]
+      - run: cargo fmt -p oxtty -p oxtty-wasm -p oxtty-node -p oxtty-web --check  # src/vt is #[rustfmt::skip]
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p oxtty
 
@@ -30,7 +30,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - run: bash scripts/build-wasm.sh
+      - run: bash scripts/build-web.sh
       - run: npm ci
         working-directory: packages/oxtty
       - run: npm test

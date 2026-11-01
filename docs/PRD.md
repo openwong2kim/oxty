@@ -10,7 +10,13 @@
 
 ### v0.4 change summary
 
-- **D3 replaced (owner decision, 2026-11-01)**: the web front end is rewritten in Rust and compiled to wasm; the TypeScript facade with borrowed xterm.js parts (`packages/oxtty/xterm`, last at `0510a7d`) and the D3 spike are removed. Only generated JS glue and the JS harnesses that compare against xterm.js remain. The parity it reached (keys, IME, mouse, selection, WebGL context loss) is the bar the Rust front end must meet. The design is under engineering review; the M2 rows and D3/D4/D7 are rewritten after it.
+- **D3 replaced (owner decision, 2026-11-01)**: the web front end is rewritten in Rust and compiled to wasm; the TypeScript facade with borrowed xterm.js parts (`packages/oxtty/xterm`, last at `0510a7d`) and the D3 spike are removed. Only generated JS glue and the JS harnesses that compare against xterm.js remain. The parity it reached (keys, IME, mouse, selection, WebGL context loss) is the bar the Rust front end must meet. Engineering review: GO with conditions, applied as follows.
+  - **Two WebAssembly modules.** The engine (`oxtty.wasm`, raw ABI, no imports, ≤300 KB, its hand-written loader `index.js` kept by owner decision) and the front end (`crates/oxtty-web`, wasm-bindgen, `xterm_web_bg.wasm`, ≤600 KB enforced by `scripts/build-web.sh`). The front end reaches the engine through `index.js`, so an engine crash still rebuilds only the engine instance and the page keeps running; `oxtty/xterm`'s `init()` loads both.
+  - **D7 kept**: rendering, input, selection and accessibility read only `Events`/`Frame`/`Viewport` (`crates/oxtty-web/src/engine.rs`).
+  - **Rules** (crate docs of `oxtty-web`): no JS calls while a `RefCell` is borrowed (listeners may write, resize or dispose), front-end panics are bugs (`panic = "abort"` stops every terminal on the page), no `Closure::forget`, only macrotask timers, borrowed xterm.js logic credited per file.
+  - **Renderer**: raw WebGL2 through web-sys, glyphs rasterised with Canvas2D `fillText` (same font fallback as xterm.js), the context state machine and 17-context LRU ported from `0510a7d`.
+  - **Input encoding moves into the engine crate** (`crates/oxtty/src/input`, platform-neutral `KeyInput`/`MouseInput`), pulling M3 forward.
+  - The xterm.js parity harnesses come back as JS tests against the new build (`packages/oxtty/test/web`).
 
 ### v0.3 change summary
 
@@ -262,7 +268,7 @@ M2 runs on key input code borrowed from xterm.js. M3 moves encoding to Rust.
 | Unicode | Character widths use the same table as the xterm.js Unicode 11 provider |
 | Determinism | No clock, threads or randomness in the engine. Same input → same screen |
 | Stability | 0 panics in wasm (verified by fuzzing); invalid input is ignored and processing continues |
-| Size | Keep the npm wasm at 300KB or less (currently 177KB) |
+| Size | Engine wasm 300KB or less (266KB on 2026-11-01); front-end wasm (`oxtty/xterm`) 600KB or less, checked by `scripts/build-web.sh` |
 | Performance | `write`→frame end-to-end throughput at or above xterm.js on the same corpus. The target value is set after the M1 baseline measurement |
 | Memory | Publish the scrollback memory caused by the cell size (24B) in the README; consider compressed storage before 1.0 (D6) |
 | Platforms | Native on Windows, macOS and Linux, modern browsers, Node 18 or later |

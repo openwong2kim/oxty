@@ -30,6 +30,7 @@ use std::time::Duration;
 pub mod vt;
 
 mod history;
+pub mod input;
 mod snapshot;
 pub use history::TermHistory;
 pub use snapshot::SnapshotRefusal;
