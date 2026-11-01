@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-// oxtty excerpt: only the types the renderer parts use, cut out verbatim (lines 27-29, 39-41, 104-120, 136-220, 419-431).
+// oxtty excerpt: only the types the renderer and input parts use, cut out verbatim (lines 27-29, 39-41, 45-59, 87-98, 104-120, 136-220, 419-431).
 import { UnderlineStyle } from 'common/buffer/Constants';
 
 export interface IDisposable {
@@ -15,6 +15,35 @@ export interface IDisposable {
 export type CursorStyle = 'block' | 'underline' | 'bar';
 
 export type CursorInactiveStyle = 'outline' | 'block' | 'bar' | 'underline' | 'none';
+
+/**
+ * A keyboard event interface which does not depend on the DOM, KeyboardEvent implicitly extends
+ * this event.
+ */
+export interface IKeyboardEvent {
+  altKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+  /** @deprecated See KeyboardEvent.keyCode */
+  keyCode: number;
+  key: string;
+  type: string;
+  code: string;
+}
+
+export const enum KeyboardResultType {
+  SEND_KEY,
+  SELECT_ALL,
+  PAGE_UP,
+  PAGE_DOWN
+}
+
+export interface IKeyboardResult {
+  type: KeyboardResultType;
+  cancel: boolean;
+  key: string | undefined;
+}
 
 export type CharData = [number, string, number, number];
 

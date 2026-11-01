@@ -61,20 +61,20 @@
       "reason": "Accepted, no effect: there is no proposed-API gate."
     },
     "options.scrollOnUserInput": {
-      "status": "step 2",
-      "reason": "Input."
+      "status": "supported",
+      "reason": "Keys, IME and paste scroll a scrolled-back view to the bottom (xterm.js default true; wmux passes false)."
     },
     "options.disableStdin": {
-      "status": "step 2",
-      "reason": "Input."
+      "status": "supported",
+      "reason": "Drops keys, pastes and replies to the program like xterm.js; the textarea turns read-only."
     },
     "options.altClickMovesCursor": {
       "status": "step 2",
       "reason": "Mouse input."
     },
     "options.vtExtensions.kittyKeyboard": {
-      "status": "step 2",
-      "reason": "Key encoding is input; the engine already tracks the kitty mode."
+      "status": "supported",
+      "reason": "Turns the engine's kitty protocol on (setKittyKeyboard); keys go through the copied xterm.js 6.1 kitty encoder with the flags of the last frame. Turning it off drops the pushed flags."
     },
     "options.vtExtensions.colorSchemeQuery": {
       "status": "unsupported",
@@ -173,16 +173,16 @@
       "reason": "Always \"11\" (engine tables); setting another version throws."
     },
     "Terminal.focus": {
-      "status": "step 2",
-      "reason": "Needs the hidden textarea."
+      "status": "supported",
+      "reason": "Focuses the hidden textarea."
     },
     "Terminal.textarea": {
-      "status": "step 2",
-      "reason": "Input; the place for it (.xterm-helpers) already exists."
+      "status": "supported",
+      "reason": "The hidden textarea in .xterm-helpers, set by open()."
     },
     "Terminal.attachCustomKeyEventHandler": {
-      "status": "step 2",
-      "reason": "Input."
+      "status": "supported",
+      "reason": "Sees every keydown, keypress and keyup first; false stops the key (the copied xterm.js arbitration)."
     },
     "Terminal.getSelection": {
       "status": "step 4",
@@ -401,16 +401,16 @@
       "reason": "webglTeardown: there is no DOM renderer fallback; the WebGL renderer restores its context."
     },
     "_core.coreService.kittyKeyboard": {
-      "status": "step 2",
-      "reason": "Kitty flags live in the engine; input decides the reset path."
+      "status": "supported",
+      "reason": "oxtty API: xtermKittyFlags(term) becomes term.kittyKeyboardFlags (the flags the encoder uses, from the last frame) and resetXtermKitty(term) becomes term.resetKittyKeyboard() (both screens, applied at once). Resetting in stream order at OSC 133;A still needs registerOscHandler (later)."
     },
     "_core.coreService.onUserInput": {
-      "status": "step 2",
-      "reason": "Input can tell user input from replies itself."
+      "status": "supported",
+      "reason": "oxtty API: term.onUserInput fires just before onData for keys, IME and paste, never for replies to the program; userInputGate subscribes to it instead."
     },
     "_core._compositionHelper": {
-      "status": "step 2",
-      "reason": "IME."
+      "status": "unsupported",
+      "reason": "deadInputWatchdog reads _isComposing/_isSendingComposition only for a log line and logs '?' without them; the copied CompositionHelper stays internal."
     },
     "WebglAddon._renderer._gl": {
       "status": "unsupported",
@@ -434,15 +434,15 @@
     },
     "DOM .xterm-helpers": {
       "status": "supported",
-      "reason": "Present, empty until input (step 2)."
+      "reason": "Holds the textarea and the composition view."
     },
     "DOM .xterm-helper-textarea": {
-      "status": "step 2",
-      "reason": "Input."
+      "status": "supported",
+      "reason": "Built like xterm.js (class, aria and autocomplete attributes, tabindex 0) and moved to the cursor cell after each frame."
     },
     "DOM .composition-view": {
-      "status": "step 2",
-      "reason": "IME."
+      "status": "supported",
+      "reason": "The copied CompositionHelper fills it while composing and places it at the cursor (style.left/top)."
     },
     "DOM .xterm-scrollable-element .scrollbar": {
       "status": "later",

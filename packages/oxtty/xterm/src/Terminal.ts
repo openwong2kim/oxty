@@ -2,10 +2,13 @@
 // It implements what wmux uses (xterm/test/api-checklist.json); the public types are xterm/xterm.d.ts.
 import { Mode, Terminal as Engine, type AnsiSnapshot } from '../../src/index.js';
 import { css } from 'common/Color';
-import { Emitter } from 'vs/base/common/event';
+import { Emitter, type Event } from 'vs/base/common/event';
 import type { IDisposable } from 'vs/base/common/lifecycle';
+import type { ITerminalOptions } from '@xterm/xterm';
 import { BufferNamespace } from './buffer';
 import { LocalEngineView, Viewport } from './engine-view';
+import { InputController } from './input/InputController';
+import { CoreService, OptionsService } from './input/services';
 import type { Dimensions, Renderer, RendererOptions, Theme } from './renderer/types';
 import { WebglRenderer } from './renderer/WebglRenderer';
 import { WriteQueue, isHighSurrogate } from './WriteQueue';
@@ -28,6 +31,10 @@ export interface TerminalOptions extends Omit<Partial<RendererOptions>, 'fontWei
   scrollbar?: { showScrollbar?: boolean; width?: number };
   allowProposedApi?: boolean;
   clipboard?: ClipboardHandler;
+  macOptionIsMeta?: boolean;
+  scrollOnUserInput?: boolean;
+  disableStdin?: boolean;
+  vtExtensions?: { kittyKeyboard?: boolean };
 }
 
 export interface Modes {
@@ -64,6 +71,7 @@ const DEFAULT_OPTIONS: TerminalOptions = {
   cursorBlink: false, cursorStyle: 'block', cursorWidth: 1, cursorInactiveStyle: 'outline', drawBoldTextInBrightColors: true,
   fontFamily: 'monospace', fontSize: 15, fontWeight: 'normal', fontWeightBold: 'bold', lineHeight: 1, letterSpacing: 0,
   minimumContrastRatio: 1, allowTransparency: false, theme: {},
+  macOptionIsMeta: false, scrollOnUserInput: true, disableStdin: false, vtExtensions: {},
 };
 const INIT_ONLY = new Set(['cols', 'rows', 'scrollback']);
 const RENDERER_OPTIONS: Record<keyof RendererOptions, true> = {
@@ -109,6 +117,10 @@ const STYLE = `
 .xterm .xterm-screen { position: relative; }
 .xterm .xterm-screen canvas { position: absolute; left: 0; top: 0; }
 .xterm .xterm-helpers { position: absolute; top: 0; z-index: 5; }
+.xterm.focus, .xterm:focus { outline: none; }
+.xterm .xterm-helper-textarea { padding: 0; border: 0; margin: 0; position: absolute; opacity: 0; left: -9999em; top: 0; width: 0; height: 0; z-index: -5; white-space: nowrap; overflow: hidden; resize: none; }
+.xterm .composition-view { background: #000; color: #FFF; display: none; position: absolute; white-space: nowrap; z-index: 1; }
+.xterm .composition-view.active { display: block; }
 `;
 
 const decoder = new TextDecoder();
@@ -120,6 +132,9 @@ export class Terminal {
   private readonly _queue: WriteQueue;
   private readonly _options: Record<string, unknown>;
   private readonly _optionsProxy: TerminalOptions;
+  private readonly _inputOptions: OptionsService;
+  private readonly _coreService: CoreService;
+  private readonly _input: InputController;
   private readonly _addons: TerminalAddon[] = [];
   private readonly _fitAddons: { fit(): void }[] = [];
   private _element: HTMLElement | undefined;
@@ -137,6 +152,7 @@ export class Terminal {
   private _cursorY = 0;
   private _viewportY = 0;
   private _alternate = false;
+  private _kittyKeyboard = false;
   private _disposed = false;
 
   private readonly _onData = new Emitter<string>();
@@ -160,6 +176,8 @@ export class Terminal {
   public readonly onCursorMove = this._onCursorMove.event;
   private readonly _onDimensionsChange = new Emitter<Dimensions>();
   public readonly onDimensionsChange = this._onDimensionsChange.event;
+  /** Fires just before `onData` for data the user produced (keys, IME, paste), never for replies to the program. */
+  public readonly onUserInput: Event<void>;
 
   public readonly buffer: BufferNamespace;
 
@@ -192,8 +210,14 @@ export class Terminal {
       },
     }) as TerminalOptions;
     this.buffer = new BufferNamespace(this._engine);
+    const rawOptions = this._options as unknown as Required<ITerminalOptions>;
+    this._inputOptions = new OptionsService(rawOptions);
+    this._coreService = new CoreService(this._viewport, rawOptions, this._onData, () => this.scrollToBottom());
+    this._input = new InputController(this, this._viewport, this._coreService, this._inputOptions);
+    this.onUserInput = this._coreService.onUserInput;
     this._engine.setColors(themeColors(this._options.theme as Theme));
     this._applyClipboard();
+    this._applyVtExtensions();
     this._readState();
   }
 
@@ -213,6 +237,16 @@ export class Terminal {
   /** Cell and canvas size, undefined before `open`. */
   public get dimensions(): Dimensions | undefined {
     return this._renderer?.dimensions;
+  }
+
+  /** The hidden textarea that takes keyboard and IME input, set by `open`. */
+  public get textarea(): HTMLTextAreaElement | undefined {
+    return this._input.textarea;
+  }
+
+  /** The kitty keyboard flags key encoding uses, as of the last frame (0 while the program pushed none). */
+  public get kittyKeyboardFlags(): number {
+    return this._viewport.kittyFlags;
   }
 
   public get modes(): Modes {
@@ -260,7 +294,7 @@ export class Terminal {
     element.dir = 'ltr';
     const screen = doc.createElement('div');
     screen.classList.add('xterm-screen');
-    // Input puts the hidden textarea and the IME composition view in here (step 2).
+    // Input puts the hidden textarea and the IME composition view in here.
     const helpers = doc.createElement('div');
     helpers.classList.add('xterm-helpers');
     screen.appendChild(helpers);
@@ -274,7 +308,8 @@ export class Terminal {
     // The renderer puts its canvas into `screen` and may replace it (WebGL context recreated): never keep it.
     const renderer = rendererFactory(screen, this.cols, this.rows, options);
     this._renderer = renderer;
-    // Focus picks the cursor style; the hidden textarea (step 2) focuses inside the element.
+    this._input.open(element, helpers, renderer);
+    // Focus picks the cursor style; the hidden textarea focuses inside the element.
     const onFocusIn = (): void => this._setFocused(true);
     const onFocusOut = (e: FocusEvent): void => this._setFocused(element.contains(e.relatedTarget as Node | null));
     element.addEventListener('focusin', onFocusIn);
@@ -394,6 +429,31 @@ export class Terminal {
     throw new Error(`oxtty/xterm: unsupported addon ${addon.constructor?.name ?? ''}; only fit, webgl and unicode11 addons can be loaded`);
   }
 
+  public focus(): void {
+    this._input.focus();
+  }
+
+  public blur(): void {
+    this._input.blur();
+  }
+
+  /** Sends `data` as if pasted: newlines become CR, wrapped in bracketed paste when the program asked for it. */
+  public paste(data: string): void {
+    this._input.paste(data);
+  }
+
+  /** `handler` sees every keydown, keyup and keypress first; returning false stops the terminal from handling it. */
+  public attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void {
+    this._input.attachCustomKeyEventHandler(handler);
+  }
+
+  /** Drops the kitty keyboard flags the program pushed, on both screens; keys are encoded the legacy way at once. */
+  public resetKittyKeyboard(): void {
+    this._engine.resetKittyKeyboard();
+    // The next frame brings the same 0 from the engine.
+    this._viewport.kittyFlags = 0;
+  }
+
   /** Bytes that rebuild this screen, scrollback included, in a fresh terminal of the same size (engine `ansiSnapshot`). */
   public ansiSnapshot(): AnsiSnapshot {
     return this._engine.ansiSnapshot();
@@ -403,6 +463,9 @@ export class Terminal {
     if (this._disposed) return;
     this._disposed = true;
     this._queue.dispose();
+    this._input.dispose();
+    this._coreService.dispose();
+    this._inputOptions.dispose();
     if (this._frame) cancelAnimationFrame(this._frame);
     for (const addon of this._addons.splice(0)) addon.dispose();
     for (const unsubscribe of this._openListeners.splice(0)) unsubscribe();
@@ -422,6 +485,8 @@ export class Terminal {
     this._options[key] = value;
     if (key === 'theme') this._engine.setColors(themeColors(value as Theme));
     if (key === 'clipboard') this._applyClipboard();
+    if (key === 'vtExtensions') this._applyVtExtensions();
+    this._inputOptions.fire(key);
     if (key in RENDERER_OPTIONS && this._renderer) {
       const { width, height } = this._renderer.dimensions.css.cell;
       this._renderer.setOptions({ [key]: value });
@@ -442,10 +507,20 @@ export class Terminal {
     this._engine.setClipboardAccess({ read: !!clipboard?.read, write: !!clipboard?.write });
   }
 
+  /** Lets the program push kitty keyboard flags (`vtExtensions.kittyKeyboard`); turning it off drops them. */
+  private _applyVtExtensions(): void {
+    const on = !!(this._options.vtExtensions as TerminalOptions['vtExtensions'])?.kittyKeyboard;
+    if (on === this._kittyKeyboard) return;
+    this._kittyKeyboard = on;
+    this._engine.setKittyKeyboard(on);
+    // Key encoding sees the dropped flags from the next frame.
+    this._scheduleFrame();
+  }
+
   /** Hands what the program asked of the host to the events; runs after every parsed write, frames or not. */
   private _handleEvents(): void {
     const events = this._view.takeEvents();
-    if (events.replies.length) this._onData.fire(decoder.decode(events.replies));
+    if (events.replies.length) this._coreService.triggerDataEvent(decoder.decode(events.replies));
     if (events.title !== null) this._onTitleChange.fire(events.title);
     for (let i = 0; i < events.bells; i++) this._onBell.fire();
     const clipboard = this._options.clipboard as ClipboardHandler | undefined;
@@ -521,6 +596,7 @@ export class Terminal {
     const dirty = this._hostDirty;
     this._hostDirty = new Set();
     renderer.render(this._viewport, changed, dirty);
+    this._input.handleFrame();
     const rows = dirty === 'all' ? [0, this._viewport.rows - 1] : [...changed, ...dirty];
     if (rows.length) this._onRender.fire({ start: Math.min(...rows), end: Math.max(...rows) });
   }
