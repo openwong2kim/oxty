@@ -31,6 +31,7 @@ pub mod vt;
 
 mod history;
 pub mod input;
+mod markers;
 mod search;
 mod snapshot;
 pub use history::TermHistory;
@@ -412,6 +413,7 @@ pub struct Engine {
     colors: Option<Box<[u32; COLOR_SLOTS]>>,
     // Recently decoded history rows by their History::id, newest last.
     row_cache: RefCell<VecDeque<(u64, Row<AlacCell>)>>,
+    markers: markers::Markers,
 }
 
 impl Engine {
@@ -485,6 +487,7 @@ impl Engine {
             decstr_owed: false,
             colors: None,
             row_cache: RefCell::new(VecDeque::with_capacity(ROW_CACHE)),
+            markers: Default::default(),
         }
     }
 
@@ -685,6 +688,7 @@ impl Engine {
         self.answer_color_queries();
         self.follow_scroll();
         self.count_trimmed();
+        self.follow_markers();
     }
 
     /// The soft reset of a parsed DECSTR, once no hook holds it back. As in xterm.js, DECSTR also ends a
@@ -730,6 +734,8 @@ impl Engine {
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        let reflow = size(cols, rows).cols != self.term.columns();
+        let anchors = self.anchor_markers(reflow);
         match &self.history {
             Some(history) => {
                 self.offset = history.reflow(&mut self.term, size(cols, rows), self.offset);
@@ -740,6 +746,7 @@ impl Engine {
         // Reflow renumbers the history; it is not trimming.
         self.entered_seen = self.primary().history_entered();
         self.history_seen = self.primary_history_len();
+        self.place_markers(anchors, reflow);
     }
 
     /// Lines that have left the top of the primary screen's scrollback so far (a full history dropping its oldest

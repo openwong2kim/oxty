@@ -92,6 +92,10 @@ single crate.
   lines left the top of the scrollback.
 - `Term::resets` counts full resets (RIS), which vte hands to `reset_state`
   without telling the host.
+- `Grid::track_row_moves` / `take_row_moves` log how `scroll_up`,
+  `scroll_down` and `reset_region` moved or cleared screen rows (`RowMove`),
+  off until a host turns it on. `oxtty::Engine` turns it on while it has
+  markers, to keep them on their lines.
 - `Term::set_kitty_keyboard` switches the kitty keyboard protocol at runtime
   and drops its flag stacks, as `set_options` does, without re-sending the
   title or damaging the screen.

@@ -125,3 +125,15 @@ test('native search mirrors the wasm one (without regex)', () => {
   assert.equal(line.text, '한글foo');
   assert.deepEqual(Array.from(line.cells.slice(0, 3)), [0x80000000, 0x80000002, 4]);
 });
+
+test('native markers', () => {
+  const t = new Terminal(10, 2, 3);
+  t.write('a\r\nb');
+  const id = t.addMarker(1);
+  assert.equal(t.addMarker(5), null);
+  t.write('\r\nc\r\nd');
+  assert.equal(t.markerLine(id), 1);
+  t.write('\r\ne\r\nf\r\ng');
+  assert.equal(t.markerLine(id), null);
+  assert.deepEqual(t.takeDisposedMarkers(), [id]);
+});

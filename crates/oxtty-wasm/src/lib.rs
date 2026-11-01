@@ -587,3 +587,33 @@ pub extern "C" fn oxtty_search_line(h: u32, line: i32) -> i32 {
         found.cells.len() as i32
     })
 }
+
+// Markers (lines as xterm.js buffer lines: 0 is the oldest history line).
+
+/// `Engine::add_marker`: the marker id, or 0 when `line` is outside the buffer.
+#[no_mangle]
+pub extern "C" fn oxtty_add_marker(h: u32, line: i32) -> u32 {
+    with(h, 0, |t| t.add_marker(line as i64).unwrap_or(0))
+}
+
+/// `Engine::marker_line`, or -1 once the marker is gone.
+#[no_mangle]
+pub extern "C" fn oxtty_marker_line(h: u32, id: u32) -> i32 {
+    with(h, -1, |t| t.marker_line(id).map_or(-1, |line| line as i32))
+}
+
+#[no_mangle]
+pub extern "C" fn oxtty_remove_marker(h: u32, id: u32) {
+    with(h, (), |t| t.remove_marker(id));
+}
+
+/// `Engine::take_disposed_markers`: their count, the ids in OUT32.
+#[no_mangle]
+pub extern "C" fn oxtty_take_disposed_markers(h: u32) -> i32 {
+    with(h, 0, |t| {
+        let ids = t.take_disposed_markers();
+        let n = ids.len() as i32;
+        OUT32.with_borrow_mut(|out| *out = ids);
+        n
+    })
+}

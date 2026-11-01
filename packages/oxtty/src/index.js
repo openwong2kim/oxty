@@ -702,6 +702,26 @@ export class Terminal {
     return { first: words[0] | 0, rows: words[1], text, cells };
   }
 
+  /** Puts a marker on buffer line `line` of the primary screen (0 is the oldest history line); its id, or 0 outside the buffer or on the alternate screen. */
+  addMarker(line) {
+    return wasm.oxtty_add_marker(this.#handle(), line);
+  }
+
+  /** The marker's buffer line on the primary screen, or -1 once it is gone. */
+  markerLine(id) {
+    return wasm.oxtty_marker_line(this.#handle(), id);
+  }
+
+  removeMarker(id) {
+    wasm.oxtty_remove_marker(this.#handle(), id);
+  }
+
+  /** Markers the engine dropped since the last call (trimmed, cleared, reset). @returns {number[]} */
+  takeDisposedMarkers() {
+    const n = wasm.oxtty_take_disposed_markers(this.#handle());
+    return n > 0 ? Array.from(wordsOut(n)) : [];
+  }
+
   /** Bytes that rebuild this screen in a fresh xterm.js, or why they cannot. */
   ansiSnapshot() {
     const n = wasm.oxtty_ansi_snapshot(this.#handle());

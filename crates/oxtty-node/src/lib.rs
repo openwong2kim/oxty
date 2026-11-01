@@ -493,6 +493,30 @@ impl Terminal {
         })
     }
 
+    /// Puts a marker on buffer line `line` of the primary screen (0 is the oldest history line); null outside the buffer
+    /// or on the alternate screen.
+    #[napi]
+    pub fn add_marker(&mut self, line: i32) -> Option<u32> {
+        self.inner.add_marker(line as i64)
+    }
+
+    /// The marker's buffer line on the primary screen; null once it is gone.
+    #[napi]
+    pub fn marker_line(&self, id: u32) -> Option<i32> {
+        self.inner.marker_line(id).map(|line| line as i32)
+    }
+
+    #[napi]
+    pub fn remove_marker(&mut self, id: u32) {
+        self.inner.remove_marker(id);
+    }
+
+    /// Markers the engine dropped since the last call (trimmed, cleared, reset).
+    #[napi]
+    pub fn take_disposed_markers(&mut self) -> Vec<u32> {
+        self.inner.take_disposed_markers()
+    }
+
     /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.
     #[napi]
     pub fn ansi_snapshot(&self) -> AnsiSnapshot {

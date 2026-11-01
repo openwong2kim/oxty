@@ -340,3 +340,23 @@ test('search: plain and regex over scrollback, wrapped rows and wide characters'
   assert.equal(t.searchLine(3), null);
   t.dispose();
 });
+
+test('markers follow their line into the scrollback and are reported when dropped', () => {
+  const t = new Terminal({ cols: 10, rows: 2, scrollback: 3 });
+  t.write('a\r\nb');
+  const id = t.addMarker(1);
+  assert.ok(id > 0);
+  assert.equal(t.addMarker(5), 0, 'outside the buffer');
+  t.write('\r\nc\r\nd');
+  assert.equal(t.markerLine(id), 1);
+  assert.equal(t.rowText(t.markerLine(id) - t.historyLength), 'b');
+  assert.deepEqual(t.takeDisposedMarkers(), []);
+  t.write('\r\ne\r\nf\r\ng');
+  assert.equal(t.markerLine(id), -1);
+  assert.deepEqual(t.takeDisposedMarkers(), [id]);
+  const other = t.addMarker(0);
+  t.removeMarker(other);
+  t.write('\x1bc');
+  assert.deepEqual(t.takeDisposedMarkers(), [], 'removed by the host, not reported');
+  t.dispose();
+});

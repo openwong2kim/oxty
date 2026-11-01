@@ -90,10 +90,12 @@ impl Text {
 
     fn is_match(&self, query: &[char], s: usize, whole_word: bool) -> bool {
         let e = s + query.len();
+        // NON_WORD is ASCII
+        let separator = |c: char| c.is_ascii() && NON_WORD.as_bytes().contains(&(c as u8));
         self.chars[s..].starts_with(query)
             && (!whole_word
-                || ((s == 0 || NON_WORD.contains(self.chars[s - 1]))
-                    && (e == self.chars.len() || NON_WORD.contains(self.chars[e]))))
+                || ((s == 0 || separator(self.chars[s - 1]))
+                    && (e == self.chars.len() || separator(self.chars[e]))))
     }
 
     /// The first match starting at character `from` or later.

@@ -209,6 +209,20 @@ export class Terminal {
   searchRows(query: string, options: SearchOptions | undefined, first: number, last: number): SearchMatch[];
   /** The logical line row `line` belongs to, as search reads it, for matching the text yourself; null outside the buffer. */
   searchLine(line: number): SearchLine | null;
+  /**
+   * Puts a marker on buffer line `line` of the primary screen (0 is the oldest history line, `historyLength` the top
+   * screen row) and returns its id; 0 outside the buffer or while the alternate screen is up. The marker follows its
+   * line as output scrolls it into the history and as scroll regions, IL and DL move it; it is dropped when its line
+   * leaves the scrollback or is cleared whole (ED, a line IL or DL pushed out, RIS). A resize keeps it on its logical
+   * line.
+   */
+  addMarker(line: number): number;
+  /** The marker's buffer line on the primary screen, -1 once it is gone. */
+  markerLine(id: number): number;
+  /** Drops a marker; it is not reported by `takeDisposedMarkers`. */
+  removeMarker(id: number): void;
+  /** Markers the engine dropped since the last call. */
+  takeDisposedMarkers(): number[];
   /** Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes. */
   ansiSnapshot(): AnsiSnapshot;
   dispose(): void;
