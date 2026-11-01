@@ -73,12 +73,14 @@ THE SOFTWARE.
 
 ---
 
-## xterm.js 6.0.0
+## xterm.js 6.0.0 and 6.1.0-beta.336
 
 `dist/xterm.js` (`oxtty/xterm`) contains code copied from xterm.js 6.0.0
-(commit f447274f430fd22513f6adbf9862d19524471c04) and its WebGL addon: the
-renderer parts under `packages/oxtty/xterm/vendor-xterm` in the repository,
-each file marked verbatim or with its changes. Its API follows the xterm.js
+(commit f447274f430fd22513f6adbf9862d19524471c04) and its WebGL addon (the
+renderer parts) and from xterm.js 6.1.0-beta.336 (commit
+08829c7eb6279dda2a9e86df901353a1a89858ca) (keyboard, IME, paste and mouse
+input), under `packages/oxtty/xterm/vendor-xterm` in the repository, each file
+naming its commit and marked verbatim or with its changes. Its API follows the xterm.js
 API, and its fit follows `@xterm/addon-fit`. Source:
 https://github.com/xtermjs/xterm.js
 

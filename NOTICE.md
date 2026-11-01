@@ -30,8 +30,9 @@ Apache-2.0.
 ## xterm.js
 
 `packages/oxtty/xterm/vendor-xterm` is copied from xterm.js 6.0.0 (commit
-f447274f430fd22513f6adbf9862d19524471c04) and its WebGL addon; each file
-says whether it is verbatim or changed. `packages/oxtty/xterm` follows the
+f447274f430fd22513f6adbf9862d19524471c04) and its WebGL addon (renderer), and
+from xterm.js 6.1.0-beta.336 (commit 08829c7eb6279dda2a9e86df901353a1a89858ca)
+(input); each file names its commit and says whether it is verbatim or changed. `packages/oxtty/xterm` follows the
 xterm.js API, and its fit follows `@xterm/addon-fit`. MIT license:
 
 ```

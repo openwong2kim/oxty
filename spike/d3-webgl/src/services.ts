@@ -9,7 +9,8 @@ import { Emitter } from 'vs/base/common/event';
 import type { IDisposable, ITerminalOptions } from '@xterm/xterm';
 
 // Renderer options. Follows the xterm.js defaults, with only the font changed.
-export const terminalOptions: Required<ITerminalOptions> & { rescaleOverlappingGlyphs: boolean } = {
+// The 0.2 stubs list every option; the spike's renderer parts read only these.
+export const terminalOptions = {
   customGlyphs: true,
   letterSpacing: 0,
   lineHeight: 1,
@@ -22,7 +23,7 @@ export const terminalOptions: Required<ITerminalOptions> & { rescaleOverlappingG
   minimumContrastRatio: 1,
   rescaleOverlappingGlyphs: false,
   theme: {}
-};
+} as unknown as Required<ITerminalOptions> & { rescaleOverlappingGlyphs: boolean };
 
 export class OptionsServiceStub implements IOptionsService {
   public readonly rawOptions = terminalOptions;
