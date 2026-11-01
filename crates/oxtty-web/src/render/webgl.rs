@@ -209,6 +209,8 @@ struct Inner {
     highlights: Vec<(String, Vec<Highlight>)>,
     resolved_highlights: Vec<ResolvedHighlight>,
     overlay: Vec<Rect>,
+    /// The highlights or the cell size changed since they were resolved.
+    highlights_stale: bool,
     focused: bool,
     blink: Option<Blink>,
     cursor: crate::engine::Cursor,
@@ -286,6 +288,7 @@ impl WebglRenderer {
             highlights: Vec::new(),
             resolved_highlights: Vec::new(),
             overlay: Vec::new(),
+            highlights_stale: false,
             focused,
             blink: None,
             cursor: crate::engine::Cursor::default(),
@@ -588,6 +591,7 @@ impl Inner {
 
     fn handle_resize(&mut self) {
         self.update_dimensions();
+        self.highlights_stale = true;
         self.model.resize(self.cols, self.rows);
         let d = self.dims;
         self.canvas.set_width(d.device_canvas.width as u32);
@@ -830,6 +834,7 @@ impl Inner {
         }
         self.resolved_highlights = resolved;
         self.overlay = overlay;
+        self.highlights_stale = false;
     }
 
     fn render(&mut self, viewport: &Viewport, changed: &[u32], host_dirty: &Dirty) {
@@ -886,7 +891,9 @@ impl Inner {
         } else {
             -1
         };
-        self.resolve_highlights();
+        if self.highlights_stale {
+            self.resolve_highlights();
+        }
         self.update_model(viewport, &lines);
 
         let (Some(rects), Some(glyphs)) = (&self.rects, &mut self.glyphs) else {
@@ -1044,6 +1051,7 @@ impl Inner {
         }
         if old.theme != options.theme {
             self.colors = ColorSet::new(&options.theme);
+            self.highlights_stale = true;
             if let Some(r) = &mut self.rects {
                 r.update_colors(&self.colors);
             }
@@ -1097,6 +1105,7 @@ impl Inner {
             }
             None => self.highlights.push((layer.to_string(), highlights)),
         }
+        self.highlights_stale = true;
         self.request_redraw_rows(rows);
     }
 

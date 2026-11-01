@@ -35,3 +35,27 @@ for (const deviceScaleFactor of [1, 2]) {
     }
   });
 }
+
+// SGR attributes, colours, underline styles and colours, custom glyphs, emoji and combining marks. Left out: the
+// curly underline and the shades ░▒▓, which the xterm.js 6.1 beta compared here draws differently from 6.0.0 (the
+// version ported: a zigzag polygon, and its rewritten custom glyph rasterizer).
+const ATTRIBUTES = [
+  '\x1b[1mbold\x1b[22m \x1b[2mdim\x1b[22m \x1b[3mital\x1b[23m \x1b[7minv\x1b[27m \x1b[9mstrike\x1b[29m \x1b[8mhide\x1b[28m',
+  '\x1b[31;42mred\x1b[0m \x1b[1;34mbrt\x1b[0m \x1b[38;5;208m208\x1b[0m \x1b[48;2;60;0;90;38;2;10;200;90mrgb\x1b[0m \x1b[7;33mrev\x1b[0m',
+  '\x1b[4msingle\x1b[0m \x1b[4:2mdouble\x1b[0m \x1b[4:4mdotted\x1b[0m \x1b[4:5mdashed\x1b[0m',
+  '\x1b[4;58;2;255;0;0mredline\x1b[0m \x1b[4;58;5;4mblueline\x1b[0m ┌─┬─┐│█▀▄▌  😀👍 é ñ',
+].join('\r\n');
+
+test('attributes, colours, underlines, custom glyphs and emoji draw exactly as xterm.js', async () => {
+  const results = await withPage('renderer-hangul.mjs', async (page) => {
+    await page.waitForFunction(() => window.ready);
+    return page.evaluate(async (text) => [
+      await window.compare(text, { fontFamily: 'Menlo, monospace', fontSize: 14, rows: 4 }, []),
+      await window.compare(text, { fontFamily: 'Menlo, monospace', fontSize: 14, rows: 4, minimumContrastRatio: 4.5, drawBoldTextInBrightColors: false }, []),
+    ], ATTRIBUTES);
+  });
+  for (const r of results) {
+    assert.deepEqual(r.oxtty, r.xterm, 'cell metrics');
+    assert.equal(r.diff, 0, 'pixels');
+  }
+});
