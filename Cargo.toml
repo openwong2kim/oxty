@@ -8,7 +8,7 @@ edition = "2021"
 rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/openwong2kim/oxtty"
-authors = ["wong2kim"]
+authors = ["openwong2kim"]
 
 [profile.release]
 opt-level = 3
