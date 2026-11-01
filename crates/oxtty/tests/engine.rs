@@ -631,7 +631,6 @@ fn a_restored_cursor_drops_its_pending_wrap() {
 }
 
 #[test]
-#[ignore = "grid/resize.rs: grow_columns only moves a pending-wrap cursor past the edge when it reflows, so the alternate screen keeps it in the old last column (fuzz seed 310)"]
 fn widening_the_alternate_screen_frees_a_pending_wrap() {
     let mut t = Engine::new(5, 3, 100);
     t.feed(b"\x1b[?1049habcde");
