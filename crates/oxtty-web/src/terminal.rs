@@ -517,8 +517,20 @@ impl Shared {
         if !paused && self.writes_queued() {
             self.schedule_drain();
         }
-        if self.core.borrow().disposed {
-            return;
+        {
+            let mut core = self.core.borrow_mut();
+            if core.disposed {
+                return;
+            }
+            // xterm.js refreshes the cursor row after every write (`InputHandler.parse` marks `buffer.y` dirty), so
+            // `onRender` reports it even when nothing changed; the engine damages only rows that changed.
+            let line = core.view.cursor().line;
+            if let (Dirty::Rows(rows), Ok(line)) = (&mut core.dirty, u32::try_from(line)) {
+                // Kept once: without frames (no `open`) nothing takes the rows.
+                if !rows.contains(&line) {
+                    rows.push(line);
+                }
+            }
         }
         self.handle_events();
         if !paused {
@@ -536,9 +548,10 @@ impl Shared {
             }
             (core.view.take_events(), get(&core.options, "clipboard"))
         };
-        if !events.replies.is_empty() {
-            // Replies are not user input: `disableStdin` drops them, they do not scroll the view.
-            let text = String::from_utf8_lossy(&events.replies).into_owned();
+        // One `onData` per reply, as xterm.js `triggerDataEvent`s them. Replies are not user input: `disableStdin`
+        // drops them, they do not scroll the view.
+        for reply in &events.replies {
+            let text = String::from_utf8_lossy(reply).into_owned();
             crate::input::send_data(self, &text.into(), false);
         }
         if let Some(title) = events.title {

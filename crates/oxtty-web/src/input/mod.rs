@@ -2,7 +2,7 @@
 //! (`CoreBrowserTerminal`, `CompositionHelper`, `MouseService`), ported to Rust around the encoders of
 //! `oxtty::input`. Encoding reads modes and kitty flags from the last frame ([`crate::engine::Viewport`], PRD D7);
 //! the engine is only called for terminal actions (scrolling, the kitty switch, the host focus it reports when the
-//! program asks), and the scroll position and the lines Alt+click walks come from `buffer.active`.
+//! program asks) and the `kittyKeyboardFlags` getter (public API, like `modes`), and the scroll position and the lines Alt+click walks come from `buffer.active`.
 //!
 //! Memory: one DOM listener closure per terminal. Every listener the terminal registers (textarea, element,
 //! screen, document, window) is that closure, which dispatches on the event's type and current target; the
@@ -785,12 +785,14 @@ impl Terminal {
         *self.shared.input.custom_wheel_handler.borrow_mut() = handler.dyn_into().ok();
     }
 
-    /// oxtty API: the kitty keyboard flags key encoding uses, as of the last frame (0 while the program pushed none
-    /// or `vtExtensions.kittyKeyboard` is off).
+    /// oxtty API: the kitty keyboard flags the program pushed, read from the engine like `modes` so they are current
+    /// right after a write (0 while it pushed none or `vtExtensions.kittyKeyboard` is off).
     #[wasm_bindgen(getter = kittyKeyboardFlags)]
     pub fn kitty_keyboard_flags(&self) -> u32 {
         match self.shared.core.try_borrow() {
-            Ok(core) if self.shared.input.kitty_keyboard.get() => core.viewport.kitty_flags,
+            Ok(core) if !core.disposed && self.shared.input.kitty_keyboard.get() => {
+                core.view.engine().kitty_flags().unwrap_or(0)
+            }
             _ => 0,
         }
     }
