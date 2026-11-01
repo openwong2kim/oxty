@@ -265,8 +265,9 @@ test('the selection follows its text as the scrollback trims, then clears, like 
 
 test('alternate screen switch, a change of rows and full resets clear the selection; onSelectionChange fires like xterm.js', async () => {
   const result = await withTerminals({ cols: COLS, rows: 16, scrollback: 20 }, async t => {
-    // The cursor leaves the wrapped last line: widening does not reflow the cursor's line in the engine (it does in
-    // xterm.js), which would put blank cells inside that line
+    // The cursor leaves the wrapped last line. Widening leaves the cursor's line unreflowed in both, with a blank
+    // tail on its first row that xterm.js trims as empty cells and oxtty copies as typed spaces (the known
+    // erased-cell-or-space difference)
     await t.write(`${CONTENT}\r\n`);
     await t.drag([2, 0], [20, 3]);
     await t.compare('drag');
