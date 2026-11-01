@@ -209,6 +209,7 @@ export class Terminal {
   // Host settings re-applied when the engine starts over after a crash.
   #clipboard = { read: false, write: false };
   #kittyKeyboard = false;
+  #focus = null;
   #colors = null;
   #hooks = new Set();
   #windowsPty = null;
@@ -251,6 +252,7 @@ export class Terminal {
     this.#open(wasm, this.#cols, this.#rows);
     wasm.oxtty_set_clipboard_access(this.#h, this.#clipboard.read ? 1 : 0, this.#clipboard.write ? 1 : 0);
     if (this.#kittyKeyboard) wasm.oxtty_set_kitty_keyboard(this.#h, 1);
+    if (this.#focus !== null) wasm.oxtty_set_focus(this.#h, this.#focus ? 1 : 0);
     if (this.#colors) this.setColors(this.#colors);
     this.#rest = null;
     if (this.#windowsPty) this.setWindowsPty(this.#windowsPty);
@@ -520,6 +522,12 @@ export class Terminal {
   /** Active kitty keyboard flags: 1 disambiguate, 2 event types, 4 alternate keys, 8 all keys as escapes, 16 associated text. */
   kittyFlags() {
     return wasm.oxtty_kitty_flags(this.#handle());
+  }
+
+  /** The host's focus, for the report sent when the program turns on focus events (`CSI ? 1004 h`); `null`, the default, sends none. */
+  setFocus(focused) {
+    this.#focus = focused == null ? null : !!focused;
+    wasm.oxtty_set_focus(this.#handle(), this.#focus === null ? -1 : this.#focus ? 1 : 0);
   }
 
   /** Viewport changes since the last call: move drawn rows up by `scroll`, then redraw `lines`. */

@@ -41,6 +41,17 @@ Jeffrey and (c) 2014-2025 The xterm.js authors, MIT license
 fixtures in `crates/oxtty/tests/fixtures/input-*.json` are recorded from
 xterm.js by `packages/oxtty/test/web/gen-input-fixtures.mjs`.
 
+`crates/oxtty-web/src/input` (the browser front end's textarea, IME and mouse
+handling around those encoders) is a Rust port of parts of the same xterm.js
+6.1.0-beta.336: `src/browser/CoreBrowserTerminal.ts`,
+`src/browser/input/CompositionHelper.ts`, `src/browser/input/MoveToCell.ts`,
+`src/browser/input/Mouse.ts`, `src/browser/Clipboard.ts`,
+`src/browser/services/KeyboardService.ts`, `src/browser/services/MouseService.ts`,
+`src/browser/services/MouseCoordsService.ts` and
+`src/browser/services/SelectionService.ts`, Copyright (c) 2014-2026 The
+xterm.js authors, MIT license (`crates/oxtty/LICENSE-XTERM`). Each file names
+its source lines.
+
 ## xterm.js search addon
 
 `crates/oxtty-web/src/search.rs` is a Rust port of `@xterm/addon-search`

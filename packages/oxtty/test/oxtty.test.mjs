@@ -257,6 +257,25 @@ test('kitty keyboard flags and X10 mouse mode reach JS, and kitty stays enabled 
   t.dispose();
 });
 
+test('setFocus answers CSI ? 1004 h in order with other replies, and is kept across a crash', async () => {
+  const { __trapForTest } = await import('../dist/index.js');
+  const t = make({ onCrash: () => {} });
+  t.write('\x1b[?1004h');
+  assert.equal(new TextDecoder().decode(t.takeReplies()), '', 'no report without the host focus');
+  t.setFocus(false);
+  t.write('\x1b[5n\x1b[?1004h');
+  t.setFocus(true);
+  t.write('\x1b[?1004h');
+  assert.equal(new TextDecoder().decode(t.takeReplies()), '\x1b[0n\x1b[O\x1b[I');
+  assert.throws(() => __trapForTest(), WebAssembly.RuntimeError);
+  t.write('\x1b[?1004h');
+  assert.equal(new TextDecoder().decode(t.takeReplies()), '\x1b[I', 'the restarted engine still has the focus');
+  t.setFocus(null);
+  t.write('\x1b[?1004h');
+  assert.equal(new TextDecoder().decode(t.takeReplies()), '');
+  t.dispose();
+});
+
 test('trimmedLines counts lines that left the top of the scrollback', () => {
   const t = make({ cols: 10, rows: 2, scrollback: 3 });
   t.write('0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9');

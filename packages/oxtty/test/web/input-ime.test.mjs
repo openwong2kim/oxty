@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { cdp, withPage } from './harness.mjs';
 
 // Set to `false` once the member lands in crates/oxtty-web.
-const TODO = 'Terminal.focus, Terminal.textarea, DOM .composition-view (IME)';
+const TODO = false;
 
 // Korean 2-set layout: the jamo, the physical key and its key code.
 const JAMO = { 'ㄱ': ['KeyR', 82], 'ㄴ': ['KeyS', 83], 'ㄷ': ['KeyE', 69], 'ㄹ': ['KeyF', 70], 'ㅁ': ['KeyA', 65], 'ㅎ': ['KeyG', 71], 'ㅏ': ['KeyK', 75], 'ㅐ': ['KeyO', 79], 'ㅜ': ['KeyN', 78], 'ㅡ': ['KeyM', 77], 'ㅣ': ['KeyL', 76] };

@@ -318,6 +318,7 @@ name = "oxtty-web"
 version = "0.0.1"
 dependencies = [
  "js-sys",
+ "oxtty",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

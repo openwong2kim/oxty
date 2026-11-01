@@ -66,7 +66,7 @@ test('the opened terminal next to xterm.js', async (t) => {
       assert.deepEqual([cell.width * OPTIONS.cols, cell.height * OPTIONS.rows], sizes[0]);
     });
 
-    await t.test('focus inside the element adds the focus class like xterm.js', { todo: 'Terminal.focus, Terminal.textarea' }, async () => {
+    await t.test('focus inside the element adds the focus class like xterm.js', async () => {
       await setup();
       const states = await page.evaluate(() => window.made.map((term) => {
         const seen = [term.element.classList.contains('focus')];

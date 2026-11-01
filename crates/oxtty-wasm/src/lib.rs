@@ -354,6 +354,17 @@ pub extern "C" fn oxtty_kitty_flags(h: u32) -> u32 {
     with(h, 0, |t| t.kitty_flags() as u32)
 }
 
+/// The host's focus for the report on `CSI ? 1004 h`: 1 focused, 0 not, anything else unknown (no report).
+#[no_mangle]
+pub extern "C" fn oxtty_set_focus(h: u32, focused: i32) {
+    let focused = match focused {
+        1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    };
+    with(h, (), |t| t.set_focus(focused));
+}
+
 /// -1 = full redraw; otherwise the number of changed lines. OUT32 holds the
 /// rows to scroll up first, then the changed lines.
 #[no_mangle]

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { withPage } from './harness.mjs';
 
 // Set to `false` once the member lands in crates/oxtty-web.
-const TODO = 'Terminal.focus, Terminal.textarea, key encoding (input)';
+const TODO = false;
 
 // Physical key codes, so Shift picks the shifted key and text as on a US layout.
 const KEYS = [
