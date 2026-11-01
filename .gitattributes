@@ -1,0 +1,2 @@
+# Borrowed xterm.js sources (see THIRD_PARTY_NOTICES.md); keep them out of GitHub language stats.
+packages/oxtty/xterm/vendor-xterm/** linguist-vendored
