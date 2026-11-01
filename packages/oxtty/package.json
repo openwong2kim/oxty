@@ -24,7 +24,8 @@
   "sideEffects": false,
   "scripts": {
     "build": "bash ../../scripts/build-wasm.sh && bash ../../scripts/build-web.sh",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "test:web": "node --test test/web/*.test.mjs"
   },
   "keywords": [
     "terminal",
