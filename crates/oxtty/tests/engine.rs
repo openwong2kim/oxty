@@ -610,6 +610,27 @@ fn writing_over_a_clipped_wide_char_keeps_its_neighbour() {
 }
 
 #[test]
+fn a_restored_cursor_drops_its_pending_wrap() {
+    // xterm.js `restoreCursor` clamps the saved column, one past the edge, to the screen.
+    for (save, restore) in [
+        ("\x1b7", "\x1b8"),
+        ("\x1b[s", "\x1b[u"),
+        ("\x1b[?1048h", "\x1b[?1048l"),
+        ("\x1b[?1049h", "\x1b[?1049l"),
+    ] {
+        let mut t = Engine::new(5, 2, 0);
+        t.feed(format!("12345{save}{restore}Z").as_bytes());
+        assert_eq!(t.row_text(0).as_deref(), Some("1234Z"), "{save:?}");
+    }
+    // After widening, that column is a real one (fuzz seeds 22754, 82656).
+    let mut t = Engine::new(2, 1, 0);
+    t.feed(b"H \x1b[s");
+    t.resize(3, 1);
+    t.feed(b"\x1b[uZ");
+    assert_eq!(t.row_text(0).as_deref(), Some("H Z"));
+}
+
+#[test]
 #[ignore = "grid/resize.rs: grow_columns only moves a pending-wrap cursor past the edge when it reflows, so the alternate screen keeps it in the old last column (fuzz seed 310)"]
 fn widening_the_alternate_screen_frees_a_pending_wrap() {
     let mut t = Engine::new(5, 3, 100);

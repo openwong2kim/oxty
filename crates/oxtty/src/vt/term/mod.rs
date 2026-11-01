@@ -395,7 +395,7 @@ pub struct Config {
     /// xterm keeps "continued from the previous line" as an attribute of the lower line. Line feeds that move the cursor down without scrolling,
     /// EL0, EL2 and ED0 erasing from the first cell, and ED1 and ED2 (no scroll) erasing up to the first screen line break that mark,
     /// while the mark that an erased line continues into the next line is kept. vte also passes IND and NEL as `linefeed`, so it applies to both
-    /// (xterm does not break it on IND and NEL).
+    /// (xterm does not break it on IND and NEL). A restored cursor (DECRC, `CSI u`, 1048, 1049) also drops its pending wrap.
     /// The default `false` is the original Alacritty behavior (WRAPLINE on erased cells disappears with them).
     pub xterm_line_wrap: bool,
 
@@ -801,6 +801,18 @@ impl<T> Term<T> {
             && self.grid[line][Column(right - 1)].flags.contains(Flags::WIDE_CHAR)
         {
             self.blank_cell(line, right, bg.into());
+        }
+    }
+
+    /// oxtty (`xterm_line_wrap`): xterm.js keeps no pending wrap in a restored cursor. Its saved
+    /// column is one past the edge, clamped to the screen (`restoreCursor`), so this also lands
+    /// on a column a resize added.
+    fn drop_restored_wrap(&mut self) {
+        let last = self.grid.last_column();
+        let cursor = &mut self.grid.cursor;
+        if self.config.xterm_line_wrap && cursor.input_needs_wrap {
+            cursor.input_needs_wrap = false;
+            cursor.point.column = cmp::min(cursor.point.column + 1, last);
         }
     }
 
@@ -1911,6 +1923,7 @@ impl<T: EventListener> Handler for Term<T> {
 
         self.damage_cursor();
         self.grid.cursor = self.grid.saved_cursor.clone();
+        self.drop_restored_wrap();
         self.damage_cursor();
     }
 
@@ -2352,6 +2365,7 @@ impl<T: EventListener> Handler for Term<T> {
             NamedPrivateMode::SwapScreenAndSetRestoreCursor => {
                 if self.mode.contains(TermMode::ALT_SCREEN) {
                     self.swap_alt();
+                    self.drop_restored_wrap();
                 }
             },
             NamedPrivateMode::ShowCursor => self.mode.remove(TermMode::SHOW_CURSOR),

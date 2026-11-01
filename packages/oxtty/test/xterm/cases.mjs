@@ -89,7 +89,7 @@ const TEXT = [
 
 // Minimal inputs (20x6) reproducing one known difference each. Paired with known-differences.json entries; once the engine is fixed they fail as stale.
 // Also holds regression inputs pinning that there is no difference (osc8-underline, tab-pending-wrap, decscusr, deccolm,
-// the B regressions from serializer fixes: tab-cell, origin-mode, c0-inside-csi, and edits that cut a wide char: *-wide-*).
+// the B regressions from serializer fixes: tab-cell, origin-mode, c0-inside-csi, edits that cut a wide char: *-wide-*, and *-pending-wrap).
 const KNOWN = {
   // Erasing wrapped lines: xterm keeps isWrapped as a line attribute and changes it by fixed rules on each erase.
   'el0-col0-wrapped': `${'X'.repeat(25)}\r\x1b[K`,
@@ -137,6 +137,8 @@ const KNOWN = {
   'ich-wide-right-half': 'a가b\x1b[1;3H\x1b[@',
   'irm-wide-half': 'a가b\x1b[1;3H\x1b[4hZ',
   'invalid-utf8': Uint8Array.of(0x61, 0xac, 0x62),
+  'decrc-pending-wrap': `${'X'.repeat(20)}\x1b7\x1b8`,
+  'alt-return-pending-wrap': `${'X'.repeat(20)}\x1b[?1049h\x1b[?1049l`,
 };
 
 /**

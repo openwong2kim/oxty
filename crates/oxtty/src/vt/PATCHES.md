@@ -51,7 +51,9 @@ single crate.
   ECH, ICH and DCH keep the erased row's own `WRAPLINE` (DCH no longer leaves
   it mid-row). IL and DL move the boundary flags as xterm's line splices do.
   vte routes IND and NEL through `linefeed` as well, so they also end a
-  continuation there, unlike xterm. `oxtty::Engine` turns it on.
+  continuation there, unlike xterm. A restored cursor (DECRC, `CSI u`,
+  1048, 1049) drops its pending wrap one column on, clamped to the screen,
+  as xterm.js `restoreCursor` does. `oxtty::Engine` turns it on.
 - Writing over a right half blanks the cell to its left only when that cell
   is the left half, so a wide char a resize clipped in the last column (or a
   lone right half) does not take its neighbour with it.
