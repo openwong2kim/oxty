@@ -25,7 +25,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-// 내장 Alacritty 포크. 원본 서식을 유지해 업그레이드 diff를 작게 한다.
+// The built-in Alacritty fork. It keeps the upstream formatting so upgrade diffs stay small.
 #[rustfmt::skip]
 pub mod vt;
 
@@ -228,9 +228,10 @@ struct Inbox {
     clipboard_write: bool,
     clipboard_writes: VecDeque<(Clipboard, String)>,
     clipboard_reads: VecDeque<Clipboard>,
-    // 답을 기다리는 읽기 요청과 응답 서식(요청 원문의 선택 문자를 그대로 쓴다).
+    // Reads waiting for an answer, with their reply format (it echoes the request's selection character).
     clipboard_pending: VecDeque<(Clipboard, ClipboardFormatter)>,
-    // 색 질의: 응답이 들어갈 replies 위치, 색 번호, 서식. 질의 순서를 지키려고 위치에 끼워 넣는다.
+    // Colour queries: where in `replies` the answer goes, the colour index and the format. Answers are
+    // inserted at that position to keep the order of replies.
     color_queries: Vec<(usize, usize, ColorFormatter)>,
 }
 
@@ -338,18 +339,19 @@ pub struct Engine {
     parser: Processor<HostTimeout>,
     inbox: Listener,
     tail: snapshot::RawTail,
-    // vte 동기화 버퍼의 사본. vte는 내용을 공개하지 않고 개수만 알려 준다.
+    // A copy of vte's synchronized-update buffer. vte reports only its length, not its contents.
     held: Vec<u8>,
-    // 압축 히스토리. 켜져 있으면 Alacritty는 최근 TermHistory::RECENT줄만 들고 더 오래된 줄을 여기로 넘긴다.
+    // Compressed history. When on, Alacritty keeps only the newest TermHistory::RECENT rows and hands
+    // older ones here.
     history: Option<TermHistory>,
     scrollback: usize,
-    // 압축 히스토리일 때 주 화면의 뷰 위치는 엔진이 정한다(Alacritty 쪽은 늘 0).
+    // With compressed history the engine owns the primary screen's view position (Alacritty's stays 0).
     offset: usize,
-    // 주 화면 그리드가 위로 스크롤한 줄 수 중 이미 반영한 값.
+    // How many of the primary grid's scrolled lines the view has already followed.
     scrolled_seen: u64,
-    // 뷰가 움직여서 다음 damage는 전체다.
+    // The view moved, so the next damage is full.
     view_moved: bool,
-    // 입력 경계에 걸친 DECSTR(`CSI Ps ! p`)을 찾는 중인 상태.
+    // Scanner state for a DECSTR (`CSI Ps ! p`) split across feeds.
     decstr: DecstrScan,
     // Host colours that answer colour queries; none means queries go unanswered.
     colors: Option<Box<[u32; COLOR_SLOTS]>>,
@@ -383,22 +385,22 @@ impl Engine {
             } else {
                 scrollback
             },
-            // xterm.js 기본값(reflowCursorLine: false)과 같게 커서 문단은 reflow하지 않는다.
+            // Like xterm.js's default (reflowCursorLine: false), the cursor paragraph is not reflowed.
             reflow_cursor_line: false,
-            // 스크롤 때 화면 전체 대신 스크롤 줄 수와 새 줄만 damage로 낸다.
+            // A scroll reports the scrolled row count and the new rows, not full damage.
             scroll_damage: true,
-            // xterm.js처럼 RIS 뒤에도 커서 숨김을 유지한다.
+            // Like xterm.js, RIS keeps the cursor hidden.
             ris_keeps_cursor_visibility: true,
-            // xterm.js처럼 주 화면 ED2는 지우기만 하고 히스토리로 밀지 않는다.
+            // Like xterm.js, ED2 on the primary screen erases without pushing rows into history.
             scroll_on_erase_in_display: false,
-            // xterm.js처럼 줄바꿈과 줄·화면 지우기가 줄 이어짐을 바꾼다.
+            // Like xterm.js, line feeds and line/screen erases change line continuation.
             xterm_line_wrap: true,
-            // xterm.js처럼 덮어쓴 와이드 문자의 앞칸은 현재 펜의 빈칸이 되고, 탭은 칸에 남지 않고,
-            // SGR 21은 이중 밑줄이다.
+            // Like xterm.js, the left half of an overwritten wide char becomes a blank in the current
+            // pen, tabs leave no character in cells, and SGR 21 is a double underline.
             xterm_wide_leader: true,
             store_tabs: false,
             sgr21_double_underline: true,
-            // OSC 52는 엔진이 받고, 호스트가 허락했을 때만 넘긴다(set_clipboard_access).
+            // The engine takes OSC 52 and passes it on only with the host's consent (set_clipboard_access).
             osc52: Osc52::CopyPaste,
             ..Config::default()
         };
@@ -426,7 +428,7 @@ impl Engine {
         self.term.mode().contains(TermMode::ALT_SCREEN)
     }
 
-    /// 히스토리를 가진 주 화면 그리드(대체 화면일 때는 화면 밖에 있다).
+    /// The primary screen's grid, which holds the history (off screen while the alternate screen is up).
     fn primary(&self) -> &Grid<AlacCell> {
         if self.alt_screen() {
             self.term.inactive_grid()
@@ -435,12 +437,12 @@ impl Engine {
         }
     }
 
-    /// 압축 히스토리. 대체 화면에서는 히스토리가 보이지 않으므로 `None`이다.
+    /// The compressed history; `None` on the alternate screen, where history is not visible.
     fn stored(&self) -> Option<MutexGuard<'_, History>> {
         Some(self.history.as_ref().filter(|_| !self.alt_screen())?.lock())
     }
 
-    /// 주 화면이 스크롤한 만큼 뒤로 올린 뷰를 따라 올린다(Alacritty `display_offset`과 같다).
+    /// Moves a scrolled-back view up as far as the primary screen scrolled (as Alacritty's `display_offset` does).
     fn follow_scroll(&mut self) {
         if self.history.is_none() {
             return;
@@ -452,18 +454,18 @@ impl Engine {
             .history
             .as_ref()
             .is_some_and(|h| std::mem::take(&mut h.lock().cleared));
-        // Alacritty는 히스토리를 지우면 뷰를 맨 아래로 돌린다(damage는 내지 않는다).
+        // Alacritty returns the view to the bottom when history is cleared (without damage).
         if cleared {
             self.offset = 0;
         }
-        // Alacritty처럼 영역 스크롤에도 올리고, 히스토리가 아니라 한도로 자른다.
+        // As in Alacritty, region scrolls move the view too, clamped to the limit rather than to the history.
         if self.offset > 0 && delta > 0 {
             self.offset = (self.offset + delta).min(self.scrollback);
             self.view_moved = true;
         }
     }
 
-    /// `line`의 행을 `f`에 넘긴다. 압축 히스토리의 줄은 그 자리에서 풀어서 넘긴다.
+    /// Hands the row at `line` to `f`, decoding a compressed history row on the spot.
     fn with_row<R>(&self, line: i32, f: impl FnOnce(&Row<AlacCell>) -> R) -> Option<R> {
         let grid = self.term.grid();
         let recent = grid.history_size() as i32;
@@ -491,8 +493,8 @@ impl Engine {
     /// Interprets bytes written by the program (UTF-8 and escape sequences
     /// may be split across calls).
     pub fn feed(&mut self, mut bytes: &[u8]) {
-        // vte는 DECSTR을 버리므로 그 끝에서 입력을 나누고 엔진이 소프트 리셋한다.
-        // xterm.js처럼 DECSTR은 동기화 업데이트도 끝낸다.
+        // vte drops DECSTR, so the input is split where it ends and the engine soft-resets.
+        // As in xterm.js, DECSTR also ends a synchronized update.
         while let Some(end) = self.decstr.find(bytes) {
             let (head, rest) = bytes.split_at(end);
             self.advance(head);
@@ -508,7 +510,8 @@ impl Engine {
         self.answer_color_queries();
         self.follow_scroll();
         self.tail.push(bytes);
-        // vte 동기화 버퍼는 항상 입력 스트림의 연속된 끝부분이라 개수만으로 사본을 맞출 수 있다.
+        // vte's synchronized-update buffer is always a contiguous tail of the input, so its length is
+        // enough to keep the copy in step.
         let n = self.parser.sync_bytes_count();
         if n <= bytes.len() {
             self.held.clear();
@@ -726,7 +729,7 @@ impl Engine {
         let rows = self.term.screen_lines();
         let mut scroll = self.term.damage_scrolled() as u16;
         let moved = std::mem::take(&mut self.view_moved);
-        // 압축 히스토리일 때 Alacritty는 뷰가 늘 맨 아래라고 보므로, 뒤로 올린 만큼 줄을 내린다.
+        // With compressed history Alacritty sees the view at the bottom, so lines move down by the scroll-back.
         let shift = if self.history.is_some() && !self.alt_screen() {
             self.offset
         } else {
@@ -740,7 +743,7 @@ impl Engine {
             _ if moved => Damage::Full,
             TermDamage::Partial(lines) => Damage::Lines {
                 scroll,
-                // 뷰가 히스토리로 올라가 있으면 화면 밖으로 밀린 줄은 뺀다.
+                // With the view up in history, lines pushed off the screen are left out.
                 lines: lines
                     .map(|b| b.line + shift)
                     .filter(|&l| l < rows)
@@ -820,7 +823,8 @@ impl Engine {
         self.colors = colors.map(Box::new);
     }
 
-    // 쌓인 색 질의에 답을 질의가 온 자리에 끼워 넣는다. 뒤에서부터 넣어 앞 위치가 밀리지 않게 한다.
+    // Inserts answers to the queued colour queries where each query arrived. Working from the back keeps
+    // the earlier positions valid.
     fn answer_color_queries(&mut self) {
         let listener = self.inbox.clone();
         let mut inbox = listener.inbox();
@@ -836,7 +840,7 @@ impl Engine {
                 continue;
             };
             let mut reply = format(rgb);
-            // xterm.js는 질의가 BEL로 끝났어도 ST로 답한다.
+            // xterm.js answers with ST even when the query ended with BEL.
             if let Some(body) = reply.strip_suffix('\x07') {
                 reply = format!("{body}\x1b\\");
             }
@@ -891,7 +895,7 @@ impl Engine {
     }
 }
 
-/// `ESC [ Ps ! p`(DECSTR)를 바이트 단위로 찾는 상태. 호출 사이에 이어진다.
+/// Byte-level scanner for `ESC [ Ps ! p` (DECSTR). Its state carries across calls.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum DecstrScan {
     #[default]
@@ -902,7 +906,7 @@ enum DecstrScan {
 }
 
 impl DecstrScan {
-    /// DECSTR이 끝나는 위치(마지막 바이트 다음)를 돌려준다. 없으면 `bytes` 끝까지 상태만 옮긴다.
+    /// Where a DECSTR ends (just past its last byte), or `None` after advancing the state through `bytes`.
     fn find(&mut self, bytes: &[u8]) -> Option<usize> {
         let mut i = 0;
         while i < bytes.len() {
