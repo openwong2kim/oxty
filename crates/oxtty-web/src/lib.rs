@@ -35,6 +35,7 @@ pub mod fit;
 mod input;
 pub mod markers;
 pub mod options;
+pub mod parser;
 pub mod render;
 pub mod scrollbar;
 pub mod search;

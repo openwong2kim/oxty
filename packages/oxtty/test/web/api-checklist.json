@@ -200,16 +200,19 @@
       "reason": "xterm.js SelectionService.setSelection; does nothing before open() (xterm.js throws)."
     },
     "Terminal.parser.registerOscHandler": {
-      "status": "later",
-      "reason": "Needs an engine hook. OSC 52 is covered by the clipboard option; OSC 133/7792 and the viewer OSC 4/10/11/12 handlers are not."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/parser.rs on the engine's parser hooks (setHook while a handler exists, writeUntilHook/pendingHook/finishHook/resume): newest first, true skips the default, a Promise holds the write queue, output before the sequence reaches the host first. A throwing handler counts as false and is rethrown on a later task. OSC 52 still goes through the clipboard option.",
+      "exercisedBy": "registerOscHandler\\("
     },
     "Terminal.parser.registerCsiHandler": {
-      "status": "later",
-      "reason": "Needs an engine hook (replyParity, shellPromptModeReset, viewerParser)."
+      "status": "supported",
+      "reason": "As registerOscHandler; identifiers are checked with xterm.js's errors. An empty sub-parameter is 0 (xterm.js -1).",
+      "exercisedBy": "registerCsiHandler\\("
     },
     "Terminal.parser.registerDcsHandler": {
-      "status": "later",
-      "reason": "Needs an engine hook (viewerParser DECRQSS)."
+      "status": "supported",
+      "reason": "As registerCsiHandler; the handler gets the whole payload when the sequence ends. The engine does not answer DECRQSS itself, so a handler falling through sends nothing (xterm.js replies).",
+      "exercisedBy": "registerDcsHandler\\("
     },
     "Terminal.registerLinkProvider": {
       "status": "later",
@@ -472,8 +475,9 @@
       "reason": "Mouse reports and selection both listen on the element, so dispatched events (plainDragSelect replays) select and report like real ones."
     },
     "write() from inside parser handlers": {
-      "status": "later",
-      "reason": "With the parser hooks."
+      "status": "supported",
+      "reason": "Queued behind the writes already waiting and parsed after the data being parsed, like xterm.js (parser.rs, terminal.rs drain).",
+      "exercisedBy": "write\\(\\) from inside a handler"
     }
   }
 }

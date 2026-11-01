@@ -104,6 +104,20 @@ extern "C" {
     pub fn take_disposed_markers(this: &Engine) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(method)]
     pub fn dispose(this: &Engine);
+    /// Stops parsing at sequences of `kind` (`'csi'`, `'osc'` or `'dcs'`) with `id`, or no longer does.
+    #[wasm_bindgen(method, catch, js_name = setHook)]
+    pub fn set_hook(this: &Engine, kind: &str, id: u32, on: bool) -> Result<(), JsValue>;
+    /// Like `write`, but false when it stopped right after a hooked sequence: `pendingHook`, `finishHook`, `resume`.
+    #[wasm_bindgen(method, catch, js_name = writeUntilHook)]
+    pub fn write_until_hook(this: &Engine, data: &JsValue) -> Result<bool, JsValue>;
+    /// `{ kind, id, params: number[][], data: Uint8Array }` or `null`.
+    #[wasm_bindgen(method, catch, js_name = pendingHook)]
+    pub fn pending_hook(this: &Engine) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = finishHook)]
+    pub fn finish_hook(this: &Engine, run_default: bool) -> Result<(), JsValue>;
+    /// Parses on after `finishHook`; false when it stopped at the next hook.
+    #[wasm_bindgen(method, catch)]
+    pub fn resume(this: &Engine) -> Result<bool, JsValue>;
 }
 
 /// `Mode` bits of the engine binding (`modes()`).

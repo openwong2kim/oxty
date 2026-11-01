@@ -93,6 +93,9 @@ of the browser front end (`crates/oxtty-web/src/input`, compiled into
 `src/browser/services/MouseCoordsService.ts` and
 `src/browser/services/SelectionService.ts` of the same version. Each Rust file
 names its source lines.
+The parser handler identifiers of the browser front end
+(`crates/oxtty-web/src/parser.rs`) are checked as in
+`src/common/parser/EscapeSequenceParser.ts` of the same version.
 Source: https://github.com/xtermjs/xterm.js
 
 ```

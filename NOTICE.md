@@ -52,6 +52,11 @@ handling around those encoders) is a Rust port of parts of the same xterm.js
 xterm.js authors, MIT license (`crates/oxtty/LICENSE-XTERM`). Each file names
 its source lines.
 
+`crates/oxtty-web/src/parser.rs` checks parser handler identifiers as the same
+xterm.js 6.1.0-beta.336 does (`src/common/parser/EscapeSequenceParser.ts`,
+`_identifier`), with its error messages, MIT license
+(`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
+
 ## xterm.js search addon
 
 `crates/oxtty-web/src/search.rs` is a Rust port of `@xterm/addon-search`
