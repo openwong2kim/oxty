@@ -19,7 +19,7 @@ mod mouse;
 
 pub use mouse::{
     MouseEncoder, MouseEncoding, MouseGrid, MouseOptions, MouseProtocol, MouseReport,
-    WheelDeltaMode, WheelInput, WheelOutcome, mouse_events,
+    WheelDeltaMode, WheelInput, WheelOutcome, events as mouse_event, mouse_events,
 };
 
 use crate::mode;

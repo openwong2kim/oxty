@@ -15,6 +15,7 @@ use super::{Modifiers, MouseAction, MouseButton, MouseInput};
 use crate::mode;
 
 /// Which events the program asked for (xterm.js `CoreMouseEventType`), as [`mouse_events`] returns them.
+/// Re-exported as `oxtty::input::mouse_event`.
 pub mod events {
     /// Any button press.
     pub const DOWN: u8 = 1;
