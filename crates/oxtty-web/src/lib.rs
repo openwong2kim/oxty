@@ -28,6 +28,7 @@
 //!   credited in `NOTICE.md` and `packages/oxtty/THIRD_PARTY_NOTICES.md`.
 pub mod emitter;
 pub mod engine;
+pub mod fit;
 pub mod render;
 pub mod terminal;
 pub mod timer;

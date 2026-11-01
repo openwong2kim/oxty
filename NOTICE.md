@@ -26,3 +26,14 @@ The engine integration started in
 `crates/oxtty/src/snapshot.rs` (ANSI snapshot) is ported from its
 `native_serialize.rs` and snapshot host code by the same author, relicensed
 Apache-2.0.
+
+## xterm.js
+
+The WebGL2 renderer in `crates/oxtty-web/src/render` is ported to Rust from
+xterm.js 6.0.0 (commit f447274f430fd22513f6adbf9862d19524471c04) and its WebGL
+addon (texture atlas, glyph and rectangle renderers, colour resolver, custom
+glyphs, cursor blink, colour helpers and theme defaults), and its fit
+(`crates/oxtty-web/src/fit.rs`) from `@xterm/addon-fit` 0.12.0-beta.332; each
+file names its source files and line ranges. MIT license, Copyright (c)
+2017-2019 The xterm.js authors (`packages/oxtty/THIRD_PARTY_NOTICES.md` has the
+full text).

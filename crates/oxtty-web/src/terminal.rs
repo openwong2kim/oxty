@@ -67,6 +67,7 @@ pub(crate) struct Emitters {
     pub render: Rc<Emitter>,
     pub write_parsed: Rc<Emitter>,
     pub cursor_move: Rc<Emitter>,
+    pub dimensions_change: Rc<Emitter>,
 }
 
 /// What the engine looked like after the last change, to fire `onScroll`/`onCursorMove` on differences.
@@ -165,6 +166,7 @@ impl Terminal {
         });
         *slot.borrow_mut() = Rc::downgrade(&shared);
         shared.apply_clipboard();
+        shared.apply_theme();
         shared.state.set(shared.read_state());
         Ok(Terminal { shared })
     }
@@ -257,6 +259,7 @@ impl Terminal {
         core.view.invalidate();
         core.dirty = Dirty::All;
         drop(core);
+        self.shared.create_renderer()?;
         self.shared.schedule_frame();
         Ok(())
     }
@@ -307,6 +310,7 @@ impl Terminal {
             }
             // Hook: selection drops on row changes.
         }
+        self.shared.sync_screen_size();
         let size = Object::new();
         Reflect::set(&size, &"cols".into(), &self.cols().into())?;
         Reflect::set(&size, &"rows".into(), &self.rows().into())?;
@@ -410,6 +414,7 @@ impl Terminal {
             &e.render,
             &e.write_parsed,
             &e.cursor_move,
+            &e.dimensions_change,
         ] {
             emitter.clear();
         }
@@ -565,6 +570,7 @@ impl Shared {
             self.apply_clipboard();
         }
         // Hook: theme (engine colours, renderer), renderer options, input, mouse and accessibility options.
+        self.apply_renderer_option(key);
         Ok(())
     }
 
@@ -639,6 +645,7 @@ impl Shared {
     }
 
     fn render_frame(self: &Rc<Self>) {
+        self.handle_renderer_requests();
         let rows = {
             let mut core = self.core.borrow_mut();
             if core.disposed || core.renderer.is_none() {
@@ -711,5 +718,7 @@ fn default_options(options: Object) -> Object {
     for (key, value) in defaults {
         let _ = Reflect::set(&merged, &key.into(), &value);
     }
-    Object::assign(&merged, &options)
+    let merged = Object::assign(&merged, &options);
+    crate::render::options::fill_defaults(&merged);
+    merged
 }

@@ -4,7 +4,7 @@ description = "The browser front end of oxtty: an xterm.js-compatible terminal w
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license = "Apache-2.0 AND MIT"
 repository.workspace = true
 publish = false
 
@@ -23,14 +23,42 @@ wasm-bindgen-futures = "=0.4.79"
 [dependencies.web-sys]
 version = "=0.3.106"
 features = [
+    "CanvasGradient",
+    "CanvasPattern",
+    "CanvasRenderingContext2d",
     "CssStyleDeclaration",
     "Document",
     "DomTokenList",
     "Element",
+    "Event",
+    "EventTarget",
+    "FocusEvent",
+    "FontFaceSet",
+    "HtmlCanvasElement",
     "HtmlElement",
     "HtmlHeadElement",
     "HtmlStyleElement",
+    "ImageData",
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "Navigator",
     "Node",
+    "OffscreenCanvas",
+    "OffscreenCanvasRenderingContext2d",
+    "Path2d",
+    "ResizeObserver",
+    "ResizeObserverBoxOptions",
+    "ResizeObserverOptions",
+    "TextMetrics",
+    "WebGl2RenderingContext",
+    "WebGlBuffer",
+    "WebGlContextAttributes",
+    "WebGlProgram",
+    "WebGlShader",
+    "WebGlTexture",
+    "WebGlUniformLocation",
+    "WebGlVertexArrayObject",
+    "WebglLoseContext",
     "Window",
     "console",
 ]
