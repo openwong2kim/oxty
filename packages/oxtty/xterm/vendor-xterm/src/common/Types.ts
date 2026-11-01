@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-// oxtty excerpt: only the types the renderer parts use, cut out verbatim (lines 27-29, 39-41, 104-120, 136-220).
+// oxtty excerpt: only the types the renderer parts use, cut out verbatim (lines 27-29, 39-41, 104-120, 136-220, 419-431).
 import { UnderlineStyle } from 'common/buffer/Constants';
 
 export interface IDisposable {
@@ -118,4 +118,18 @@ export interface ICellData extends IAttributeData {
   getCode(): number;
   setFromCharData(value: CharData): void;
   getAsCharData(): CharData;
+}
+
+// IntRange from https://stackoverflow.com/a/39495173
+type Enumerate<N extends number, Acc extends number[] = []> = Acc['length'] extends N
+  ? Acc[number]
+  : Enumerate<N, [...Acc, Acc['length']]>;
+type IntRange<F extends number, T extends number> = Exclude<Enumerate<T>, Enumerate<F>>;
+
+export type ColorIndex = IntRange<0, 256>; // number from 0 to 255
+export type AllColorIndex = ColorIndex | SpecialColorIndex;
+export const enum SpecialColorIndex {
+  FOREGROUND = 256,
+  BACKGROUND = 257,
+  CURSOR = 258
 }

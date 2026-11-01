@@ -15,7 +15,39 @@ export interface Terminal {
   readonly buffer: { readonly active: { readonly viewportY: number } };
 }
 
-// Options read by CharAtlasUtils.generateConfig
+// Theme colours as CSS strings (ThemeService)
+export interface ITheme {
+  foreground?: string;
+  background?: string;
+  cursor?: string;
+  cursorAccent?: string;
+  selectionForeground?: string;
+  selectionBackground?: string;
+  selectionInactiveBackground?: string;
+  scrollbarSliderBackground?: string;
+  scrollbarSliderHoverBackground?: string;
+  scrollbarSliderActiveBackground?: string;
+  overviewRulerBorder?: string;
+  black?: string;
+  red?: string;
+  green?: string;
+  yellow?: string;
+  blue?: string;
+  magenta?: string;
+  cyan?: string;
+  white?: string;
+  brightBlack?: string;
+  brightRed?: string;
+  brightGreen?: string;
+  brightYellow?: string;
+  brightBlue?: string;
+  brightMagenta?: string;
+  brightCyan?: string;
+  brightWhite?: string;
+  extendedAnsi?: string[];
+}
+
+// Options read by CharAtlasUtils.generateConfig, GlyphRenderer, CharSizeService and ThemeService
 export interface ITerminalOptions {
   customGlyphs?: boolean;
   letterSpacing?: number;
@@ -27,4 +59,6 @@ export interface ITerminalOptions {
   allowTransparency?: boolean;
   drawBoldTextInBrightColors?: boolean;
   minimumContrastRatio?: number;
+  rescaleOverlappingGlyphs?: boolean;
+  theme?: ITheme;
 }
