@@ -10,7 +10,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlElement;
 
-use crate::emitter::{Disposable, Emitter};
+use crate::emitter::Emitter;
 use crate::engine::{get, mode, Engine, EngineView, LocalEngineView, Viewport};
 use crate::render::{Dirty, Renderer};
 use crate::timer;
@@ -51,7 +51,7 @@ pub(crate) struct Core {
     pub dirty: Dirty,
     queue: VecDeque<Chunk>,
     /// A high surrogate a string `write` ended with, joined to the next one.
-    high_surrogate: Option<u16>,
+    pub high_surrogate: Option<u16>,
     pub disposed: bool,
     /// The size when disposed: xterm.js keeps answering `cols`/`rows` after `dispose`.
     disposed_size: (u32, u32),
@@ -79,6 +79,7 @@ pub(crate) struct Emitters {
     pub render: Rc<Emitter>,
     pub write_parsed: Rc<Emitter>,
     pub cursor_move: Rc<Emitter>,
+    pub buffer_change: Rc<Emitter>,
 }
 
 /// What the engine looked like after the last change, to fire `onScroll`/`onCursorMove` on differences.
@@ -218,6 +219,7 @@ impl Terminal {
         });
         let handler = Object::new();
         Reflect::set(&handler, &"set".into(), set.as_ref())?;
+        Reflect::set(&handler, &"get".into(), &crate::options::get_trap())?;
         let proxy = Proxy::new(&self.shared.core.borrow().options, &handler);
         *self.shared.options_proxy.borrow_mut() = Some((proxy.clone(), set));
         Ok(proxy)
@@ -349,51 +351,6 @@ impl Terminal {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = onData)]
-    pub fn on_data(&self, listener: Function) -> Disposable {
-        self.shared.events.data.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onBinary)]
-    pub fn on_binary(&self, listener: Function) -> Disposable {
-        self.shared.events.binary.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onResize)]
-    pub fn on_resize(&self, listener: Function) -> Disposable {
-        self.shared.events.resize.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onTitleChange)]
-    pub fn on_title_change(&self, listener: Function) -> Disposable {
-        self.shared.events.title_change.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onBell)]
-    pub fn on_bell(&self, listener: Function) -> Disposable {
-        self.shared.events.bell.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onScroll)]
-    pub fn on_scroll(&self, listener: Function) -> Disposable {
-        self.shared.events.scroll.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onRender)]
-    pub fn on_render(&self, listener: Function) -> Disposable {
-        self.shared.events.render.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onWriteParsed)]
-    pub fn on_write_parsed(&self, listener: Function) -> Disposable {
-        self.shared.events.write_parsed.event(listener)
-    }
-
-    #[wasm_bindgen(js_name = onCursorMove)]
-    pub fn on_cursor_move(&self, listener: Function) -> Disposable {
-        self.shared.events.cursor_move.event(listener)
-    }
-
     /// Drops pending writes without running their callbacks, like xterm.js. Safe to call from any listener.
     pub fn dispose(&self) {
         let mut core = self.shared.core.borrow_mut();
@@ -425,6 +382,7 @@ impl Terminal {
             &e.render,
             &e.write_parsed,
             &e.cursor_move,
+            &e.buffer_change,
         ] {
             emitter.clear();
         }
@@ -619,7 +577,11 @@ impl Shared {
         }
         let (old, new) = (self.state.get(), self.read_state());
         self.state.set(new);
-        // Hook: selection syncs; buffer fires onBufferChange when `alternate` changed.
+        // Hook: selection syncs.
+        if new.alternate != old.alternate && self.events.buffer_change.has_listeners() {
+            let buffer = crate::buffer::active(self);
+            self.events.buffer_change.fire(&[&buffer.into()]);
+        }
         if new.viewport_y != old.viewport_y {
             self.events.scroll.fire(&[&new.viewport_y.into()]);
         }

@@ -13,7 +13,7 @@ const pkg = JSON.parse(await readFile(new URL('../../package.json', import.meta.
 const require = createRequire(import.meta.url);
 const xterm = await import('oxtty/xterm');
 
-test('constructing before init() throws an error that says to await init()', { todo: 'clear error before init()' }, () => {
+test('constructing before init() throws an error that says to await init()', () => {
   assert.throws(() => new xterm.Terminal(), /await init\(\)/);
 });
 

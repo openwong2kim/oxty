@@ -39,7 +39,7 @@ test('status reports reach onData before the write callback, without any frame',
   t.dispose();
 });
 
-test('events are IEvent properties that also work unbound, like xterm.js', { todo: 'Terminal.onData and the other events as IEvent getters' }, async () => {
+test('events are IEvent properties that also work unbound, like xterm.js', async () => {
   const t = new m.Terminal();
   const x = new xtermHeadless.Terminal({ allowProposedApi: true });
   const { onData } = t;
@@ -98,7 +98,7 @@ test('OSC 52 goes through the clipboard option, and nowhere without it', async (
   t.dispose();
 });
 
-test('a string write split inside a surrogate pair keeps the high half for the next write', { todo: 'buffer.active.getLine, IBufferLine.translateToString' }, async () => {
+test('a string write split inside a surrogate pair keeps the high half for the next write', async () => {
   const t = new m.Terminal({ cols: 10, rows: 2 });
   t.write('a\ud83d');
   await write(t, '\ude00b');
@@ -106,7 +106,7 @@ test('a string write split inside a surrogate pair keeps the high half for the n
   t.dispose();
 });
 
-test('the buffer reads like xterm.js: lines, wrapping, wide cells, cursor and scroll position', { todo: 'buffer.active.*, IBufferLine.*, IBufferCell.*, Terminal.scrollToLine' }, async () => {
+test('the buffer reads like xterm.js: lines, wrapping, wide cells, cursor and scroll position', async () => {
   const input = 'one\r\n' + 'x'.repeat(12) + '\r\n한글 b\r\nfour\r\nfive';
   const t = new m.Terminal({ cols: 10, rows: 3, scrollback: 50 });
   const x = new xtermHeadless.Terminal({ cols: 10, rows: 3, scrollback: 50, allowProposedApi: true });
@@ -135,7 +135,7 @@ test('the buffer reads like xterm.js: lines, wrapping, wide cells, cursor and sc
   t.dispose();
 });
 
-test('the alternate screen changes the active buffer type and fires onBufferChange', { todo: 'buffer.onBufferChange, buffer.active.type' }, async () => {
+test('the alternate screen changes the active buffer type and fires onBufferChange', async () => {
   const t = new m.Terminal({ cols: 10, rows: 3 });
   const types = [];
   t.buffer.onBufferChange((buffer) => types.push(buffer.type));
@@ -146,7 +146,7 @@ test('the alternate screen changes the active buffer type and fires onBufferChan
   t.dispose();
 });
 
-test('modes follow the program like xterm.js', { todo: 'Terminal.modes' }, async () => {
+test('modes follow the program like xterm.js', async () => {
   const t = new m.Terminal();
   const x = new xtermHeadless.Terminal({ allowProposedApi: true });
   assert.equal(t.modes.mouseTrackingMode, 'none');
@@ -172,7 +172,7 @@ test('options: init-only keys throw at runtime, resize updates size and fires on
   t.dispose();
 });
 
-test('options read back the xterm.js defaults', { todo: 'option defaults: options.fontSize, options.cursorStyle, options.cursorBlink, options.scrollOnUserInput, options.disableStdin, options.altClickMovesCursor, options.minimumContrastRatio' }, () => {
+test('options read back the xterm.js defaults', () => {
   const t = new m.Terminal();
   const x = new xtermHeadless.Terminal({ allowProposedApi: true });
   for (const key of ['fontSize', 'cursorStyle', 'cursorBlink', 'scrollback', 'scrollOnUserInput', 'disableStdin', 'altClickMovesCursor', 'minimumContrastRatio']) {
@@ -201,7 +201,7 @@ test('loadAddon absorbs unicode11 and webgl addons and rejects the rest', { todo
   t.dispose();
 });
 
-test('reset clears the screen at once', { todo: 'Terminal.reset' }, async () => {
+test('reset clears the screen at once', async () => {
   const t = new m.Terminal({ cols: 10, rows: 2 });
   await write(t, 'text');
   t.reset();
