@@ -162,6 +162,7 @@ xterm.js splits into an **engine layer** (`common`: bytes → screen state) and 
 
 **D7. Allow parsing to move to a Web Worker**
 - Like wterm, to free the main thread when many panes are busy. The engine API already returns only "changed lines", so crossing the Worker boundary is easy (M4).
+- Contract (fixed in M2, `packages/oxtty/xterm/src/engine-view.ts`): the renderer, input and selection read only `Events` (replies, title, bells, OSC 52; taken after every write drain, not per frame, so a hidden page still answers status queries), `Frame` (changed rows, cursor and modes in viewport coordinates) and `Viewport` (a mirror of the visible rows). Only `buffer.active.getLine()`, search and serialize call the engine directly; a Worker build needs a main-thread mirror for those. Input encoding reads modes from the last frame, which is one frame late in a Worker build (accepted risk).
 
 **D8. Develop in the oxtty repository; wmux uses it as a dependency from the start**
 - No "build it inside wmux and split it out later". Growing it inside mixes wmux policy into the engine. The daemon API (`textSnapshot`, `feedFrozen`) is already wmux-shaped.
@@ -205,10 +206,14 @@ xterm.js splits into an **engine layer** (`common`: bytes → screen state) and 
 | --- | --- |
 | `oxtty/xterm`: the borrowed WebGL renderer draws oxtty rows (D3) | Updates only changed lines, recovers from WebGL context loss |
 | API checklist: `new Terminal(opts)`, `open`, `write`, `onData`, `onBinary`, `onResize`, `onTitleChange`, `onBell`, `resize`, `buffer.active.getLine().translateToString()`, `loadAddon`, `dispose` | 100% of the checklist + a support scope table published in the README |
-| Key input: `Keyboard.ts` borrowed from xterm.js reads oxtty mode values | Key input bytes match existing xterm.js |
+| Key input: `Keyboard.ts` and the keydown/keypress/input arbitration of xterm.js `CoreBrowserTerminal` (`_keyDown`, `_keyPress`, `_inputEvent`) borrowed verbatim, reading oxtty mode values; `attachCustomKeyEventHandler`, `paste()` (bracketed, CRLF→CR), focus events, wheel (scroll the view / arrow keys on the alternate screen with alternate scroll / mouse reports). The kitty keyboard protocol stays off | Bytes on `onData` match xterm.js for the same CDP key events (key × modifier × mode), at the DOM level |
 | Replacing wmux addons: fit and webgl built in, unicode11 is the engine table, search and serialize call oxtty directly, web-links is OSC 8 + regex detection | Every feature wmux uses works (image is a §10 open question) |
 | Hangul IME composition | Characters being composed appear at the cursor position, and only committed characters go to the PTY. wmux's existing IME and CJK regression tests pass |
-| Selection UI: drag selection and copy (computation moves to Rust in M4) | Word and line selection cover the same ranges as xterm.js |
+| Selection UI: drag selection and copy (computation moves to Rust in M4); the engine reports trimmed scrollback lines so a selection follows its text; selection clears on alternate-screen switch | Word and line selection cover the same ranges as xterm.js |
+| Engine output wiring: replies → `onData`, title → `onTitleChange`, bells → `onBell`, OSC 52 and colour queries through host options | `ESC[6n` gives the CPR bytes on `onData`; DA1 matches xterm.js |
+| Failure paths: write queue survives an engine crash and `dispose`; WebGL context loss recovery; reference-counted glyph atlas | Crash mid-write, drain after dispose, `WEBGL_lose_context` loss→restore, 17 contexts on one page |
+| Runtime options (theme, font, cursor), font load and devicePixelRatio changes re-measure and refit | Hangul fallback widths compared side by side with xterm.js |
+| Migration: `await init()` once before `new Terminal()` is the only required change; the published `.d.ts` lists only supported members; unknown addons are rejected with a clear error | Checklist built from wmux's actual usage, not from this table |
 | Adopt in wmux: add "oxtty" to the Terminal engine setting, replace the 19 xterm.js internal workarounds (in 4 files) | 0 differential mismatches before the swap; 0 regressions in wmux e2e, IME and screen snapshots after the swap |
 
 ### M3 · 0.3 input in Rust
@@ -279,6 +284,8 @@ M2 runs on key input code borrowed from xterm.js. M3 moves encoding to Rust.
 | --- | --- | --- |
 | Too much scope in the in-house front end (implementing selection UI and accessibility ourselves) | M2 delay | Borrowing the rendering is confirmed by the spike (D3). Selection, IME, key input, links, accessibility, context loss recovery, DPR changes and ligatures are not yet validated |
 | Uneven widths in the Hangul fallback font | On the spike screen, "안 녕 하 세 요" spreads apart while "입니다" sticks together | Compare font fallback and glyph width handling against xterm.js in M2 |
+| One WebGL2 context per pane (M2 eng review) | Chrome keeps about 16 active contexts; past that the oldest panes lose theirs, and naive recovery can make panes evict each other in a loop | 0.2 keeps one context per pane: recovery waits for `webglcontextrestored`, then recreates the canvas under a throttle. The limit goes in the README support table. Sharing one context across panes is revisited after wmux dogfooding |
+| npm versions cannot be reused (M2 eng review) | A broken 0.2.0 stays published | Publish `0.2.0-beta.N` under the `next` tag first and move to `latest` after wmux dogfooding |
 | ✅ Resolved — snapshots reflect the engine's synchronized updates (code review 2026-10-31) | Calling `ansiSnapshot()` on the engine a renderer draws from showed half-drawn frames, and when an ESU was split across a snapshot boundary, synchronization did not end until the timeout | The engine keeps a copy of the vte sync buffer (the tail of the input, aligned with `sync_bytes_count()`), and a snapshot taken during sync carries the pre-sync screen + `CSI ? 2026 h` + the raw pending bytes. Snapshots do not change the engine (`&self`). Pinned by a round-trip test at every split point |
 | State snapshots do not carry (code review) | Character sets (ESC ( 0, SO/SI), the DECSC saved cursor, tab stops, cursor shape and OSC 8 links disappear in the restored terminal, so later output differs | Stated in the README. Rejecting based on engine state or carrying it in the serialization is follow-up work. None of the 91 fixtures contain these sequences |
 | Cases where the snapshot tail scanner differs from vte (code review, engine worker) | After ESC with C0/DEL, BEL inside DCS, or an incomplete multibyte sequence right after ESC, the tail is lost or cut incorrectly (same behavior as the wmux tracker) | Attach reproduction cases and fix as follow-up |
