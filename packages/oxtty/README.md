@@ -1,6 +1,6 @@
 # oxtty
 
-Terminal emulator engine in Rust, compiled to WebAssembly (~175 KB, no
+Terminal emulator engine in Rust, compiled to WebAssembly (~235 KB, ~83 KB gzipped, no
 dependencies). Feed it PTY output; it keeps the screen and tells your renderer
 which rows changed.
 
