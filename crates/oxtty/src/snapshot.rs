@@ -1,13 +1,13 @@
-//! ANSI 스냅샷: 엔진 화면을 "빈 xterm.js에 쓰면 같은 화면이 되는 바이트"로 만든다.
+//! ANSI snapshot: turns the engine screen into "bytes that produce the same screen when written to an empty xterm.js".
 //!
-//! 출처: wmux(openwong2kim/wmux, 오너 작성 MIT)의 `core/wmux-term/src/native_serialize.rs`
-//! (직렬화기)와, 호스트가 메우던 보정 `src/daemon/RustSnapshot.ts`·
-//! `src/daemon/util/ansiStreamScan.ts`(미완 escape 꼬리, UTF-8 carry, 마진 거부)를 옮겼다.
-//! 같은 작성자가 oxtty에서는 Apache-2.0으로 다시 배포한다.
+//! Origin: ported from `core/wmux-term/src/native_serialize.rs` in wmux (openwong2kim/wmux, MIT, written by the owner)
+//! (the serializer), plus the corrections the host used to fill in, `src/daemon/RustSnapshot.ts` and
+//! `src/daemon/util/ansiStreamScan.ts` (incomplete escape tail, UTF-8 carry, margin rejection).
+//! The same author redistributes it under Apache-2.0 in oxtty.
 //!
-//! 출력 = 직렬화(grid) ‖ 원문 꼬리. 동기화 중이면 직렬화(BSU 전 grid) ‖ `CSI ?2026h` ‖ 대기 바이트 원문.
-//! 커서 가시성은 엔진 상태(`SHOW_CURSOR`)를 그대로 싣는다 — RIS 동작은 vt 옵션
-//! `ris_keeps_cursor_visibility`가 xterm.js에 맞춘다.
+//! Output = serialize(grid) ‖ raw tail. During sync: serialize(grid before BSU) ‖ `CSI ?2026h` ‖ raw pending bytes.
+//! Cursor visibility carries the engine state (`SHOW_CURSOR`) as is — the vt option
+//! `ris_keeps_cursor_visibility` aligns RIS behavior with xterm.js.
 use crate::history::History;
 use crate::vt::event::EventListener;
 use crate::vt::grid::{Dimensions, Grid, Row};
@@ -52,24 +52,24 @@ impl fmt::Display for SnapshotRefusal {
 
 impl std::error::Error for SnapshotRefusal {}
 
-/// 넘겨줄 미완 시퀀스의 최대 길이(wmux `MAX_PENDING_TAIL_CHARS`).
+/// Maximum length of an incomplete sequence to carry over (wmux `MAX_PENDING_TAIL_CHARS`).
 const MAX_PENDING_TAIL: usize = 4096;
 
-/// `feed`가 받은 원문의 끝. vte는 파서의 미완 상태를 원문으로 돌려주지 않으므로 엔진이 들고 있다.
+/// The raw end of what `feed` received. vte does not give back the parser's incomplete state as raw bytes, so the engine keeps it.
 ///
-/// ESC는 어느 상태에서든 새 시퀀스를 시작하므로(vte·xterm 공통) 꼬리는 항상 스트림의
-/// 마지막 ESC부터다. 그래서 feed마다 마지막 ESC 이후만 훑는다.
+/// ESC starts a new sequence from any state (common to vte and xterm), so the tail always starts at the
+/// last ESC in the stream. So each feed scans only what follows the last ESC.
 #[derive(Default)]
 pub(crate) struct RawTail {
     state: Scan,
-    /// 미완 시퀀스 원문(ESC 포함). 넘치면 비우고 `overflowed`.
+    /// Raw incomplete sequence (including ESC). On overflow it is cleared and `overflowed` is set.
     escape: Vec<u8>,
     overflowed: bool,
-    /// 스트림의 마지막 최대 3바이트 — 미완 UTF-8 접미 계산용.
+    /// Up to the last 3 bytes of the stream — for computing the incomplete UTF-8 suffix.
     last: Vec<u8>,
 }
 
-/// wmux `ScanState`. 문자열(OSC/DCS/SOS/PM/APC) 안의 ESC는 ST든 중단이든 `Esc`와 같게 진행한다.
+/// wmux `ScanState`. An ESC inside a string (OSC/DCS/SOS/PM/APC) proceeds the same as `Esc`, whether it is ST or an abort.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Scan {
     #[default]
@@ -94,7 +94,7 @@ impl RawTail {
             let was = self.state;
             self.state = step(was, b);
             if self.state == Scan::Ground {
-                // 마지막 ESC 뒤이므로 남은 바이트는 평문이다.
+                // This is after the last ESC, so the remaining bytes are plain text.
                 self.escape.clear();
                 self.overflowed = false;
                 break;
@@ -103,7 +103,7 @@ impl RawTail {
                 self.escape.clear();
                 self.overflowed = false;
             }
-            // 시퀀스 안의 C0(`\x1b[31\n`의 LF)는 여기서 이미 실행됐다. 다시 실행되지 않게 빼도 파라미터 상태는 같다.
+            // A C0 inside a sequence (the LF in `\x1b[31\n`) has already been executed here. Dropping it so it does not run again leaves the parameter state the same.
             if b < 0x20 && b != 0x1b {
                 continue;
             }
@@ -122,7 +122,7 @@ impl RawTail {
             .extend_from_slice(&bytes[bytes.len().saturating_sub(3)..]);
     }
 
-    /// payload 끝에 붙일 원문: 미완 시퀀스(그 안의 미완 UTF-8 포함), 없으면 미완 UTF-8 접미.
+    /// Raw bytes to append to the payload: the incomplete sequence (including any incomplete UTF-8 in it), or else the incomplete UTF-8 suffix.
     fn pending(&self) -> Result<&[u8], SnapshotRefusal> {
         if self.state != Scan::Ground {
             return if self.overflowed {
@@ -135,7 +135,7 @@ impl RawTail {
     }
 }
 
-/// wmux `PartialSequenceTracker.advance`의 바이트판.
+/// Byte version of wmux `PartialSequenceTracker.advance`.
 fn step(state: Scan, b: u8) -> Scan {
     if b == 0x1b {
         return Scan::Esc;
@@ -154,7 +154,7 @@ fn step(state: Scan, b: u8) -> Scan {
         },
         Scan::Csi => match b {
             0x40..=0x7e | 0x18 | 0x1a => Scan::Ground,
-            // 파라미터·중간 바이트, 그리고 시퀀스를 끝내지 않는 C0.
+            // Parameter and intermediate bytes, and C0s that do not end the sequence.
             _ => Scan::Csi,
         },
         Scan::String => match b {
@@ -164,7 +164,7 @@ fn step(state: Scan, b: u8) -> Scan {
     }
 }
 
-/// 끝에서 미완인 UTF-8 바이트 수(0~3). wmux `incompleteUtf8SuffixLength`.
+/// Number of incomplete UTF-8 bytes at the end (0~3). wmux `incompleteUtf8SuffixLength`.
 fn incomplete_utf8_suffix_len(buf: &[u8]) -> usize {
     for back in 1..=buf.len().min(3) {
         let b = buf[buf.len() - back];
@@ -187,7 +187,7 @@ fn incomplete_utf8_suffix_len(buf: &[u8]) -> usize {
     0
 }
 
-/// [`crate::Engine::ansi_snapshot`]의 본체. 거부 순서는 wmux와 같다: 마진 → 꼬리 넘침 → 와이드 가장자리.
+/// The body of [`crate::Engine::ansi_snapshot`]. The rejection order is the same as wmux: margins → tail overflow → wide edge.
 pub(crate) fn ansi<T: EventListener>(
     term: &Term<T>,
     held_sync: Option<&[u8]>,
@@ -198,7 +198,7 @@ pub(crate) fn ansi<T: EventListener>(
     if region.start.0 != 0 || region.end.0 != term.screen_lines() as i32 {
         return Err(SnapshotRefusal::Margins);
     }
-    // 동기화 중엔 BSU 뒤 원문 전체가 꼬리다(BSU 직후 파서는 ground) — 넘침 검사가 필요 없다.
+    // During sync, all raw bytes after BSU are the tail (the parser is in ground right after BSU) — no overflow check needed.
     let tail = match held_sync {
         Some(held) => held,
         None => tail.pending()?,
@@ -212,8 +212,8 @@ pub(crate) fn ansi<T: EventListener>(
     Ok(bytes)
 }
 
-// 여기부터 wmux native_serialize.rs에서 옮긴 코드. 바뀐 점: 리스너 제네릭, 거부 enum,
-// 탭 칸을 공백으로, DECOM을 커서보다 먼저.
+// From here on, code ported from wmux native_serialize.rs. Changes: listener generic, rejection enum,
+// tab cells as spaces, DECOM before the cursor.
 
 fn color(out: &mut String, value: Color, foreground: bool) {
     let base = if foreground { 38 } else { 48 };
@@ -285,7 +285,7 @@ fn style(cell: &Cell) -> String {
 }
 
 fn glyph(out: &mut String, cell: &Cell) {
-    // 탭이 지나간 첫 칸에 남은 '\t'를 그대로 쓰면 xterm이 다시 탭으로 실행한다.
+    // Writing the '\t' left in the first cell a tab passed over as is would make xterm execute it as a tab again.
     out.push(if cell.c == '\t' { ' ' } else { cell.c });
     if let Some(chars) = cell.zerowidth() {
         out.extend(chars);
@@ -303,7 +303,7 @@ fn cursor(out: &mut String, grid: &Grid<Cell>) {
         col = col.saturating_sub(1);
     }
     let _ = write!(out, "\x1b[{};{}H", point.line.0 + 1, col + 1);
-    // CUP는 줄 끝 대기를 지우므로 가장자리 칸을 다시 써서 그 상태를 되살린다.
+    // CUP clears the pending wrap at line end, so rewrite the edge cell to restore that state.
     if grid.cursor.input_needs_wrap {
         let cell = &grid[point.line][Column(col)];
         out.push_str(&style(cell));
@@ -312,7 +312,7 @@ fn cursor(out: &mut String, grid: &Grid<Cell>) {
     out.push_str(&style(&grid.cursor.template));
 }
 
-/// `older`는 이 그리드보다 오래된 압축 히스토리(주 화면일 때만).
+/// `older` is the compressed history older than this grid (primary screen only).
 fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
     let mut previous_style = String::new();
     let mut row = |out: &mut String, line: &Row<Cell>, last: bool| {
@@ -328,8 +328,8 @@ fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
             glyph(out, cell);
         }
         if !last && !line[grid.last_column()].flags.contains(Flags::WRAPLINE) {
-            // 스크롤 전에 속성을 지운다. 안 그러면 색이 있는 빈칸 템플릿이
-            // 직렬화한 내용 밖의 칸까지 칠한다.
+            // Clear attributes before scrolling. Otherwise a colored blank template
+            // paints cells outside the serialized content.
             out.push_str("\x1b[0m\r\n");
             previous_style.clear();
         }
@@ -346,9 +346,9 @@ fn serialize<T: EventListener>(
     term: &Term<T>,
     older: Option<&History>,
 ) -> Result<String, SnapshotRefusal> {
-    // 커서 문단을 자를 때 xterm은 넓은 글자 반쪽을 남길 수 있다. 그 글자를 출력하면
-    // 줄이 넘어가므로 망가뜨리지 않고 거부한다. 비활성 그리드는 대체 화면일 때만
-    // 직렬화하므로 그때만 본다(나온 뒤 남은 대체 화면 내용으로 거부하지 않게).
+    // When cutting the cursor paragraph, xterm can leave half of a wide character. Printing that character
+    // wraps the line, so reject instead of corrupting it. The inactive grid is serialized only when on the
+    // alternate screen, so check it only then (so leftover alternate screen content after leaving does not cause a rejection).
     let alt = term.mode().contains(TermMode::ALT_SCREEN);
     for grid in std::iter::once(term.grid()).chain(alt.then(|| term.inactive_grid())) {
         for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
@@ -375,7 +375,7 @@ fn serialize<T: EventListener>(
         out.push_str("\x1b[?1049h\x1b[0m\x1b[H");
     }
     screen(&mut out, term.grid(), if alt { None } else { older });
-    // DECOM을 켜면 커서가 홈으로 가므로 CUP보다 먼저 낸다(마진은 거부되므로 CUP 기준은 화면 전체).
+    // Turning on DECOM sends the cursor home, so emit it before CUP (margins are rejected, so CUP is relative to the whole screen).
     if modes.contains(TermMode::ORIGIN) {
         out.push_str("\x1b[?6h");
     }

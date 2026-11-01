@@ -1,6 +1,6 @@
-//! Alacritty `alacritty_terminal` 0.26 포크 (Apache-2.0). 변경 내역은 `PATCHES.md`.
+//! Fork of Alacritty `alacritty_terminal` 0.26 (Apache-2.0). Changes are listed in `PATCHES.md`.
 //!
-//! 저수준 API이며 oxtty의 버전 안정성 약속 밖이다. 렌더러는 [`crate::Engine`]을 쓴다.
+//! A low-level API outside the oxtty version stability promise. Renderers use [`crate::Engine`].
 
 pub mod event;
 pub mod grid;

@@ -25,7 +25,7 @@ mod alloc {
 
     struct Stepped;
 
-    // dlmalloc의 wasm System과 같고, 늘리는 크기만 GROW_STEP 이상으로 올린다
+    // Same as dlmalloc's wasm System, except the grow size is raised to at least GROW_STEP
     unsafe impl Allocator for Stepped {
         fn alloc(&self, size: usize) -> (*mut u8, usize, u32) {
             let pages = size.max(GROW_STEP).div_ceil(PAGE);
@@ -56,7 +56,7 @@ mod alloc {
 
     struct Global(UnsafeCell<Dlmalloc<Stepped>>);
 
-    // wasm32-unknown-unknown(atomics 없음)은 스레드가 하나뿐이다
+    // wasm32-unknown-unknown (no atomics) has only one thread
     unsafe impl Sync for Global {}
 
     unsafe impl GlobalAlloc for Global {

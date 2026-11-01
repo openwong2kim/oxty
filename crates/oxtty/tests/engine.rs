@@ -209,7 +209,7 @@ fn resize_keeps_content_and_clamps() {
 
 #[test]
 fn resize_reflows_all_but_the_cursor_paragraph() {
-    // xterm.js reflowCursorLine: false — 커서가 있는 문단만 줄을 다시 나누지 않는다.
+    // xterm.js reflowCursorLine: false — only the paragraph holding the cursor is not re-wrapped.
     let mut t = Engine::new(10, 5, 100);
     t.feed(b"0123456789ab\r\nXXXXXXXXXXyy");
     t.resize(20, 5);
@@ -219,7 +219,7 @@ fn resize_reflows_all_but_the_cursor_paragraph() {
 
 #[test]
 fn secondary_device_attributes_report_alacritty_version() {
-    // 내장 후에도 DA2 응답은 oxtty 버전이 아니라 Alacritty 0.26.0(2600)이다.
+    // Even after embedding, the DA2 reply is Alacritty 0.26.0 (2600), not the oxtty version.
     let mut t = term();
     t.feed(b"\x1b[>c");
     assert_eq!(t.take_replies(), b"\x1b[>0;2600;1c");
@@ -324,7 +324,7 @@ fn view_scrolls_into_history_and_back() {
     t.scroll_display(2);
     assert_eq!(t.display_offset(), 2);
     assert_eq!(t.take_damage(), Damage::Full);
-    // 뷰포트 0번 줄 = line(0 - 2)
+    // Viewport row 0 = line(0 - 2)
     assert_eq!(t.row_text(-2).unwrap(), "line6");
     t.scroll_display(1000);
     assert_eq!(t.display_offset(), t.history_len());
@@ -338,7 +338,7 @@ fn scrolling_output_reports_scroll_and_new_lines() {
     t.feed(b"a\r\nb\r\nc\r\nd\r\ne");
     t.take_damage();
     t.feed(b"\r\nf");
-    // 화면이 한 줄 올라갔다: 옛 커서 줄(3으로 이동)과 새 줄 4만 다시 그린다.
+    // The screen moved up one line: redraw only the old cursor line (moved to 3) and the new line 4.
     assert_eq!(
         t.take_damage(),
         Damage::Lines {
@@ -354,17 +354,17 @@ fn scrolling_output_reports_scroll_and_new_lines() {
             lines: vec![2, 3, 4]
         }
     );
-    // 화면 높이 이상 스크롤되면 전체를 다시 그린다.
+    // Scrolling by the screen height or more redraws everything.
     t.feed(b"\r\n1\r\n2\r\n3\r\n4\r\n5");
     assert_eq!(t.take_damage(), Damage::Full);
-    // 스크롤 영역(vim 등)이 화면 일부면 전체로 처리한다.
+    // If the scroll region (vim etc.) is part of the screen, treat it as full.
     t.feed(b"\x1b[2;4r\x1b[4;1H\n");
     assert_eq!(t.take_damage(), Damage::Full);
 }
 
 #[test]
 fn erase_display_keeps_history_like_xterm() {
-    // xterm.js scrollOnEraseInDisplay: false — 주 화면 ED2는 화면만 지우고 히스토리로 밀지 않는다.
+    // xterm.js scrollOnEraseInDisplay: false — ED2 on the primary screen only clears the screen and does not push into history.
     let mut t = Engine::new(20, 6, 100);
     t.feed(b"a\r\nb\r\nc\x1b[2J");
     assert_eq!(t.history_len(), 0);
@@ -379,17 +379,17 @@ fn legacy_alternate_screen_modes_match_xterm() {
         t.feed(format!("main{enter}alt").as_bytes());
         assert_ne!(t.modes() & mode::ALT_SCREEN, 0, "{enter:?}");
         assert_eq!(t.row_text(0).unwrap(), "    alt");
-        // xterm.js: 나올 때 주 화면 커서는 대체 화면 커서 위치를 이어받는다(1049와 달리 복원 없음).
+        // xterm.js: on exit the primary screen cursor inherits the alternate screen cursor position (no restore, unlike 1049).
         t.feed(format!("\x1b[3;5H{}", enter.replace('h', "l")).as_bytes());
         assert_eq!(t.modes() & mode::ALT_SCREEN, 0);
         assert_eq!(t.row_text(0).unwrap(), "main");
         assert_eq!((t.cursor().line, t.cursor().col), (2, 4));
     }
-    // 47/1047은 저장된 커서(DECSC)를 덮어쓰지 않는다.
+    // 47/1047 do not overwrite the saved cursor (DECSC).
     let mut t = Engine::new(20, 6, 100);
     t.feed(b"\x1b[2;2H\x1b7\x1b[H\x1b[?47h\x1b[?47l\x1b8");
     assert_eq!((t.cursor().line, t.cursor().col), (1, 1));
-    // 47로 들어가 ?1049l로 나오면 xterm.js는 주 화면 저장 커서(여기선 저장한 적 없어 홈)로 간다.
+    // Entering with 47 and leaving with ?1049l, xterm.js goes to the primary screen saved cursor (home here, since nothing was saved).
     let mut t = Engine::new(20, 6, 100);
     t.feed(b"main\x1b[?47halt\x1b[?1049lX");
     assert_eq!(t.row_text(0).unwrap(), "Xain");
@@ -405,7 +405,7 @@ fn mode_1048_saves_and_restores_cursor() {
 
 #[test]
 fn narrowing_fills_empty_rows_before_history_like_xterm() {
-    // xterm.js _reflowSmaller: 히스토리가 비어 있으면 늘어난 줄만큼 커서 아래 줄을 버리고 커서를 내린다.
+    // xterm.js _reflowSmaller: if the history is empty, drop as many lines below the cursor as were added and move the cursor down.
     let rows = |t: &Engine| {
         (0..t.rows() as i32)
             .map(|y| t.row_text(y).unwrap())
@@ -417,14 +417,14 @@ fn narrowing_fills_empty_rows_before_history_like_xterm() {
     assert_eq!(t.history_len(), 0);
     assert_eq!(rows(&t), ["abc한글0", "12345678", "9", "last"]);
     assert_eq!((t.cursor().line, t.cursor().col), (3, 4));
-    // 화면 끝에 닿으면 나머지는 히스토리로 간다.
+    // Once it reaches the end of the screen, the rest goes to history.
     let mut t = Engine::new(16, 6, 100);
     t.feed(b"abcdefghijklmnopqrstuvwxyz0123456\r\nlast");
     t.resize(4, 6);
     assert_eq!(t.history_len(), 4);
     assert_eq!(rows(&t), ["qrst", "uvwx", "yz01", "2345", "6", "last"]);
     assert_eq!((t.cursor().line, t.cursor().col), (5, 3));
-    // 커서 아래 문단이 늘어도 xterm.js는 커서를 늘어난 줄 수만큼 내린다.
+    // Even when the paragraph below the cursor grows, xterm.js moves the cursor down by the number of added lines.
     let mut t = Engine::new(16, 4, 100);
     t.feed("top\r\nabc한글0123456789\x1b[1;4H".as_bytes());
     t.resize(8, 4);
@@ -445,7 +445,7 @@ fn decstr_split_across_feeds_resets_modes_and_ends_a_synchronized_update() {
     assert!(t.cursor().visible);
     assert_eq!(t.modes() & (mode::INSERT | mode::BRACKETED_PASTE), 0);
     assert_eq!(t.row_text(0).unwrap(), "AB");
-    // 인자·다른 중간 문자가 붙은 시퀀스는 DECSTR이 아니다.
+    // Sequences with parameters or other intermediate characters are not DECSTR.
     t.feed(b"\x1b[4h\x1b[?!p\x1b[!q");
     assert_ne!(t.modes() & mode::INSERT, 0);
     t.feed(b"\x1b[0!p");
@@ -462,13 +462,13 @@ fn color_queries_answer_only_with_host_colors_in_xterm_format_and_order() {
     colors[256] = 0xcccccc;
     colors[257] = 0x1e1e2e;
     t.set_colors(Some(colors));
-    // xterm.js: 16비트 채널(rrrr), 질의가 BEL로 끝나도 ST로 답하고, 다른 응답과 질의 순서를 지킨다.
+    // xterm.js: 16-bit channels (rrrr), replies with ST even when the query ends with BEL, and keeps query order with other replies.
     t.feed(b"\x1b]11;?\x07\x1b[6n\x1b]4;1;?\x1b\\");
     assert_eq!(
         String::from_utf8(t.take_replies()).unwrap(),
         "\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\\x1b[1;1R\x1b]4;1;rgb:cdcd/3131/3131\x1b\\"
     );
-    // 프로그램이 OSC 4로 바꾼 색이 호스트 색보다 먼저다.
+    // Colors the program changed via OSC 4 take precedence over host colors.
     t.feed(b"\x1b]4;1;rgb:00/80/ff\x07\x1b]4;1;?\x07");
     assert_eq!(
         String::from_utf8(t.take_replies()).unwrap(),

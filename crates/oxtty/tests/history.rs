@@ -1,5 +1,5 @@
-//! 압축 히스토리 차분 테스트: 같은 입력·resize·뷰 스크롤을 압축한 엔진과 압축하지 않은 엔진
-//! (Alacritty 원래 배치)에 주고 화면·히스토리·damage·스냅샷이 모두 같은지 본다.
+//! Compressed history differential test: feed the same input, resizes and view scrolls to a compressing engine and a non-compressing engine
+//! (the original Alacritty layout) and check that screen, history, damage and snapshots all match.
 use oxtty::vt::event::VoidListener;
 use oxtty::vt::grid::{Dimensions, Row};
 use oxtty::vt::index::{Column, Line};
@@ -9,7 +9,7 @@ use oxtty::vt::term::{Config, Term, TermMode};
 use oxtty::vt::vte::ansi::{Color, Processor, StdSyncHandler};
 use oxtty::{Cell, CellExtra, Engine, TermHistory};
 
-/// 재현 가능한 의사 난수(xorshift64*).
+/// Reproducible pseudo-random numbers (xorshift64*).
 struct Rng(u64);
 
 impl Rng {
@@ -29,7 +29,7 @@ impl Rng {
     }
 }
 
-/// 히스토리를 빨리 쌓고, 넓은 글자·결합 문자·링크·밑줄 색·여백·대체 화면을 섞은 출력.
+/// Output that fills history quickly and mixes wide characters, combining characters, links, underline colors, margins and the alternate screen.
 fn chunk(rng: &mut Rng) -> String {
     let mut s = String::new();
     for _ in 0..rng.below(40) + 1 {
@@ -129,7 +129,7 @@ fn assert_same(a: &Engine, b: &Engine, step: usize) {
         );
         assert_eq!(x, y, "cells of line {line}, step {step}");
         assert_eq!(a.row_extras(line, &mut ex), b.row_extras(line, &mut ey));
-        // 만들어 붙인 링크 id는 프로세스 전역 카운터라 엔진마다 다르다.
+        // Generated link ids come from a process-wide counter, so they differ per engine.
         for e in ex.iter_mut().chain(ey.iter_mut()) {
             if let Some(link) = &mut e.hyperlink {
                 if link.id.ends_with("_alacritty") {
@@ -198,7 +198,7 @@ fn run(seed: u64, steps: usize, scrollback: usize) {
             ),
             _ => {
                 let bytes = chunk(&mut rng).into_bytes();
-                // 바이트 단위로 갈라도 같아야 한다.
+                // Must match even when split byte by byte.
                 let cut = rng.below(bytes.len() as u64 + 1) as usize;
                 if trace {
                     eprintln!("  feed {:?}", String::from_utf8_lossy(&bytes));
@@ -236,7 +236,7 @@ fn one_seed() {
 
 #[test]
 fn compressed_history_matches_uncompressed() {
-    // OXTTY_SEEDS로 더 많이 돌릴 수 있다.
+    // Run more with OXTTY_SEEDS.
     let seeds: u64 = std::env::var("OXTTY_SEEDS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -253,11 +253,11 @@ fn compressed_history_matches_uncompressed() {
 
 #[test]
 fn compressed_history_keeps_long_scrollback() {
-    // 블록 경계와 오래된 줄 버리기가 여러 번 일어나도록 길게 돌린다.
+    // Run long so block boundaries and dropping of old lines happen many times.
     run(7, 4000, 3000);
 }
 
-/// 칸 비교용 값. 링크는 URI만 본다(ID 없는 링크에 Alacritty가 프로세스 전역 번호를 붙인다).
+/// Value for cell comparison. Links compare only the URI (Alacritty assigns a process-wide number to links without an ID).
 type CellKey = (
     char,
     Color,
@@ -268,7 +268,7 @@ type CellKey = (
     Option<String>,
 );
 
-/// 주 화면의 히스토리와 화면 줄 전체(오래된 줄부터)를 칸 단위로 꺼낸다.
+/// Extracts the primary screen history and all screen lines (oldest first) cell by cell.
 fn primary_rows(term: &Term<VoidListener>, older: Option<&TermHistory>) -> Vec<Vec<CellKey>> {
     let grid = if term.mode().contains(TermMode::ALT_SCREEN) {
         term.inactive_grid()
@@ -304,8 +304,8 @@ fn primary_rows(term: &Term<VoidListener>, older: Option<&TermHistory>) -> Vec<V
 
 #[test]
 fn term_history_matches_plain_term() {
-    // Engine 없이 Term을 직접 쓰는 쪽(wmux 스냅샷)도 압축 히스토리로 같은 줄을 얻는다.
-    // 기본 Config라 ED2가 화면을 히스토리로 미는 경로도 탄다.
+    // Code that uses Term directly without Engine (wmux snapshots) also gets the same lines from the compressed history.
+    // With the default Config, it also takes the path where ED2 pushes the screen into history.
     for seed in 1..=20u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
         let (cols, rows) = (rng.below(70) as usize + 10, rng.below(10) as usize + 4);
