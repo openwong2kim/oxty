@@ -99,6 +99,16 @@ export class Terminal {
   /** New window title, or null if unchanged ("" = reset). */
   takeTitle(): string | null;
   takeBells(): number;
+  /** Lets the program read and/or write the host clipboards with OSC 52 (both off by default). */
+  setClipboardAccess(access?: { read?: boolean; write?: boolean }): void;
+  /** Oldest text the program asked to copy, or null. */
+  takeClipboardWrite(): { selection: 'c' | 'p'; text: string } | null;
+  /** Oldest clipboard the program asked to read, or null. Answer it with replyClipboard. */
+  takeClipboardRead(): 'c' | 'p' | null;
+  /** Answers the oldest read of `selection`; the reply joins takeReplies(). False if none is waiting. */
+  replyClipboard(selection: 'c' | 'p', text: string): boolean;
+  /** Colours (0xRRGGBB, COLOR_SLOTS of them: palette 0–255, foreground, background, cursor) that answer OSC 4/10/11/12 queries; null stops answering. */
+  setColors(colors: ArrayLike<number> | null): void;
   syncPending(): boolean;
   flushSync(): void;
   /** Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes. */
@@ -106,6 +116,8 @@ export class Terminal {
   dispose(): void;
 }
 
+/** Entries `setColors` takes: palette 0–255, then foreground, background, cursor. */
+export declare const COLOR_SLOTS: 259;
 export declare const Attr: Readonly<{
   BOLD: number; DIM: number; ITALIC: number; UNDERLINE: number;
   DOUBLE_UNDERLINE: number; CURLY_UNDERLINE: number; DOTTED_UNDERLINE: number; DASHED_UNDERLINE: number;

@@ -1,6 +1,6 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { init, Terminal, Attr, Mode, decodeColor } from '../dist/index.js';
+import { init, Terminal, Attr, Mode, decodeColor, COLOR_SLOTS } from '../dist/index.js';
 
 before(async () => {
   await init();
@@ -191,4 +191,25 @@ test('ansi snapshot: payload rebuilds the screen, refusal names the reason', () 
   assert.deepEqual(copy.rowCells(0), t.rowCells(0));
   t.write('\x1b[2;3r');
   assert.deepEqual(t.ansiSnapshot(), { ok: false, reason: 'margins' });
+});
+
+test('host policy: colour queries and OSC 52 only with the host, in xterm.js reply format', () => {
+  const t = make();
+  t.write('\x1b]11;?\x07\x1b]52;c;aGk=\x07');
+  assert.equal(t.takeReplies().length, 0);
+  assert.equal(t.takeClipboardWrite(), null);
+  const colors = new Array(COLOR_SLOTS).fill(0);
+  colors[257] = 0x1e1e2e;
+  t.setColors(colors);
+  t.setClipboardAccess({ read: true, write: true });
+  t.write('\x1b]11;?\x07\x1b]52;c;aGk=\x07\x1b]52;c;?\x1b\\');
+  assert.deepEqual(t.takeClipboardWrite(), { selection: 'c', text: 'hi' });
+  assert.equal(t.takeClipboardRead(), 'c');
+  assert.equal(t.replyClipboard('c', '한글'), true);
+  assert.equal(new TextDecoder().decode(t.takeReplies()), '\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\\x1b]52;c;7ZWc6riA\x07');
+  t.setColors(null);
+  t.write('\x1b]11;?\x07');
+  assert.equal(t.takeReplies().length, 0);
+  assert.throws(() => t.setColors([1, 2, 3]), RangeError);
+  t.dispose();
 });

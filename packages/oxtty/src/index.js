@@ -1,7 +1,7 @@
 // oxtty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 3;
+const ABI = 4;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -94,6 +94,9 @@ const CURSOR_SHAPES = ['block', 'underline', 'bar'];
 /** Packed colour kinds (`rowCells` words 1 and 2). */
 export const ColorKind = Object.freeze({ NAMED: 1, INDEXED: 2, RGB: 3 });
 
+/** Entries `setColors` takes: palette 0–255, then foreground, background, cursor. */
+export const COLOR_SLOTS = 259;
+
 /**
  * @param {number} packed
  * @returns {{ kind: 'named' | 'indexed' | 'rgb', value: number }}
@@ -137,14 +140,19 @@ export class Terminal {
     const h = this.#handle();
     const bytes = typeof data === 'string' ? encoder.encode(data) : data;
     if (!bytes.length) return;
+    wasm.oxtty_feed(h, this.#stage(bytes), bytes.length);
+    this.#armSync();
+  }
+
+  // Copies bytes into the reusable input buffer in linear memory.
+  #stage(bytes) {
     if (bytes.length > this.#inCap) {
       if (this.#inPtr) wasm.oxtty_free(this.#inPtr, this.#inCap);
       this.#inCap = Math.max(bytes.length, 4096);
       this.#inPtr = wasm.oxtty_alloc(this.#inCap);
     }
     new Uint8Array(wasm.memory.buffer, this.#inPtr, bytes.length).set(bytes);
-    wasm.oxtty_feed(h, this.#inPtr, bytes.length);
-    this.#armSync();
+    return this.#inPtr;
   }
 
   // Synchronized output (CSI ? 2026 h) holds the screen until the program
@@ -292,6 +300,41 @@ export class Terminal {
 
   takeBells() {
     return wasm.oxtty_take_bells(this.#handle());
+  }
+
+  /** Lets the program read and/or write the host clipboards with OSC 52 (both off by default). */
+  setClipboardAccess({ read = false, write = false } = {}) {
+    wasm.oxtty_set_clipboard_access(this.#handle(), read ? 1 : 0, write ? 1 : 0);
+  }
+
+  /** @returns {{ selection: 'c' | 'p', text: string } | null} oldest text the program asked to copy */
+  takeClipboardWrite() {
+    const n = wasm.oxtty_take_clipboard_write(this.#handle());
+    if (n < 0) return null;
+    const out = bytesOut(n);
+    return { selection: String.fromCharCode(out[0]), text: decoder.decode(out.subarray(1)) };
+  }
+
+  /** @returns {'c' | 'p' | null} oldest clipboard the program asked to read; answer with replyClipboard */
+  takeClipboardRead() {
+    const c = wasm.oxtty_take_clipboard_read(this.#handle());
+    return c < 0 ? null : String.fromCharCode(c);
+  }
+
+  /** Answers the oldest read of `selection`; the reply joins takeReplies(). */
+  replyClipboard(selection, text) {
+    const h = this.#handle();
+    const bytes = encoder.encode(text);
+    return wasm.oxtty_reply_clipboard(h, selection.charCodeAt(0), this.#stage(bytes), bytes.length) === 1;
+  }
+
+  /** Colours (0xRRGGBB, COLOR_SLOTS of them) that answer OSC 4/10/11/12 queries; null stops answering. */
+  setColors(colors) {
+    const h = this.#handle();
+    if (!colors) return wasm.oxtty_set_colors(h, 0, 0);
+    if (colors.length !== COLOR_SLOTS) throw new RangeError(`oxtty: setColors takes ${COLOR_SLOTS} colours`);
+    const words = Uint32Array.from(colors);
+    wasm.oxtty_set_colors(h, this.#stage(new Uint8Array(words.buffer)), words.byteLength);
   }
 
   syncPending() {

@@ -69,3 +69,20 @@ test('native ansi snapshot', () => {
   t.write('m\x1b[2;3r');
   assert.deepEqual(t.ansiSnapshot(), { ok: false, reason: 'margins' });
 });
+
+test('native host policy: clipboard and colour queries', () => {
+  const t = new Terminal(80, 24);
+  const colors = new Uint32Array(259);
+  colors[256] = 0xcccccc;
+  t.setColors(colors);
+  t.setClipboardAccess(true, true);
+  t.write('\x1b]10;?\x07\x1b]52;c;aGk=\x07\x1b]52;c;?\x07');
+  assert.deepEqual(t.takeClipboardWrite(), { selection: 'c', text: 'hi' });
+  assert.equal(t.takeClipboardRead(), 'c');
+  assert.equal(t.replyClipboard('c', 'ok'), true);
+  assert.equal(t.takeReplies().toString(), '\x1b]10;rgb:cccc/cccc/cccc\x1b\\\x1b]52;c;b2s=\x07');
+  assert.throws(() => t.setColors(new Uint32Array(3)));
+  t.setColors(null);
+  t.write('\x1b]10;?\x07');
+  assert.equal(t.takeReplies().length, 0);
+});

@@ -3,6 +3,7 @@
 
 use napi::bindgen_prelude::{Buffer, Either, Uint32Array};
 use napi_derive::napi;
+use oxtty::{Clipboard, COLOR_SLOTS};
 
 #[napi(object)]
 pub struct Cursor {
@@ -12,6 +13,13 @@ pub struct Cursor {
     /// `"block"`, `"underline"` or `"bar"`.
     pub shape: String,
     pub blink: bool,
+}
+
+#[napi(object)]
+pub struct ClipboardWrite {
+    /// `"c"` (clipboard) or `"p"` (primary selection).
+    pub selection: String,
+    pub text: String,
 }
 
 #[napi(object)]
@@ -211,6 +219,56 @@ impl Terminal {
         self.inner.take_bells()
     }
 
+    /// Lets the program read and/or write the host clipboards with OSC 52 (both off by default).
+    #[napi]
+    pub fn set_clipboard_access(&mut self, read: bool, write: bool) {
+        self.inner.set_clipboard_access(read, write);
+    }
+
+    /// Oldest text the program asked to copy.
+    #[napi]
+    pub fn take_clipboard_write(&mut self) -> Option<ClipboardWrite> {
+        self.inner
+            .take_clipboard_write()
+            .map(|(clipboard, text)| ClipboardWrite {
+                selection: selection_name(clipboard).to_owned(),
+                text,
+            })
+    }
+
+    /// Oldest clipboard (`"c"` or `"p"`) the program asked to read; answer with `replyClipboard`.
+    #[napi]
+    pub fn take_clipboard_read(&mut self) -> Option<String> {
+        self.inner
+            .take_clipboard_read()
+            .map(|clipboard| selection_name(clipboard).to_owned())
+    }
+
+    /// Answers the oldest read of `selection`; the reply joins `takeReplies()`.
+    #[napi]
+    pub fn reply_clipboard(&mut self, selection: String, text: String) -> bool {
+        let clipboard = match selection.as_str() {
+            "c" => Clipboard::Clipboard,
+            "p" => Clipboard::Selection,
+            _ => return false,
+        };
+        self.inner.reply_clipboard(clipboard, &text)
+    }
+
+    /// Colours (`0xRRGGBB`, palette 0–255 then foreground, background, cursor) that answer
+    /// OSC 4/10/11/12 queries; `null` stops answering.
+    #[napi]
+    pub fn set_colors(&mut self, colors: Option<Uint32Array>) -> napi::Result<()> {
+        let colors = match colors {
+            None => None,
+            Some(c) => Some(<[u32; COLOR_SLOTS]>::try_from(&c[..]).map_err(|_| {
+                napi::Error::from_reason(format!("setColors takes {COLOR_SLOTS} colours"))
+            })?),
+        };
+        self.inner.set_colors(colors);
+        Ok(())
+    }
+
     #[napi]
     pub fn sync_pending(&self) -> bool {
         self.inner.sync_pending()
@@ -236,5 +294,12 @@ impl Terminal {
                 reason: Some(why.as_str().into()),
             },
         }
+    }
+}
+
+fn selection_name(clipboard: Clipboard) -> &'static str {
+    match clipboard {
+        Clipboard::Clipboard => "c",
+        Clipboard::Selection => "p",
     }
 }

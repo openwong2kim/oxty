@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 
-use oxtty::{CursorShape, Damage, Engine};
+use oxtty::{Clipboard, CursorShape, Damage, Engine, COLOR_SLOTS};
 
 /// The same dlmalloc std uses on wasm, but growing linear memory in larger
 /// steps: at 64 KiB per `memory.grow`, filling a scrollback calls it thousands
@@ -107,7 +107,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    3
+    4
 }
 
 #[no_mangle]
@@ -363,6 +363,80 @@ pub extern "C" fn oxtty_take_title(h: u32) -> i32 {
 #[no_mangle]
 pub extern "C" fn oxtty_take_bells(h: u32) -> u32 {
     with(h, 0, |t| t.take_bells())
+}
+
+#[no_mangle]
+pub extern "C" fn oxtty_set_clipboard_access(h: u32, read: u32, write: u32) {
+    with(h, (), |t| t.set_clipboard_access(read != 0, write != 0));
+}
+
+/// Oldest clipboard write into OUT: the selection byte (`c` or `p`), then
+/// the UTF-8 text. Returns its length, or -1 if none is waiting.
+#[no_mangle]
+pub extern "C" fn oxtty_take_clipboard_write(h: u32) -> i32 {
+    with(h, -1, |t| {
+        t.take_clipboard_write().map_or(-1, |(clipboard, text)| {
+            let mut out = Vec::with_capacity(1 + text.len());
+            out.push(selection_byte(clipboard));
+            out.extend_from_slice(text.as_bytes());
+            set_out(out) as i32
+        })
+    })
+}
+
+/// Oldest clipboard read: the selection byte (`c` or `p`), or -1 if none.
+#[no_mangle]
+pub extern "C" fn oxtty_take_clipboard_read(h: u32) -> i32 {
+    with(h, -1, |t| {
+        t.take_clipboard_read()
+            .map_or(-1, |clipboard| selection_byte(clipboard) as i32)
+    })
+}
+
+/// Answers the oldest read of `selection` (`c` or `p`); 1 if one was waiting.
+///
+/// # Safety
+/// `ptr` must point to `len` readable bytes of UTF-8 in linear memory.
+#[no_mangle]
+pub unsafe extern "C" fn oxtty_reply_clipboard(
+    h: u32,
+    selection: u32,
+    ptr: *const u8,
+    len: u32,
+) -> u32 {
+    let clipboard = match selection as u8 {
+        b'c' => Clipboard::Clipboard,
+        b'p' => Clipboard::Selection,
+        _ => return 0,
+    };
+    let Ok(text) = std::str::from_utf8(std::slice::from_raw_parts(ptr, len as usize)) else {
+        return 0;
+    };
+    with(h, 0, |t| t.reply_clipboard(clipboard, text) as u32)
+}
+
+/// Colours for OSC 4/10/11/12 queries: `COLOR_SLOTS` little-endian `u32`
+/// words (`0xRRGGBB`) at `ptr`, or `len` 0 to stop answering.
+///
+/// # Safety
+/// `ptr` must point to `len` readable bytes in linear memory.
+#[no_mangle]
+pub unsafe extern "C" fn oxtty_set_colors(h: u32, ptr: *const u8, len: u32) {
+    if len as usize != COLOR_SLOTS * 4 {
+        with(h, (), |t| t.set_colors(None));
+        return;
+    }
+    let bytes = std::slice::from_raw_parts(ptr, len as usize);
+    let colors: [u32; COLOR_SLOTS] =
+        std::array::from_fn(|i| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()));
+    with(h, (), |t| t.set_colors(Some(colors)));
+}
+
+fn selection_byte(clipboard: Clipboard) -> u8 {
+    match clipboard {
+        Clipboard::Clipboard => b'c',
+        Clipboard::Selection => b'p',
+    }
 }
 
 #[no_mangle]

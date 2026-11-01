@@ -20,6 +20,7 @@
 //! [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 0.26
 //! built into this crate as [`vt`] (see `src/vt/PATCHES.md`).
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -37,7 +38,8 @@ use crate::vt::event::{Event, EventListener};
 use crate::vt::grid::{Dimensions, Grid, Row, Scroll};
 use crate::vt::index::Line;
 use crate::vt::term::cell::{Cell as AlacCell, Flags};
-use crate::vt::term::{Config, Term, TermDamage, TermMode};
+use crate::vt::term::{ClipboardType, Config, Osc52, Term, TermDamage, TermMode};
+use crate::vt::vte::ansi::Rgb;
 use crate::vt::vte::ansi::{Color, CursorShape as AlacCursorShape, Processor, Timeout};
 
 /// Smallest and largest accepted dimensions.
@@ -181,11 +183,52 @@ pub struct Hyperlink {
     pub uri: String,
 }
 
+/// The clipboard an OSC 52 request names: `c`, or `p`/`s` (the primary selection).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clipboard {
+    Clipboard,
+    Selection,
+}
+
+impl From<ClipboardType> for Clipboard {
+    fn from(ty: ClipboardType) -> Self {
+        match ty {
+            ClipboardType::Clipboard => Clipboard::Clipboard,
+            ClipboardType::Selection => Clipboard::Selection,
+        }
+    }
+}
+
+/// Colours that answer OSC 4/10/11/12 queries: the 256 palette entries, then
+/// foreground, background and cursor, as `0xRRGGBB`.
+pub const COLOR_SLOTS: usize = 259;
+
+/// 호스트가 답하지 않은 클립보드 읽기·쓰기를 이만큼만 들고 있는다(오래된 것부터 버림).
+const CLIPBOARD_QUEUE: usize = 16;
+
+type ClipboardFormatter = Arc<dyn Fn(&str) -> String + Sync + Send>;
+type ColorFormatter = Arc<dyn Fn(Rgb) -> String + Sync + Send>;
+
 #[derive(Default)]
 struct Inbox {
     replies: Vec<u8>,
     title: Option<String>,
     bells: u32,
+    clipboard_read: bool,
+    clipboard_write: bool,
+    clipboard_writes: VecDeque<(Clipboard, String)>,
+    clipboard_reads: VecDeque<Clipboard>,
+    // 답을 기다리는 읽기 요청과 응답 서식(요청 원문의 선택 문자를 그대로 쓴다).
+    clipboard_pending: VecDeque<(Clipboard, ClipboardFormatter)>,
+    // 색 질의: 응답이 들어갈 replies 위치, 색 번호, 서식. 질의 순서를 지키려고 위치에 끼워 넣는다.
+    color_queries: Vec<(usize, usize, ColorFormatter)>,
+}
+
+fn push_bounded<T>(queue: &mut VecDeque<T>, item: T) {
+    if queue.len() == CLIPBOARD_QUEUE {
+        queue.pop_front();
+    }
+    queue.push_back(item);
 }
 
 /// Receives Alacritty's events and keeps what a host has to act on.
@@ -200,7 +243,18 @@ impl EventListener for Listener {
             Event::Title(title) => inbox.title = Some(title),
             Event::ResetTitle => inbox.title = Some(String::new()),
             Event::Bell => inbox.bells = inbox.bells.saturating_add(1),
-            // Clipboard, colour queries and size queries are host policy; not in 0.1.
+            Event::ClipboardStore(ty, text) if inbox.clipboard_write => {
+                push_bounded(&mut inbox.clipboard_writes, (ty.into(), text));
+            }
+            Event::ClipboardLoad(ty, format) if inbox.clipboard_read => {
+                push_bounded(&mut inbox.clipboard_reads, ty.into());
+                push_bounded(&mut inbox.clipboard_pending, (ty.into(), format));
+            }
+            Event::ColorRequest(index, format) => {
+                let at = inbox.replies.len();
+                inbox.color_queries.push((at, index, format));
+            }
+            // Size queries are host policy; not in 0.1.
             _ => {}
         }
     }
@@ -272,6 +326,8 @@ pub struct Engine {
     view_moved: bool,
     // 입력 경계에 걸친 DECSTR(`CSI Ps ! p`)을 찾는 중인 상태.
     decstr: DecstrScan,
+    // 색 질의에 답할 호스트 색. 없으면 질의에 답하지 않는다.
+    colors: Option<Box<[u32; COLOR_SLOTS]>>,
 }
 
 impl Engine {
@@ -315,6 +371,8 @@ impl Engine {
             xterm_wide_leader: true,
             store_tabs: false,
             sgr21_double_underline: true,
+            // OSC 52는 엔진이 받고, 호스트가 허락했을 때만 넘긴다(set_clipboard_access).
+            osc52: Osc52::CopyPaste,
             ..Config::default()
         };
         let inbox = Listener::default();
@@ -332,6 +390,7 @@ impl Engine {
             scrolled_seen: 0,
             view_moved: false,
             decstr: DecstrScan::default(),
+            colors: None,
         }
     }
 
@@ -409,6 +468,7 @@ impl Engine {
 
     fn advance(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+        self.answer_color_queries();
         self.follow_scroll();
         self.tail.push(bytes);
         // vte 동기화 버퍼는 항상 입력 스트림의 연속된 끝부분이라 개수만으로 사본을 맞출 수 있다.
@@ -670,6 +730,96 @@ impl Engine {
         self.inbox.0.lock().ok().and_then(|mut i| i.title.take())
     }
 
+    /// Lets the program read and/or write the host's clipboards with OSC 52.
+    /// Both are off by default; requests that arrive while off are dropped.
+    pub fn set_clipboard_access(&mut self, read: bool, write: bool) {
+        if let Ok(mut inbox) = self.inbox.0.lock() {
+            inbox.clipboard_read = read;
+            inbox.clipboard_write = write;
+            if !read {
+                inbox.clipboard_reads.clear();
+                inbox.clipboard_pending.clear();
+            }
+            if !write {
+                inbox.clipboard_writes.clear();
+            }
+        }
+    }
+
+    /// The oldest text the program asked to put on a clipboard (OSC 52) that
+    /// the host has not taken yet. Invalid base64 is ignored.
+    pub fn take_clipboard_write(&mut self) -> Option<(Clipboard, String)> {
+        self.inbox.0.lock().ok()?.clipboard_writes.pop_front()
+    }
+
+    /// The oldest clipboard read (OSC 52 `?`) the host has not taken yet.
+    /// Answer it with [`Engine::reply_clipboard`].
+    pub fn take_clipboard_read(&mut self) -> Option<Clipboard> {
+        self.inbox.0.lock().ok()?.clipboard_reads.pop_front()
+    }
+
+    /// Answers the oldest unanswered read of `clipboard` with `text`. The
+    /// reply joins [`Engine::take_replies`] as xterm.js's clipboard addon
+    /// sends it (`OSC 52 ; Pc ; base64 BEL`). Returns `false` when no read of
+    /// that clipboard is waiting.
+    pub fn reply_clipboard(&mut self, clipboard: Clipboard, text: &str) -> bool {
+        let Ok(mut inbox) = self.inbox.0.lock() else {
+            return false;
+        };
+        let Some(at) = inbox
+            .clipboard_pending
+            .iter()
+            .position(|(c, _)| *c == clipboard)
+        else {
+            return false;
+        };
+        let (_, format) = inbox
+            .clipboard_pending
+            .remove(at)
+            .expect("position is in range");
+        let mut reply = format(text);
+        if let Some(body) = reply.strip_suffix("\x1b\\") {
+            reply = format!("{body}\x07");
+        }
+        inbox.replies.extend_from_slice(reply.as_bytes());
+        true
+    }
+
+    /// Colours that answer OSC 4/10/11/12 queries: [`COLOR_SLOTS`] entries
+    /// (palette 0–255, then foreground, background, cursor) as `0xRRGGBB`. A
+    /// colour the program itself set with OSC 4/10/11/12 answers instead.
+    /// `None`, the default, leaves the queries unanswered, as
+    /// `@xterm/headless` does.
+    pub fn set_colors(&mut self, colors: Option<[u32; COLOR_SLOTS]>) {
+        self.colors = colors.map(Box::new);
+    }
+
+    // 쌓인 색 질의에 답을 질의가 온 자리에 끼워 넣는다. 뒤에서부터 넣어 앞 위치가 밀리지 않게 한다.
+    fn answer_color_queries(&mut self) {
+        let inbox = self.inbox.clone();
+        let Ok(mut inbox) = inbox.0.lock() else {
+            return;
+        };
+        let queries = std::mem::take(&mut inbox.color_queries);
+        let Some(colors) = &self.colors else { return };
+        for (at, index, format) in queries.into_iter().rev() {
+            let host = colors.get(index).map(|&c| Rgb {
+                r: (c >> 16) as u8,
+                g: (c >> 8) as u8,
+                b: c as u8,
+            });
+            let Some(rgb) = self.term.colors()[index].or(host) else {
+                continue;
+            };
+            let mut reply = format(rgb);
+            // xterm.js는 질의가 BEL로 끝났어도 ST로 답한다.
+            if let Some(body) = reply.strip_suffix('\x07') {
+                reply = format!("{body}\x1b\\");
+            }
+            inbox.replies.splice(at..at, reply.into_bytes());
+        }
+    }
+
     /// Bells (`BEL`) received since the last call.
     pub fn take_bells(&mut self) -> u32 {
         self.inbox
@@ -689,6 +839,7 @@ impl Engine {
     pub fn flush_sync(&mut self) {
         if self.sync_pending() {
             self.parser.stop_sync(&mut self.term);
+            self.answer_color_queries();
             self.held.clear();
             self.follow_scroll();
         }

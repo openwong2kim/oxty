@@ -1,4 +1,7 @@
-use oxtty::{Cell, CellExtra, CursorShape, Damage, Engine, Hyperlink, attr, color, mode};
+use oxtty::{
+    COLOR_SLOTS, Cell, CellExtra, Clipboard, CursorShape, Damage, Engine, Hyperlink, attr, color,
+    mode,
+};
 
 fn term() -> Engine {
     Engine::new(80, 24, 1000)
@@ -447,4 +450,51 @@ fn decstr_split_across_feeds_resets_modes_and_ends_a_synchronized_update() {
     assert_ne!(t.modes() & mode::INSERT, 0);
     t.feed(b"\x1b[0!p");
     assert_eq!(t.modes() & mode::INSERT, 0);
+}
+
+#[test]
+fn color_queries_answer_only_with_host_colors_in_xterm_format_and_order() {
+    let mut t = term();
+    t.feed(b"\x1b]11;?\x07");
+    assert!(t.take_replies().is_empty());
+    let mut colors = [0u32; COLOR_SLOTS];
+    colors[1] = 0xcd3131;
+    colors[256] = 0xcccccc;
+    colors[257] = 0x1e1e2e;
+    t.set_colors(Some(colors));
+    // xterm.js: 16비트 채널(rrrr), 질의가 BEL로 끝나도 ST로 답하고, 다른 응답과 질의 순서를 지킨다.
+    t.feed(b"\x1b]11;?\x07\x1b[6n\x1b]4;1;?\x1b\\");
+    assert_eq!(
+        String::from_utf8(t.take_replies()).unwrap(),
+        "\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\\x1b[1;1R\x1b]4;1;rgb:cdcd/3131/3131\x1b\\"
+    );
+    // 프로그램이 OSC 4로 바꾼 색이 호스트 색보다 먼저다.
+    t.feed(b"\x1b]4;1;rgb:00/80/ff\x07\x1b]4;1;?\x07");
+    assert_eq!(
+        String::from_utf8(t.take_replies()).unwrap(),
+        "\x1b]4;1;rgb:0000/8080/ffff\x1b\\"
+    );
+}
+
+#[test]
+fn clipboard_requests_wait_for_host_access_and_replies_use_the_xterm_addon_format() {
+    let mut t = term();
+    t.feed(b"\x1b]52;c;aGk=\x07\x1b]52;c;?\x07");
+    assert_eq!(
+        (t.take_clipboard_write(), t.take_clipboard_read()),
+        (None, None)
+    );
+    t.set_clipboard_access(true, true);
+    t.feed(b"\x1b]52;c;aGk=\x07\x1b]52;p;?\x1b\\");
+    assert_eq!(
+        t.take_clipboard_write(),
+        Some((Clipboard::Clipboard, "hi".to_owned()))
+    );
+    assert_eq!(t.take_clipboard_read(), Some(Clipboard::Selection));
+    assert!(!t.reply_clipboard(Clipboard::Clipboard, "nope"));
+    assert!(t.reply_clipboard(Clipboard::Selection, "한글"));
+    assert_eq!(
+        String::from_utf8(t.take_replies()).unwrap(),
+        "\x1b]52;p;7ZWc6riA\x07"
+    );
 }

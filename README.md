@@ -222,6 +222,14 @@ change or a screen switch.
 `takeBells()`, `modes()` (cursor visibility, bracketed paste, mouse reporting,
 alternate screen, …).
 
+Clipboard and colour queries are the host's call and off until it opts in.
+`setClipboardAccess({ read, write })` lets OSC 52 through:
+`takeClipboardWrite()` hands over text to copy, `takeClipboardRead()` a
+clipboard to read, answered with `replyClipboard(selection, text)`.
+`setColors(colors)` (`COLOR_SLOTS` = 259 values: palette, foreground,
+background, cursor) answers OSC 4/10/11/12 queries. Replies are byte for byte
+what xterm.js and its clipboard addon send.
+
 </details>
 
 <details>
@@ -295,7 +303,8 @@ Requires Rust ≥ 1.85 and Node ≥ 18. Format with
 - [ ] **Input in Rust** — keyboard (including the kitty protocol), mouse and
       paste encoding shared by every host.
 - [ ] **Selection, search and link detection in Rust.**
-- [ ] **Host policy hooks** — OSC 52 clipboard, colour queries, hyperlinks.
+- [x] **Host policy hooks** — OSC 52 clipboard and OSC 4/10/11/12 colour
+      queries, off until the host opts in.
 - [ ] **Prebuilt N-API binaries** for Windows, macOS and Linux.
 - [ ] **Fuzzing.**
 
