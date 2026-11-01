@@ -12,6 +12,7 @@ use web_sys::HtmlElement;
 
 use crate::emitter::Emitter;
 use crate::engine::{get, mode, Engine, EngineView, LocalEngineView, Viewport};
+use crate::parser::Parsed;
 use crate::render::{Dirty, Renderer};
 use crate::timer;
 
@@ -100,6 +101,7 @@ pub(crate) struct Shared {
     pub events: Emitters,
     pub input: crate::input::Input,
     pub markers: RefCell<crate::markers::Markers>,
+    pub parser: crate::parser::ParserState,
     state: Cell<State>,
     /// Serialises OSC 52 reads so each answers the oldest pending read.
     clipboard_reads: RefCell<Promise>,
@@ -145,6 +147,10 @@ impl Terminal {
             let slot = slot.clone();
             Closure::<dyn FnMut()>::new(move || {
                 let weak = slot.borrow().clone();
+                // Hook: parser handlers of a hook the flush stopped at run now (the engine's own timer task).
+                if let Some(shared) = weak.upgrade() {
+                    crate::parser::after_sync_flush(&shared);
+                }
                 timer::queue(move || {
                     if let Some(shared) = weak.upgrade() {
                         shared.after_change();
@@ -176,6 +182,7 @@ impl Terminal {
             events: Emitters::default(),
             input: Default::default(),
             markers: RefCell::default(),
+            parser: Default::default(),
             state: Cell::new(State::default()),
             clipboard_reads: RefCell::new(Promise::resolve(&JsValue::UNDEFINED)),
             drain_timer: RefCell::new(None),
@@ -382,6 +389,7 @@ impl Terminal {
         core.view.engine().dispose();
         drop(core);
         crate::markers::drop_all(&self.shared);
+        crate::parser::dispose(&self.shared);
         self.shared.drain_timer.borrow_mut().take();
         self.shared.frame.borrow_mut().take();
         self.shared.options_proxy.borrow_mut().take();
@@ -419,10 +427,32 @@ impl Shared {
         }));
     }
 
-    /// Feeds queued writes for up to [`TIME_BUDGET_MS`]. A crashed engine drops the chunk it was fed.
+    /// Whether writes wait in the queue.
+    pub(crate) fn writes_queued(&self) -> bool {
+        !self.core.borrow().queue.is_empty()
+    }
+
+    /// Feeds queued writes for up to [`TIME_BUDGET_MS`]. A crashed engine drops the chunk it was fed. An async
+    /// parser handler holds the queue: the chunk it stopped in stays first, its callback waits.
     fn drain(self: &Rc<Self>) {
+        if crate::parser::paused(self) {
+            return;
+        }
         let start = timer::now();
+        let mut paused = false;
         loop {
+            let (slice, rest) = {
+                let core = self.core.borrow();
+                if core.disposed {
+                    return;
+                }
+                let Some(chunk) = core.queue.front() else {
+                    break;
+                };
+                split_chunk(&chunk.data)
+            };
+            // Hook: parser handlers run in here, with no borrow held.
+            let fed = crate::parser::feed(self, &slice);
             let finished = {
                 let mut core = self.core.borrow_mut();
                 if core.disposed {
@@ -431,17 +461,22 @@ impl Shared {
                 let Some(chunk) = core.queue.front_mut() else {
                     break;
                 };
-                let (slice, rest) = split_chunk(&chunk.data);
-                let fed = core.view.engine().write(&slice);
-                let chunk = core.queue.front_mut().unwrap();
                 match (fed, rest) {
-                    (Ok(()), Some(rest)) => {
+                    (Ok(Parsed::Paused), rest) => {
+                        chunk.data = rest.unwrap_or_else(|| JsValue::from_str(""));
+                        paused = true;
+                        None
+                    }
+                    (Ok(Parsed::Done), Some(rest)) => {
                         chunk.data = rest;
                         None
                     }
-                    _ => Some(core.queue.pop_front().unwrap().callback),
+                    _ => core.queue.pop_front().map(|chunk| chunk.callback),
                 }
             };
+            if paused {
+                break;
+            }
             if let Some(callback) = finished {
                 self.handle_events();
                 // Hook: selection syncs to the output just parsed, before the callback reads it.
@@ -455,14 +490,16 @@ impl Shared {
                 break;
             }
         }
-        if !self.core.borrow().queue.is_empty() {
+        if !paused && self.writes_queued() {
             self.schedule_drain();
         }
         if self.core.borrow().disposed {
             return;
         }
         self.handle_events();
-        self.events.write_parsed.fire(&[]);
+        if !paused {
+            self.events.write_parsed.fire(&[]);
+        }
         self.after_change();
     }
 
