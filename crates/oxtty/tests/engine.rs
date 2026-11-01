@@ -533,3 +533,20 @@ fn cached_history_rows_follow_a_reflow() {
         assert_eq!(rows(&packed), rows(&plain), "{cols}x{lines}");
     }
 }
+
+#[test]
+fn a_wide_char_over_a_wide_spacer_leaves_a_narrow_blank() {
+    let mut t = term();
+    t.feed("漢字\x08🚀".as_bytes());
+    let mut cells = Vec::new();
+    t.row_cells(0, &mut cells);
+    assert_eq!(
+        (
+            cells[2].ch,
+            cells[2].attrs & (attr::WIDE | attr::WIDE_SPACER)
+        ),
+        (' ', 0)
+    );
+    assert_eq!(cells[3].ch, '🚀');
+    assert_ne!(cells[3].attrs & attr::WIDE, 0);
+}

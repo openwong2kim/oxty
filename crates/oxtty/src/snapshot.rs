@@ -12,7 +12,7 @@ use crate::history::History;
 use crate::vt::event::EventListener;
 use crate::vt::grid::{Dimensions, Grid, Row};
 use crate::vt::index::{Column, Line};
-use crate::vt::term::cell::{Cell, Flags};
+use crate::vt::term::cell::{Cell, Flags, Hyperlink};
 use crate::vt::term::{Term, TermMode};
 use crate::vt::vte::ansi::{Color, NamedColor};
 use std::fmt::{self, Write};
@@ -166,25 +166,15 @@ fn step(state: Scan, b: u8) -> Scan {
 
 /// Number of incomplete UTF-8 bytes at the end (0~3). wmux `incompleteUtf8SuffixLength`.
 fn incomplete_utf8_suffix_len(buf: &[u8]) -> usize {
-    for back in 1..=buf.len().min(3) {
-        let b = buf[buf.len() - back];
-        if b & 0b1100_0000 == 0b1000_0000 {
-            continue;
-        }
-        let expected = if b & 0b1000_0000 == 0 {
-            1
-        } else if b & 0b1110_0000 == 0b1100_0000 {
-            2
-        } else if b & 0b1111_0000 == 0b1110_0000 {
-            3
-        } else if b & 0b1111_1000 == 0b1111_0000 {
-            4
-        } else {
-            return 0;
-        };
-        return if expected > back { back } else { 0 };
-    }
-    0
+    // vte keeps exactly what `from_utf8` calls an unfinished character at the end; bytes that can
+    // never start a character (E0 80, a lone continuation) were already handled as invalid.
+    (1..=buf.len().min(3))
+        .rev()
+        .find(|&n| {
+            std::str::from_utf8(&buf[buf.len() - n..])
+                .is_err_and(|e| e.valid_up_to() == 0 && e.error_len().is_none())
+        })
+        .unwrap_or(0)
 }
 
 /// The body of [`crate::Engine::ansi_snapshot`]. The rejection order is the same as wmux: margins → tail overflow → wide edge.
@@ -284,6 +274,21 @@ fn style(cell: &Cell) -> String {
     out
 }
 
+/// Opens `link` or closes the open one. A program's own id is kept so separate runs of one
+/// link stay one link; an id Alacritty generated is left out, and the receiver generates its
+/// own (a new run starts wherever the link changes, so links stay apart).
+fn link(out: &mut String, link: Option<&Hyperlink>) {
+    match link {
+        Some(link) if link.id().ends_with("_alacritty") => {
+            let _ = write!(out, "\x1b]8;;{}\x1b\\", link.uri());
+        }
+        Some(link) => {
+            let _ = write!(out, "\x1b]8;id={};{}\x1b\\", link.id(), link.uri());
+        }
+        None => out.push_str("\x1b]8;;\x1b\\"),
+    }
+}
+
 fn glyph(out: &mut String, cell: &Cell) {
     // Writing the '\t' left in the first cell a tab passed over as is would make xterm execute it as a tab again.
     out.push(if cell.c == '\t' { ' ' } else { cell.c });
@@ -307,14 +312,26 @@ fn cursor(out: &mut String, grid: &Grid<Cell>) {
     if grid.cursor.input_needs_wrap {
         let cell = &grid[point.line][Column(col)];
         out.push_str(&style(cell));
+        let edge = cell.hyperlink();
+        if edge.is_some() {
+            link(out, edge.as_ref());
+        }
         glyph(out, cell);
+        if edge.is_some() {
+            link(out, None);
+        }
     }
     out.push_str(&style(&grid.cursor.template));
+    // The program may be in the middle of writing a link.
+    if let Some(open) = grid.cursor.template.hyperlink() {
+        link(out, Some(&open));
+    }
 }
 
 /// `older` is the compressed history older than this grid (primary screen only).
 fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
     let mut previous_style = String::new();
+    let mut previous_link: Option<Hyperlink> = None;
     let mut row = |out: &mut String, line: &Row<Cell>, last: bool| {
         for cell in &line[..] {
             if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
@@ -324,6 +341,11 @@ fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
             if next_style != previous_style {
                 out.push_str(&next_style);
                 previous_style = next_style;
+            }
+            let next_link = cell.hyperlink();
+            if next_link != previous_link {
+                link(out, next_link.as_ref());
+                previous_link = next_link;
             }
             glyph(out, cell);
         }
@@ -339,6 +361,9 @@ fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
     }
     for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
         row(out, &grid[Line(y)], y == grid.screen_lines() as i32 - 1);
+    }
+    if previous_link.is_some() {
+        link(out, None);
     }
 }
 
@@ -373,6 +398,10 @@ fn serialize<T: EventListener>(
         screen(&mut out, term.inactive_grid(), older);
         cursor(&mut out, term.inactive_grid());
         out.push_str("\x1b[?1049h\x1b[0m\x1b[H");
+        // SGR 0 leaves an OSC 8 link open; the primary pen's link is saved with 1049 and must not spill.
+        if term.inactive_grid().cursor.template.hyperlink().is_some() {
+            link(&mut out, None);
+        }
     }
     screen(&mut out, term.grid(), if alt { None } else { older });
     // Turning on DECOM sends the cursor home, so emit it before CUP (margins are rejected, so CUP is relative to the whole screen).

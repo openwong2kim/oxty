@@ -1159,8 +1159,10 @@ impl<T> Term<T> {
                 self.grid[point.line][point.column + 1].flags.remove(Flags::WIDE_CHAR_SPACER);
             } else if point.column > 0 {
                 if self.config.xterm_wide_leader {
+                    // The pen, minus the width flags `input` sets on it while writing a wide char.
                     let mut blank = self.grid.cursor.template.clone();
                     blank.c = ' ';
+                    blank.flags.remove(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER);
                     self.grid[point.line][point.column - 1] = blank;
                 } else {
                     self.grid[point.line][point.column - 1].clear_wide();
