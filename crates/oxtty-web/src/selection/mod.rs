@@ -482,8 +482,16 @@ fn handle_triple_click(shared: &Rc<Shared>, event: &MouseEvent) {
     }
 }
 
-/// xterm.js `_selectWordAtCursor`: the word under the mouse.
+/// xterm.js `_selectWordAtCursor`: the hovered link, else the word under the mouse.
 fn select_word_at_cursor(shared: &Rc<Shared>, event: &MouseEvent, allow_whitespace: bool) -> bool {
+    if let Some(range) = crate::links::current_link_range(shared) {
+        let cols = size(shared).map_or(0.0, |s| s.cols);
+        let mut s = shared.selection.borrow_mut();
+        s.model.start = Some(point(range[0] - 1.0, range[1] - 1.0));
+        s.model.start_length = range_length(range, cols);
+        s.model.end = None;
+        return true;
+    }
     if let Some(coords) = mouse_buffer_coords(shared, event) {
         select_word_at(shared, coords.get(), allow_whitespace);
         shared.selection.borrow_mut().model.end = None;

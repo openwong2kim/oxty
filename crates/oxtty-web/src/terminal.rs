@@ -102,6 +102,7 @@ pub(crate) struct Shared {
     pub input: crate::input::Input,
     pub markers: RefCell<crate::markers::Markers>,
     pub selection: RefCell<crate::selection::Selection>,
+    pub links: crate::links::Links,
     state: Cell<State>,
     /// Serialises OSC 52 reads so each answers the oldest pending read.
     clipboard_reads: RefCell<Promise>,
@@ -179,6 +180,7 @@ impl Terminal {
             input: Default::default(),
             markers: RefCell::default(),
             selection: RefCell::default(),
+            links: Default::default(),
             state: Cell::new(State::default()),
             clipboard_reads: RefCell::new(Promise::resolve(&JsValue::UNDEFINED)),
             drain_timer: RefCell::new(None),
@@ -338,8 +340,9 @@ impl Terminal {
             }
             rows != old_rows
         };
-        // The selection drops on row changes, before `onResize` (xterm.js).
+        // The selection drops on row changes and the hovered link is let go, before `onResize` (xterm.js).
         crate::selection::after_resize(&self.shared, rows_changed);
+        crate::links::after_resize(&self.shared);
         crate::input::after_resize(&self.shared);
         self.shared.sync_screen_size();
         let size = Object::new();
@@ -382,6 +385,7 @@ impl Terminal {
         // Hook: input, mouse, selection and accessibility remove their listeners here.
         crate::input::dispose(&self.shared);
         crate::selection::dispose(&self.shared);
+        crate::links::dispose(&self.shared);
         core.renderer = None;
         if let Some(element) = core.element.take() {
             element.remove();
@@ -640,6 +644,7 @@ impl Shared {
             core.dirty = Dirty::All;
         }
         crate::selection::handle_crash(self);
+        crate::links::after_resize(self);
         crate::markers::drop_all(self);
         self.after_change();
     }
@@ -660,7 +665,7 @@ impl Shared {
 
     fn render_frame(self: &Rc<Self>) {
         self.handle_renderer_requests();
-        let rows = {
+        let (rows, content) = {
             let mut core = self.core.borrow_mut();
             if core.disposed || core.element.is_none() {
                 return;
@@ -681,14 +686,21 @@ impl Shared {
             // The selection is handed over before the draw, so the rows it moved to are drawn now.
             crate::selection::paint(self, renderer.as_mut(), viewport);
             renderer.render(viewport, &changed, &dirty);
-            match dirty {
+            // The rows whose content changed (ascending), not those only redrawn
+            let content = changed.first().zip(changed.last()).map(|(&a, &b)| (a, b));
+            let rows = match dirty {
                 Dirty::All => Some((0, viewport.rows.saturating_sub(1))),
                 Dirty::Rows(rows) => changed.iter().chain(&rows).fold(None, |range, &y| {
                     Some(range.map_or((y, y), |(a, b): (u32, u32)| (a.min(y), b.max(y))))
                 }),
-            }
+            };
+            (rows, content)
         };
         crate::input::after_frame(self);
+        // A hovered link on rows the output changed is looked up again (xterm.js `onRenderedViewportChange`).
+        if let Some((start, end)) = content {
+            crate::links::after_render(self, start, end);
+        }
         if let Some((start, end)) = rows {
             let range = Object::new();
             let _ = Reflect::set(&range, &"start".into(), &start.into());

@@ -71,6 +71,16 @@ license (`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
 authors, MIT license (`crates/oxtty/LICENSE-XTERM`). Each file names its source
 lines.
 
+## xterm.js links
+
+`crates/oxtty-web/src/links.rs` is a Rust port of xterm.js 6.1.0-beta.336 and
+`@xterm/addon-web-links` 0.13.0-beta.330 (commit
+08829c7eb6279dda2a9e86df901353a1a89858ca): `src/browser/Linkifier.ts`,
+`src/browser/OscLinkProvider.ts`, `src/browser/services/LinkProviderService.ts`,
+`addons/addon-web-links/src/WebLinksAddon.ts` and `WebLinkProvider.ts`,
+Copyright (c) 2019-2022 The xterm.js authors, MIT license
+(`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
+
 ## wmux
 
 The engine integration started in

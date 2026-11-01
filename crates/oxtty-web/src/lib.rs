@@ -32,6 +32,7 @@ pub mod engine;
 pub mod events;
 pub mod fit;
 mod input;
+pub mod links;
 pub mod markers;
 pub mod options;
 pub mod render;

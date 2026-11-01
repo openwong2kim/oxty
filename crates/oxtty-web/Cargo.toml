@@ -64,6 +64,7 @@ features = [
     "ResizeObserverOptions",
     "TextMetrics",
     "UiEvent",
+    "Url",
     "WebGl2RenderingContext",
     "WebGlBuffer",
     "WebGlContextAttributes",

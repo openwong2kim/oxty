@@ -49,6 +49,8 @@ const STYLE_ID: &str = "oxtty-xterm-input-style";
 /// The xterm.css rules of the textarea, the composition view and the mouse cursor while the program takes clicks.
 const STYLE: &str = "
 .xterm.enable-mouse-events { cursor: default; }
+.xterm.xterm-cursor-pointer, .xterm .xterm-cursor-pointer { cursor: pointer; }
+.xterm.column-select.focus { cursor: crosshair; }
 .xterm .xterm-helper-textarea { padding: 0; border: 0; margin: 0; position: absolute; opacity: 0; left: -9999em; top: 0; width: 0; height: 0; z-index: -5; white-space: nowrap; overflow: hidden; resize: none; }
 .xterm .composition-view { background: #000; color: #FFF; display: none; position: absolute; white-space: nowrap; z-index: 1; }
 .xterm .composition-view.active { display: block; }
@@ -109,7 +111,7 @@ enum Target {
 }
 
 /// Listeners on from `open` to `dispose`: target, type, capture, and whether it may cancel (`passive: false`).
-const STATIC: [(Target, &str, bool, bool); 18] = [
+const STATIC: [(Target, &str, bool, bool); 21] = [
     (Target::Textarea, "focus", false, false),
     (Target::Textarea, "blur", false, false),
     (Target::Textarea, "keyup", true, false),
@@ -131,8 +133,11 @@ const STATIC: [(Target, &str, bool, bool); 18] = [
     (Target::Element, "copy", false, false),
     (Target::Element, "contextmenu", false, false),
     (Target::Element, "auxclick", false, false),
-    // The column-select cursor.
+    // The column-select cursor, then the link under the mouse (xterm.js `Linkifier`).
     (Target::Screen, "mousemove", false, false),
+    (Target::Screen, "mouseleave", false, false),
+    (Target::Screen, "mousedown", false, false),
+    (Target::Screen, "mouseup", false, false),
 ];
 
 /// Listeners that come and go with the mouse state, as bits.
@@ -352,7 +357,19 @@ fn handle_event(shared: &Rc<Shared>, event: Event) {
                 }
             }
         }
-        (Target::Screen, "mousemove") => crate::selection::update_cursor_style(shared, &event),
+        (Target::Screen, "mousemove") => {
+            crate::selection::update_cursor_style(shared, &event);
+            if let Some(e) = cast(&event) {
+                crate::links::mouse_move(shared, e);
+            }
+        }
+        (Target::Screen, "mouseleave") => crate::links::mouse_leave(shared),
+        (Target::Screen, "mousedown") => crate::links::mouse_down(shared),
+        (Target::Screen, "mouseup") => {
+            if let Some(e) = cast(&event) {
+                crate::links::mouse_up(shared, e);
+            }
+        }
         (Target::Document, "mouseup") => {
             if let Some(e) = cast(&event) {
                 mouse::document_mouse_up(shared, e);

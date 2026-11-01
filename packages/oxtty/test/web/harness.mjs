@@ -1,7 +1,7 @@
 // Browser tests for oxtty/xterm: serves the package directory, opens a page module in headless system Chrome
 // (SwiftShader WebGL2) and hands the page to the test. Page modules import 'oxtty/xterm' (the built dist) and
-// real xterm.js as '@xterm/xterm' / '@xterm/addon-webgl' / '@xterm/addon-unicode11' through an import map, so both
-// run side by side; 'oxtty' is the engine (index.js) for its crash trigger.
+// real xterm.js as '@xterm/xterm' / '@xterm/addon-webgl' / '@xterm/addon-unicode11' / '@xterm/addon-web-links' through
+// an import map, so both run side by side; 'oxtty' is the engine (index.js) for its crash trigger.
 import { chromium } from 'playwright-core';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -16,6 +16,7 @@ const IMPORTS = {
   '@xterm/xterm': '/node_modules/@xterm/xterm/lib/xterm.mjs',
   '@xterm/addon-webgl': '/node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs',
   '@xterm/addon-unicode11': '/node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs',
+  '@xterm/addon-web-links': '/node_modules/@xterm/addon-web-links/lib/addon-web-links.mjs',
 };
 
 /**

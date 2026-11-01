@@ -88,8 +88,8 @@
       "reason": "crates/oxtty-web/src/input/mouse.rs should_force_selection: on macOS, Option+click is not reported to the program and selects, and Option no longer makes a column selection (xterm.js shouldForceSelection, shouldColumnSelect); selection.test.mjs compares it with xterm.js."
     },
     "options.linkHandler": {
-      "status": "later",
-      "reason": "Links step (OSC 8 + regex detection)."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/links.rs, a port of xterm.js OscLinkProvider: OSC 8 links activate, hover and leave through linkHandler with their 1-based range (wrapped links across rows), non-http links only with allowNonHttpProtocols, and without a handler the default confirm-then-open; links.test.mjs compares every callback with xterm.js."
     },
     "options.screenReaderMode": {
       "status": "later",
@@ -212,8 +212,8 @@
       "reason": "Needs an engine hook (viewerParser DECRQSS)."
     },
     "Terminal.registerLinkProvider": {
-      "status": "later",
-      "reason": "Links step."
+      "status": "supported",
+      "reason": "A port of xterm.js Linkifier and LinkProviderService: providers are asked after the OSC 8 links in registration order, synchronously or on a later task; the earliest provider with a link under the mouse wins and later overlapping links are dropped; hover underline (the renderer's \"link\" layer), pointer cursor and activation on mouseup like xterm.js. A link's decorations are read when it is hovered (later changes are not followed)."
     },
     "Terminal.registerMarker": {
       "status": "supported",
@@ -385,8 +385,9 @@
       "reason": "loadAddon throws; Terminal.ansiSnapshot() (engine) replaces it. coldFrame's scrollback:0 + excludeModes variant needs an engine option (later)."
     },
     "WebLinksAddon": {
-      "status": "later",
-      "reason": "Links step (OSC 8 + regex detection); loadAddon throws until then."
+      "status": "supported",
+      "reason": "Built in (crates/oxtty-web/src/links.rs), a port of @xterm/addon-web-links 0.13.0-beta.330 accepted by loadAddon: the same URL pattern (a JS RegExp, or options.urlRegex), URL check, wrapped-line windows and handler, hover and leave options; links.test.mjs compares it with the real addon. Load this package's WebLinksAddon; the npm addon is refused by loadAddon.",
+      "exercisedBy": "new WebLinksAddon\\("
     },
     "ImageAddon": {
       "status": "later",

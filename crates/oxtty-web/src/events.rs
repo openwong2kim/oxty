@@ -139,6 +139,21 @@ pub(crate) fn event(shared: &Rc<Shared>, event: Event) -> Function {
     })
 }
 
+/// The page-wide id of a terminal, for page-wide callbacks bound to it (link provider replies).
+pub(crate) fn terminal_id(shared: &Rc<Shared>) -> u32 {
+    id_of(shared)
+}
+
+/// The terminal of an id from [`terminal_id`], while it lives.
+pub(crate) fn terminal_of(id: u32) -> Option<Rc<Shared>> {
+    TERMINALS.with(|list| {
+        list.borrow()
+            .iter()
+            .find(|(i, _)| *i == id)
+            .and_then(|(_, w)| w.upgrade())
+    })
+}
+
 fn id_of(shared: &Rc<Shared>) -> u32 {
     TERMINALS.with(|list| {
         let mut list = list.borrow_mut();
