@@ -53,7 +53,7 @@
     },
     "options.scrollbar": {
       "status": "supported",
-      "reason": "Only the width FitAddon keeps free (xterm.js 14px default; none without scrollback or with showScrollbar false); no scrollbar is drawn yet."
+      "reason": "showScrollbar builds or removes the .xterm-scrollable-element bar at runtime, width sizes it (xterm.js 14px default); FitAddon keeps the same width free (none without scrollback). showArrows is not drawn."
     },
     "options.allowProposedApi": {
       "status": "supported",
@@ -92,8 +92,8 @@
       "reason": "crates/oxtty-web/src/links.rs, a port of xterm.js OscLinkProvider: OSC 8 links activate, hover and leave through linkHandler with their 1-based range (wrapped links across rows), non-http links only with allowNonHttpProtocols, and without a handler the default confirm-then-open; links.test.mjs compares every callback with xterm.js."
     },
     "options.screenReaderMode": {
-      "status": "later",
-      "reason": "Accessibility."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/a11y.rs (AccessibilityManager port): the row tree with aria-posinset/setsize refreshed at most once a second, boundary focus scrolling, an aria-live region fed from the cursor's movement between frames (the engine has no per-character stream; lines that scroll out within one frame cannot be read), toggled at runtime; nothing allocated while off. The selectionchange mapping is not ported."
     },
     "options.windowsPty": {
       "status": "supported",
@@ -109,7 +109,7 @@
     },
     "Terminal.open": {
       "status": "supported",
-      "reason": "Builds the xterm.js DOM (.terminal.xterm > .xterm-screen > .xterm-helpers); opening again moves the element."
+      "reason": "Builds the xterm.js DOM (.terminal.xterm > .xterm-scrollable-element > .xterm-screen > .xterm-helpers, the wrapper while the scrollbar is shown); opening again moves the element."
     },
     "Terminal.write": {
       "status": "supported",
@@ -200,16 +200,19 @@
       "reason": "xterm.js SelectionService.setSelection (JavaScript numbers, so API input behaves the same); does nothing before open() (xterm.js throws). The built-in SearchAddon selects its match through it."
     },
     "Terminal.parser.registerOscHandler": {
-      "status": "later",
-      "reason": "Needs an engine hook. OSC 52 is covered by the clipboard option; OSC 133/7792 and the viewer OSC 4/10/11/12 handlers are not."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/parser.rs on the engine's parser hooks (setHook while a handler exists, writeUntilHook/pendingHook/finishHook/resume): newest first, true skips the default, a Promise holds the write queue, output before the sequence reaches the host first. A throwing handler counts as false and is rethrown on a later task. OSC 52 still goes through the clipboard option.",
+      "exercisedBy": "registerOscHandler\\("
     },
     "Terminal.parser.registerCsiHandler": {
-      "status": "later",
-      "reason": "Needs an engine hook (replyParity, shellPromptModeReset, viewerParser)."
+      "status": "supported",
+      "reason": "As registerOscHandler; identifiers are checked with xterm.js's errors. An empty sub-parameter is 0 (xterm.js -1).",
+      "exercisedBy": "registerCsiHandler\\("
     },
     "Terminal.parser.registerDcsHandler": {
-      "status": "later",
-      "reason": "Needs an engine hook (viewerParser DECRQSS)."
+      "status": "supported",
+      "reason": "As registerCsiHandler; the handler gets the whole payload when the sequence ends. The engine does not answer DECRQSS itself, so a handler falling through sends nothing (xterm.js replies).",
+      "exercisedBy": "registerDcsHandler\\("
     },
     "Terminal.registerLinkProvider": {
       "status": "supported",
@@ -455,8 +458,9 @@
       "reason": "The ported CompositionHelper fills it while composing (between LRM marks) and places it at the cursor (style.left/top) with the textarea under it, on every frame and once more a task later."
     },
     "DOM .xterm-scrollable-element .scrollbar": {
-      "status": "later",
-      "reason": "No scrollbar is drawn yet."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/scrollbar.rs: .xterm-scrollable-element wraps .xterm-screen with .xterm-scrollbar.xterm-vertical > .xterm-slider (the class names xterm.js 6.1.0-beta.336 uses; wmux's .scrollbar/.slider selectors match neither), the same inline sizes, xterm-visible/xterm-invisible/xterm-fade and xterm-active classes; slider drags and track presses scroll the view. No horizontal bar, arrows or shadows; the wheel is the mouse module's.",
+      "exercisedBy": "\\.xterm-scrollbar\\.xterm-vertical"
     },
     "CSS @xterm/xterm/css/xterm.css": {
       "status": "unsupported",
@@ -473,8 +477,9 @@
       "exercisedBy": "window\\.synthetic\\("
     },
     "write() from inside parser handlers": {
-      "status": "later",
-      "reason": "With the parser hooks."
+      "status": "supported",
+      "reason": "Queued behind the writes already waiting and parsed after the data being parsed, like xterm.js (parser.rs, terminal.rs drain).",
+      "exercisedBy": "write\\(\\) from inside a handler"
     }
   }
 }

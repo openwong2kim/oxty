@@ -17,6 +17,7 @@
   - **Renderer**: raw WebGL2 through web-sys, glyphs rasterised with Canvas2D `fillText` (same font fallback as xterm.js). For the memory goal it shares **one WebGL2 context and one glyph atlas per page** across all panes (not one per pane as xterm.js and the old front end did), so 17+ panes neither hit Chrome's ~16-context limit nor multiply GPU memory; hidden panes skip drawing.
   - **Input encoding moves into the engine crate** (`crates/oxtty/src/input`, platform-neutral `KeyInput`/`MouseInput`), pulling M3 forward.
   - The xterm.js parity harnesses come back as JS tests against the new build (`packages/oxtty/test/web`).
+- **Images in Rust (owner decision, 2026-11-01; answers §10.2 question 1)**: wmux uses `@xterm/addon-image`, so oxtty implements what it supports (sixel and the iTerm2 inline image protocol, OSC 1337) instead of leaving images on the xterm.js path; graphics move from "after 1.0" into the wmux adoption scope. Image memory counts against the primary goal: bounded storage per page, images freed when their cells scroll out or are overwritten.
 
 ### v0.3 change summary
 
@@ -268,7 +269,7 @@ M2 runs on key input code borrowed from xterm.js. M3 moves encoding to Rust.
 | Unicode | Character widths use the same table as the xterm.js Unicode 11 provider |
 | Determinism | No clock, threads or randomness in the engine. Same input → same screen |
 | Stability | 0 panics in wasm (verified by fuzzing); invalid input is ignored and processing continues |
-| Size | Engine wasm 340KB or less (302KB on 2026-11-01, with search, markers and the vte fork; raised from 300KB because one instance serves every pane on a page, so the code is paid once, not per terminal); front-end wasm (`oxtty/xterm`) 600KB or less, checked by `scripts/build-web.sh`; both also by `test/web/size.test.mjs` |
+| Size | Engine wasm 340KB or less (302KB on 2026-11-01, with search, markers and the vte fork; raised from 300KB because one instance serves every pane on a page, so the code is paid once, not per terminal); front-end wasm (`oxtty/xterm`) 800KB or less (557KB on 2026-11-01 with the renderer, input, search, parser hooks, accessibility and scrollbar; raised from 600KB for selection, links and images on the same one-instance-per-page reasoning — `opt-level = "z"` would save 13% but slows the per-frame renderer code), checked by `scripts/build-web.sh`; both also by `test/web/size.test.mjs` |
 | Performance | `write`→frame end-to-end throughput at or above xterm.js on the same corpus. The target value is set after the M1 baseline measurement |
 | Memory | Publish the scrollback memory caused by the cell size (24B) in the README; consider compressed storage before 1.0 (D6) |
 | Platforms | Native on Windows, macOS and Linux, modern browsers, Node 18 or later |

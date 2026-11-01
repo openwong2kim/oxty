@@ -12,6 +12,7 @@ use web_sys::HtmlElement;
 
 use crate::emitter::Emitter;
 use crate::engine::{get, mode, Engine, EngineView, LocalEngineView, Viewport};
+use crate::parser::Parsed;
 use crate::render::{Dirty, Renderer};
 use crate::timer;
 
@@ -23,12 +24,26 @@ const SLICE: u32 = 16 * 1024;
 const INIT_ONLY: [&str; 3] = ["cols", "rows", "scrollback"];
 
 const STYLE_ID: &str = "oxtty-xterm-style";
+/// The accessibility and scrollbar rules are xterm.js 6.1.0-beta.336 `css/xterm.css` lines 133–166 and 218–262
+/// (commit 08829c7eb6279dda2a9e86df901353a1a89858ca, MIT), with the default theme's slider colours.
 const STYLE: &str = "
 .xterm { position: relative; cursor: text; user-select: none; -webkit-user-select: none; }
 .xterm .xterm-screen { position: relative; }
 .xterm .xterm-screen canvas { position: absolute; left: 0; top: 0; }
 .xterm .xterm-helpers { position: absolute; top: 0; z-index: 5; }
 .xterm.focus, .xterm:focus { outline: none; }
+.xterm .xterm-accessibility { position: absolute; left: 0; top: 0; bottom: 0; right: 0; z-index: 10; color: transparent; pointer-events: none; }
+.xterm .xterm-accessibility-tree *::selection { color: transparent; }
+.xterm .xterm-accessibility-tree { font-family: monospace; user-select: text; white-space: pre; }
+.xterm .xterm-accessibility-tree > div { transform-origin: left; width: fit-content; }
+.xterm .live-region { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.xterm .xterm-scrollable-element > .xterm-scrollbar { cursor: default; }
+.xterm .xterm-scrollable-element > .xterm-visible { opacity: 1; background: rgba(0,0,0,0); transition: opacity 100ms linear; z-index: 11; }
+.xterm .xterm-scrollable-element > .xterm-invisible { opacity: 0; pointer-events: none; }
+.xterm .xterm-scrollable-element > .xterm-invisible.xterm-fade { transition: opacity 800ms linear; }
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider { background: #ffffff33; }
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider:hover { background: #ffffff66; }
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider.xterm-active { background: #ffffff80; }
 ";
 
 /// One `write()` waiting for the engine. `data` is a string or a `Uint8Array`.
@@ -48,6 +63,10 @@ pub(crate) struct Core {
     pub screen: Option<HtmlElement>,
     /// Hook: the renderer module creates it in `open`.
     pub renderer: Option<Box<dyn Renderer>>,
+    /// While `options.screenReaderMode` is on.
+    pub a11y: Option<crate::a11y::A11y>,
+    /// While `options.scrollbar.showScrollbar` is not false.
+    pub scrollbar: Option<crate::scrollbar::Scrollbar>,
     pub dirty: Dirty,
     queue: VecDeque<Chunk>,
     /// A high surrogate a string `write` ended with, joined to the next one.
@@ -103,6 +122,7 @@ pub(crate) struct Shared {
     pub markers: RefCell<crate::markers::Markers>,
     pub selection: RefCell<crate::selection::Selection>,
     pub links: crate::links::Links,
+    pub parser: crate::parser::ParserState,
     state: Cell<State>,
     /// Serialises OSC 52 reads so each answers the oldest pending read.
     clipboard_reads: RefCell<Promise>,
@@ -148,6 +168,10 @@ impl Terminal {
             let slot = slot.clone();
             Closure::<dyn FnMut()>::new(move || {
                 let weak = slot.borrow().clone();
+                // Hook: parser handlers of a hook the flush stopped at run now (the engine's own timer task).
+                if let Some(shared) = weak.upgrade() {
+                    crate::parser::after_sync_flush(&shared);
+                }
                 timer::queue(move || {
                     if let Some(shared) = weak.upgrade() {
                         shared.after_change();
@@ -170,6 +194,8 @@ impl Terminal {
                 element: None,
                 screen: None,
                 renderer: None,
+                a11y: None,
+                scrollbar: None,
                 dirty: Dirty::All,
                 queue: VecDeque::new(),
                 high_surrogate: None,
@@ -181,6 +207,7 @@ impl Terminal {
             markers: RefCell::default(),
             selection: RefCell::default(),
             links: Default::default(),
+            parser: Default::default(),
             state: Cell::new(State::default()),
             clipboard_reads: RefCell::new(Promise::resolve(&JsValue::UNDEFINED)),
             drain_timer: RefCell::new(None),
@@ -288,7 +315,9 @@ impl Terminal {
         core.dirty = Dirty::All;
         drop(core);
         crate::selection::open(&self.shared);
+        self.shared.apply_scrollbar();
         self.shared.create_renderer()?;
+        self.shared.apply_screen_reader_mode();
         self.shared.schedule_frame();
         Ok(())
     }
@@ -386,6 +415,8 @@ impl Terminal {
         crate::input::dispose(&self.shared);
         crate::selection::dispose(&self.shared);
         crate::links::dispose(&self.shared);
+        core.a11y = None;
+        core.scrollbar = None;
         core.renderer = None;
         if let Some(element) = core.element.take() {
             element.remove();
@@ -394,6 +425,7 @@ impl Terminal {
         core.view.engine().dispose();
         drop(core);
         crate::markers::drop_all(&self.shared);
+        crate::parser::dispose(&self.shared);
         self.shared.drain_timer.borrow_mut().take();
         self.shared.frame.borrow_mut().take();
         self.shared.options_proxy.borrow_mut().take();
@@ -432,10 +464,32 @@ impl Shared {
         }));
     }
 
-    /// Feeds queued writes for up to [`TIME_BUDGET_MS`]. A crashed engine drops the chunk it was fed.
+    /// Whether writes wait in the queue.
+    pub(crate) fn writes_queued(&self) -> bool {
+        !self.core.borrow().queue.is_empty()
+    }
+
+    /// Feeds queued writes for up to [`TIME_BUDGET_MS`]. A crashed engine drops the chunk it was fed. An async
+    /// parser handler holds the queue: the chunk it stopped in stays first, its callback waits.
     fn drain(self: &Rc<Self>) {
+        if crate::parser::paused(self) {
+            return;
+        }
         let start = timer::now();
+        let mut paused = false;
         loop {
+            let (slice, rest) = {
+                let core = self.core.borrow();
+                if core.disposed {
+                    return;
+                }
+                let Some(chunk) = core.queue.front() else {
+                    break;
+                };
+                split_chunk(&chunk.data)
+            };
+            // Hook: parser handlers run in here, with no borrow held.
+            let fed = crate::parser::feed(self, &slice);
             let finished = {
                 let mut core = self.core.borrow_mut();
                 if core.disposed {
@@ -444,17 +498,22 @@ impl Shared {
                 let Some(chunk) = core.queue.front_mut() else {
                     break;
                 };
-                let (slice, rest) = split_chunk(&chunk.data);
-                let fed = core.view.engine().write(&slice);
-                let chunk = core.queue.front_mut().unwrap();
                 match (fed, rest) {
-                    (Ok(()), Some(rest)) => {
+                    (Ok(Parsed::Paused), rest) => {
+                        chunk.data = rest.unwrap_or_else(|| JsValue::from_str(""));
+                        paused = true;
+                        None
+                    }
+                    (Ok(Parsed::Done), Some(rest)) => {
                         chunk.data = rest;
                         None
                     }
-                    _ => Some(core.queue.pop_front().unwrap().callback),
+                    _ => core.queue.pop_front().map(|chunk| chunk.callback),
                 }
             };
+            if paused {
+                break;
+            }
             if let Some(callback) = finished {
                 self.handle_events();
                 // The selection syncs to the output just parsed, before the callback reads it.
@@ -469,14 +528,16 @@ impl Shared {
                 break;
             }
         }
-        if !self.core.borrow().queue.is_empty() {
+        if !paused && self.writes_queued() {
             self.schedule_drain();
         }
         if self.core.borrow().disposed {
             return;
         }
         self.handle_events();
-        self.events.write_parsed.fire(&[]);
+        if !paused {
+            self.events.write_parsed.fire(&[]);
+        }
         self.after_change();
     }
 
@@ -574,6 +635,12 @@ impl Shared {
         // Hook: theme (engine colours, renderer), renderer options, input, mouse and accessibility options.
         crate::input::set_option(self, key);
         self.apply_renderer_option(key);
+        match key {
+            "screenReaderMode" => self.apply_screen_reader_mode(),
+            "scrollbar" => self.apply_scrollbar(),
+            "theme" => self.apply_scrollbar_theme(),
+            _ => {}
+        }
         Ok(())
     }
 
@@ -665,6 +732,7 @@ impl Shared {
 
     fn render_frame(self: &Rc<Self>) {
         self.handle_renderer_requests();
+        self.apply_scroll_requests();
         let (rows, content) = {
             let mut core = self.core.borrow_mut();
             if core.disposed || core.element.is_none() {
@@ -680,7 +748,12 @@ impl Shared {
             }
             let dirty = std::mem::replace(&mut core.dirty, Dirty::Rows(Vec::new()));
             let Core {
-                renderer, viewport, ..
+                renderer,
+                viewport,
+                a11y,
+                scrollbar,
+                options,
+                ..
             } = &mut *core;
             let renderer = renderer.as_mut().unwrap();
             // The selection is handed over before the draw, so the rows it moved to are drawn now.
@@ -688,13 +761,21 @@ impl Shared {
             renderer.render(viewport, &changed, &dirty);
             // The rows whose content changed (ascending), not those only redrawn
             let content = changed.first().zip(changed.last()).map(|(&a, &b)| (a, b));
-            let rows = match dirty {
+            let range = match dirty {
                 Dirty::All => Some((0, viewport.rows.saturating_sub(1))),
                 Dirty::Rows(rows) => changed.iter().chain(&rows).fold(None, |range, &y| {
                     Some(range.map_or((y, y), |(a, b): (u32, u32)| (a.min(y), b.max(y))))
                 }),
             };
-            (rows, content)
+            let dimensions = renderer.dimensions();
+            if let Some(scrollbar) = scrollbar {
+                scrollbar.sync(viewport, &dimensions);
+            }
+            if let Some(a11y) = a11y {
+                let font_size = crate::options::option(options, "fontSize").as_f64();
+                a11y.frame(viewport, range, &dimensions, font_size.unwrap_or(15.0));
+            }
+            (range, content)
         };
         crate::input::after_frame(self);
         // A hovered link on rows the output changed is looked up again (xterm.js `onRenderedViewportChange`).

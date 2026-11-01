@@ -26,6 +26,7 @@
 //!   `packages/oxtty/test/web/api-checklist.json`.
 //! - **Borrowed xterm.js logic** (MIT) names its source file, commit and line range in a header comment, and is
 //!   credited in `NOTICE.md` and `packages/oxtty/THIRD_PARTY_NOTICES.md`.
+pub mod a11y;
 pub mod buffer;
 pub mod emitter;
 pub mod engine;
@@ -35,7 +36,9 @@ mod input;
 pub mod links;
 pub mod markers;
 pub mod options;
+pub mod parser;
 pub mod render;
+pub mod scrollbar;
 pub mod search;
 mod selection;
 pub mod state;

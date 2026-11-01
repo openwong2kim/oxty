@@ -59,6 +59,7 @@ features = [
     "OffscreenCanvas",
     "OffscreenCanvasRenderingContext2d",
     "Path2d",
+    "PointerEvent",
     "ResizeObserver",
     "ResizeObserverBoxOptions",
     "ResizeObserverOptions",

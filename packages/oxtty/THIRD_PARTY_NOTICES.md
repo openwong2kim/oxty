@@ -93,6 +93,9 @@ of the browser front end (`crates/oxtty-web/src/input`, compiled into
 `src/browser/services/MouseCoordsService.ts` and
 `src/browser/services/SelectionService.ts` of the same version. Each Rust file
 names its source lines.
+The parser handler identifiers of the browser front end
+(`crates/oxtty-web/src/parser.rs`) are checked as in
+`src/common/parser/EscapeSequenceParser.ts` of the same version.
 Source: https://github.com/xtermjs/xterm.js
 
 ```
@@ -195,4 +198,19 @@ Rust port of xterm.js 6.1.0-beta.336 and `@xterm/addon-web-links` 0.13.0-beta.33
 `addons/addon-web-links/src/WebLinksAddon.ts` and `WebLinkProvider.ts`,
 Copyright (c) 2019-2022 The xterm.js authors, under the MIT license reproduced in
 the input encoding section above. The file names its source lines.
+Source: https://github.com/xtermjs/xterm.js
+
+---
+
+## xterm.js 6.1.0-beta.336 — accessibility and scrollbar
+
+`screenReaderMode` and the scrollbar of `dist/xterm_web_bg.wasm`
+(`crates/oxtty-web/src/a11y.rs` and `scrollbar.rs` in
+https://github.com/openwong2kim/oxtty, with their rules from `css/xterm.css`)
+are a Rust port of xterm.js 6.1.0-beta.336 (commit
+08829c7eb6279dda2a9e86df901353a1a89858ca): `src/browser/AccessibilityManager.ts`,
+`TimeBasedDebouncer.ts`, `LocalizableStrings.ts`, `Viewport.ts` and
+`src/browser/scrollable/*`, Copyright (c) 2017-2024 The xterm.js authors; the
+scrollable files derive from VS Code, Copyright (c) Microsoft Corporation. Both
+under the MIT license reproduced in the input encoding section above.
 Source: https://github.com/xtermjs/xterm.js
