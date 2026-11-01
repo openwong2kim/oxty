@@ -253,7 +253,12 @@ impl HistoryAbove<Cell> for Above {
             grow_row(&mut rows, row, reflow, columns, i, display_offset);
             while rows.len() > keep.max(1) {
                 if let Some(mut row) = rows.pop_front() {
-                    row.grow(columns);
+                    // Without reflow a row keeps its wrapped mark, as the grid does with the xterm.js resize.
+                    if reflow {
+                        row.grow(columns);
+                    } else {
+                        row.resize_keeping_wrap(columns);
+                    }
                     self.rows.push_row(&row);
                 }
             }
@@ -385,6 +390,13 @@ fn shrink_row(
     i: usize,
     display_offset: &mut usize,
 ) {
+    // Without reflow a row keeps its wrapped mark, as the grid does with the xterm.js resize.
+    if !reflow {
+        row.resize_keeping_wrap(columns);
+        rows.push(row);
+        return;
+    }
+
     // Append lines left over from the previous row.
     if let Some(buffered) = buffered.take() {
         row.append_front(buffered);

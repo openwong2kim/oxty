@@ -167,6 +167,7 @@ export class Terminal {
   #kittyKeyboard = false;
   #colors = null;
   #hooks = new Set();
+  #windowsPty = null;
   // Bytes of a write that stopped at a hook, fed by finishHook.
   #rest = null;
 
@@ -208,6 +209,7 @@ export class Terminal {
     if (this.#kittyKeyboard) wasm.oxtty_set_kitty_keyboard(this.#h, 1);
     if (this.#colors) this.setColors(this.#colors);
     this.#rest = null;
+    if (this.#windowsPty) this.setWindowsPty(this.#windowsPty);
     for (const key of this.#hooks) {
       const [kind, id] = key.split(':');
       wasm.oxtty_set_hook(this.#h, HOOK_KINDS.indexOf(kind), Number(id), 1);
@@ -555,6 +557,18 @@ export class Terminal {
     wasm.oxtty_flush_sync(h);
     this.#armSync();
     return wasm.oxtty_pending_hook(h) < 0;
+  }
+
+  /**
+   * Behaves as xterm.js does with `windowsPty` (none by default): new rows blank at the bottom, no reflow before
+   * conpty build 21376, and its wrapping heuristic for conpty before 21376.
+   * @param {{ backend?: 'conpty' | 'winpty', buildNumber?: number } | null | undefined} pty
+   */
+  setWindowsPty(pty) {
+    const h = this.#handle();
+    this.#windowsPty = pty ? { backend: pty.backend, buildNumber: pty.buildNumber } : null;
+    const backend = pty?.backend === 'conpty' ? 1 : pty?.backend === 'winpty' ? 2 : 0;
+    wasm.oxtty_set_windows_pty(h, backend, pty?.buildNumber ?? NaN);
   }
 
   /** Bytes that rebuild this screen in a fresh xterm.js, or why they cannot. */

@@ -162,6 +162,13 @@ export class Terminal {
   finishHook(runDefault: boolean): void;
   /** Parses the rest of the stopped write (or flush) after `finishHook`; false when it stopped at the next hook. */
   resume(): boolean;
+  /**
+   * Behaves as xterm.js 6.1 does with `windowsPty` (none by default): with a backend or build, more rows are added
+   * blank at the bottom instead of bringing scrollback back; with a build that is not conpty 21376 or later,
+   * resizing does not reflow; with conpty before 21376, a line feed or `CSI H` marks the cursor row as continuing
+   * the row above when that row ends in a non-blank cell.
+   */
+  setWindowsPty(pty: { backend?: 'conpty' | 'winpty'; buildNumber?: number } | null | undefined): void;
   /** Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes. */
   ansiSnapshot(): AnsiSnapshot;
   dispose(): void;

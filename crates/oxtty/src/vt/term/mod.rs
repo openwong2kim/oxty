@@ -428,6 +428,20 @@ pub struct Config {
     /// oxtty: whether to answer device attributes (DA1 `CSI c`, DA2 `CSI > c`) as xterm.js does (`CSI ? 1 ; 2 c`, `CSI > 0 ; 276 ; 0 c`).
     /// The default `false` is the original Alacritty behavior (`CSI ? 6 c`, `CSI > 0 ; version ; 1 c`).
     pub xterm_device_attributes: bool,
+
+    /// oxtty: whether resizing reflows the primary screen. xterm.js turns reflow off for a Windows PTY older than
+    /// conpty build 21376 (`windowsPty`). The default `true` is the original Alacritty behavior.
+    pub reflow: bool,
+
+    /// oxtty: whether more rows bring scrollback back into view. xterm.js adds them blank at the bottom instead
+    /// for a Windows PTY (`windowsPty`), as conpty redraws its own screen. The default `true` is the original
+    /// Alacritty behavior.
+    pub grow_from_history: bool,
+
+    /// oxtty: xterm.js `updateWindowsModeWrappedState` (conpty before build 21376): after a C0 line feed and before
+    /// `CSI H`, the cursor row continues the row above when that row's last cell is not blank. The default `false`
+    /// is the original Alacritty behavior.
+    pub windows_wrap_heuristic: bool,
 }
 
 impl Default for Config {
@@ -449,6 +463,9 @@ impl Default for Config {
             sgr21_double_underline: false,
             xterm_mouse_modes: false,
             xterm_device_attributes: false,
+            reflow: true,
+            grow_from_history: true,
+            windows_wrap_heuristic: false,
         }
     }
 }
@@ -503,6 +520,8 @@ impl<T> Term<T> {
         let mut inactive_grid = Grid::new(num_lines, num_cols, 0);
         grid.set_keep_cursor_paragraph(!config.reflow_cursor_line);
         inactive_grid.set_keep_cursor_paragraph(!config.reflow_cursor_line);
+        grid.set_grow_blank(!config.grow_from_history);
+        inactive_grid.set_grow_blank(!config.grow_from_history);
 
         let tabs = TabStops::new(grid.columns());
 
@@ -608,6 +627,8 @@ impl<T> Term<T> {
 
         self.grid.set_keep_cursor_paragraph(!self.config.reflow_cursor_line);
         self.inactive_grid.set_keep_cursor_paragraph(!self.config.reflow_cursor_line);
+        self.grid.set_grow_blank(!self.config.grow_from_history);
+        self.inactive_grid.set_grow_blank(!self.config.grow_from_history);
 
         if self.mode.contains(TermMode::ALT_SCREEN) {
             self.inactive_grid.update_history(self.config.scrolling_history);
@@ -894,8 +915,9 @@ impl<T> Term<T> {
         self.vi_mode_cursor.point.line += delta;
 
         let is_alt = self.mode.contains(TermMode::ALT_SCREEN);
-        self.grid.resize(!is_alt, num_lines, num_cols);
-        self.inactive_grid.resize(is_alt, num_lines, num_cols);
+        let reflow = self.config.reflow;
+        self.grid.resize(!is_alt && reflow, num_lines, num_cols);
+        self.inactive_grid.resize(is_alt && reflow, num_lines, num_cols);
 
         // Invalidate selection and tabs only when necessary.
         if old_cols != num_cols {
@@ -1175,6 +1197,16 @@ impl<T> Term<T> {
         self.keyboard_mode_stack = Vec::new();
         self.inactive_keyboard_mode_stack = Vec::new();
         self.mode.remove(TermMode::KITTY_KEYBOARD_PROTOCOL);
+    }
+
+    /// oxtty: sets [`Config::reflow`], [`Config::grow_from_history`] and [`Config::windows_wrap_heuristic`] without
+    /// the other effects of `set_options`. They apply from the next resize, line feed or `CSI H`.
+    pub fn set_windows_pty(&mut self, reflow: bool, grow_from_history: bool, windows_wrap_heuristic: bool) {
+        self.config.reflow = reflow;
+        self.config.grow_from_history = grow_from_history;
+        self.config.windows_wrap_heuristic = windows_wrap_heuristic;
+        self.grid.set_grow_blank(!grow_from_history);
+        self.inactive_grid.set_grow_blank(!grow_from_history);
     }
 
     /// oxtty: the modes a reset of mouse tracking mode `mode` clears (all tracking with `xterm_mouse_modes`).
@@ -1729,6 +1761,23 @@ impl<T: EventListener> Handler for Term<T> {
         self.damage.damage_line(line, new_col, self.grid.cursor.point.column.0);
         self.grid.cursor.point.column = Column(new_col);
         self.grid.cursor.input_needs_wrap = false;
+    }
+
+    /// oxtty: xterm.js `updateWindowsModeWrappedState`. xterm marks the cursor row as continuing the row above;
+    /// Alacritty keeps that as `WRAPLINE` on the row above's last cell.
+    #[inline]
+    fn windows_wrap_heuristic(&mut self) {
+        if !self.config.windows_wrap_heuristic {
+            return;
+        }
+        let above: Line = self.grid.cursor.point.line - 1;
+        if above < self.grid.topmost_line() {
+            return;
+        }
+        let last = self.grid.last_column();
+        let cell = &mut self.grid[above][last];
+        let wrapped = cell.c != ' ' && cell.c != '\0';
+        cell.flags.set(Flags::WRAPLINE, wrapped);
     }
 
     /// Linefeed.

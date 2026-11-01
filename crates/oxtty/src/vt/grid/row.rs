@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::vt::grid::GridCell;
 use crate::vt::index::Column;
-use crate::vt::term::cell::ResetDiscriminant;
+use crate::vt::term::cell::{Flags, ResetDiscriminant};
 
 /// A row in the grid.
 #[derive(Default, Clone, Debug)]
@@ -66,6 +66,26 @@ impl<T: Default> Row<T> {
         // default cells may not match the old ones, so the old cells count as occupied.
         self.occ = self.inner.len();
         self.inner.resize_with(columns, T::default);
+    }
+
+    /// oxtty: resizes to `columns` without reflow; a `WRAPLINE` on the last cell moves to the new last cell, as
+    /// xterm.js keeps a line's wrapped flag. Cells cut off are dropped.
+    pub fn resize_keeping_wrap(&mut self, columns: usize)
+    where
+        T: GridCell,
+    {
+        let wrapped = self.last().is_some_and(|cell| cell.flags().contains(Flags::WRAPLINE));
+        if let (true, Some(cell)) = (wrapped, self.last_mut()) {
+            cell.flags_mut().remove(Flags::WRAPLINE);
+        }
+        if self.len() < columns {
+            self.grow(columns);
+        } else {
+            self.shrink(columns);
+        }
+        if let (true, Some(cell)) = (wrapped, self.last_mut()) {
+            cell.flags_mut().insert(Flags::WRAPLINE);
+        }
     }
 
     /// Reduce the number of columns in the row.

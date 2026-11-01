@@ -105,3 +105,11 @@ test('native parser hooks', () => {
   assert.equal(t.rowText(0), 'abc');
   assert.equal(t.takeReplies().length, 0);
 });
+
+test('native windowsPty', () => {
+  const t = new Terminal(10, 3);
+  t.setWindowsPty('conpty', 19045);
+  t.write('0123456789\r\n');
+  assert.equal(t.rowWrapped(0), true);
+  assert.throws(() => t.setWindowsPty('pty', 1), /unknown backend/);
+});

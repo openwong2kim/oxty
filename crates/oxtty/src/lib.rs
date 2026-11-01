@@ -226,6 +226,24 @@ pub struct Hook {
     pub data: Vec<u8>,
 }
 
+/// The PTY backend of a Windows host (xterm.js `windowsPty.backend`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowsPtyBackend {
+    Conpty,
+    Winpty,
+}
+
+/// A PTY hosted on Windows (xterm.js `windowsPty`), for [`Engine::set_windows_pty`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowsPty {
+    pub backend: Option<WindowsPtyBackend>,
+    /// The Windows build, such as 19045.
+    pub build_number: Option<u32>,
+}
+
+/// The conpty build from which xterm.js reflows and drops its wrapping heuristic.
+const CONPTY_REFLOW_BUILD: u32 = 21376;
+
 /// DECSTR (`CSI ! p`) as [`hook_id`] names it.
 const DECSTR_HOOK: u32 = (b'!' as u32) << 8 | b'p' as u32;
 
@@ -678,6 +696,26 @@ impl Engine {
             self.term.soft_reset();
             self.decstr_owed = false;
         }
+    }
+
+    /// Behaves as xterm.js 6.1 does with `windowsPty` set to `pty` (the default is none): with a backend or build,
+    /// more rows are added blank at the bottom instead of bringing scrollback back; with a build that is not
+    /// conpty 21376 or later, resizing does not reflow; with conpty before 21376, a line feed or `CSI H` marks the
+    /// cursor row as continuing the row above when that row ends in a non-blank cell.
+    pub fn set_windows_pty(&mut self, pty: WindowsPty) {
+        let conpty = pty.backend == Some(WindowsPtyBackend::Conpty);
+        let reflow = match pty.build_number {
+            // xterm.js tests the build for truth, so 0 is no build here.
+            Some(build) if build != 0 => conpty && build >= CONPTY_REFLOW_BUILD,
+            _ => true,
+        };
+        let grow_from_history = pty.backend.is_none() && pty.build_number.is_none();
+        let heuristic = conpty
+            && pty
+                .build_number
+                .is_some_and(|build| build < CONPTY_REFLOW_BUILD);
+        self.term
+            .set_windows_pty(reflow, grow_from_history, heuristic);
     }
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].

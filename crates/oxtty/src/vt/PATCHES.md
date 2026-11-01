@@ -179,6 +179,18 @@ single crate.
   run hook defaults themselves, as before hooks existed. One `debug!`
   argument lost a borrow for a newer clippy. To upgrade, diff this file
   against the old crate's `src/ansi.rs` and apply that to the new one.
+- xterm.js `windowsPty` behaviour is three options, each upstream by
+  default, set together by `Term::set_windows_pty`: `term::Config::reflow`
+  (`false`: resizing reflows neither screen), `term::Config::grow_from_history`
+  (`false`: `Grid::set_grow_blank` makes more rows come in blank at the bottom
+  while history stays history) and `term::Config::windows_wrap_heuristic`
+  (xterm.js `updateWindowsModeWrappedState`: the vte fork calls
+  `Handler::windows_wrap_heuristic` after a C0 line feed and before `CSI H`,
+  and `Term` sets or clears `WRAPLINE` on the row above the cursor by whether
+  its last cell is blank). With the xterm.js resize (`keep_cursor_paragraph`),
+  a row that is not reflowed keeps `WRAPLINE` on its new last cell
+  (`Row::resize_keeping_wrap`), as xterm.js keeps a line's wrapped flag; this
+  also applies to the alternate screen.
 
 These changes are compatibility policy, not upstream behaviour.
 

@@ -7,7 +7,9 @@
 
 use std::cell::RefCell;
 
-use oxtty::{Clipboard, CursorShape, Damage, Engine, HookKind, COLOR_SLOTS};
+use oxtty::{
+    Clipboard, CursorShape, Damage, Engine, HookKind, WindowsPty, WindowsPtyBackend, COLOR_SLOTS,
+};
 
 /// The same dlmalloc std uses on wasm, but growing linear memory in larger
 /// steps: at 64 KiB per `memory.grow`, filling a scrollback calls it thousands
@@ -546,4 +548,21 @@ pub extern "C" fn oxtty_pending_hook(h: u32) -> i32 {
 #[no_mangle]
 pub extern "C" fn oxtty_finish_hook(h: u32, run_default: u32) {
     with(h, (), |t| t.finish_hook(run_default != 0));
+}
+
+/// xterm.js `windowsPty`: `backend` 0 none, 1 conpty, 2 winpty; `build` NaN for none.
+#[no_mangle]
+pub extern "C" fn oxtty_set_windows_pty(h: u32, backend: u32, build: f64) {
+    let backend = match backend {
+        1 => Some(WindowsPtyBackend::Conpty),
+        2 => Some(WindowsPtyBackend::Winpty),
+        _ => None,
+    };
+    let build_number = (!build.is_nan()).then(|| build.clamp(0.0, u32::MAX as f64) as u32);
+    with(h, (), |t| {
+        t.set_windows_pty(WindowsPty {
+            backend,
+            build_number,
+        })
+    });
 }

@@ -745,6 +745,10 @@ pub trait Handler {
     /// Linefeed.
     fn linefeed(&mut self) {}
 
+    /// oxtty: where xterm.js runs its Windows wrapping heuristic: after a C0 line feed (LF, VT, FF; not IND or
+    /// NEL) and before `CSI H` (not `CSI f`).
+    fn windows_wrap_heuristic(&mut self) {}
+
     /// Ring the bell.
     ///
     /// Hopefully this is never implemented.
@@ -1504,7 +1508,10 @@ where
             C0::HT => self.handler.put_tab(1),
             C0::BS => self.handler.backspace(),
             C0::CR => self.handler.carriage_return(),
-            C0::LF | C0::VT | C0::FF => self.handler.linefeed(),
+            C0::LF | C0::VT | C0::FF => {
+                self.handler.linefeed();
+                self.handler.windows_wrap_heuristic();
+            },
             C0::BEL => self.handler.bell(),
             C0::SUB => self.handler.substitute(),
             C0::SI => self.handler.set_active_charset(CharsetIndex::G0),
@@ -1831,6 +1838,9 @@ where
                 handler.clear_tabs(mode);
             },
             ('H', []) | ('f', []) => {
+                if action == 'H' {
+                    handler.windows_wrap_heuristic();
+                }
                 let y = next_param_or(1) as i32;
                 let x = next_param_or(1) as usize;
                 handler.goto(y - 1, x - 1);

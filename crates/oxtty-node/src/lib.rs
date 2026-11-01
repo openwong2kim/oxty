@@ -3,7 +3,7 @@
 
 use napi::bindgen_prelude::{Buffer, Either, Uint32Array};
 use napi_derive::napi;
-use oxtty::{Clipboard, HookKind, COLOR_SLOTS};
+use oxtty::{Clipboard, HookKind, WindowsPty, WindowsPtyBackend, COLOR_SLOTS};
 
 #[napi(object)]
 pub struct Cursor {
@@ -371,6 +371,28 @@ impl Terminal {
     #[napi]
     pub fn finish_hook(&mut self, run_default: bool) {
         self.inner.finish_hook(run_default);
+    }
+
+    /// xterm.js `windowsPty`: `backend` is `"conpty"` or `"winpty"`.
+    #[napi]
+    pub fn set_windows_pty(
+        &mut self,
+        backend: Option<String>,
+        build_number: Option<u32>,
+    ) -> napi::Result<()> {
+        let backend = match backend.as_deref() {
+            None => None,
+            Some("conpty") => Some(WindowsPtyBackend::Conpty),
+            Some("winpty") => Some(WindowsPtyBackend::Winpty),
+            Some(other) => {
+                return Err(napi::Error::from_reason(format!("unknown backend {other}")))
+            }
+        };
+        self.inner.set_windows_pty(WindowsPty {
+            backend,
+            build_number,
+        });
+        Ok(())
     }
 
     /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.

@@ -299,3 +299,16 @@ test('parser hooks: writeUntilHook stops at a hooked sequence, finishHook decide
   assert.equal(t.syncPending(), false);
   t.dispose();
 });
+
+test('windowsPty: the conpty wrapping heuristic, and no setting is no heuristic', () => {
+  const t = make({ cols: 10, rows: 3 });
+  t.write('0123456789\r\n');
+  assert.equal(t.rowWrapped(0), false);
+  t.setWindowsPty({ backend: 'conpty', buildNumber: 19045 });
+  t.write('0123456789\r\n');
+  assert.equal(t.rowWrapped(1), true);
+  t.setWindowsPty(undefined);
+  t.write('0123456789\r\n');
+  assert.equal(t.rowWrapped(2), false);
+  t.dispose();
+});

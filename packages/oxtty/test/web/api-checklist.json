@@ -96,8 +96,8 @@
       "reason": "Accessibility."
     },
     "options.windowsPty": {
-      "status": "later",
-      "reason": "xterm.js ConPTY heuristics; needs a decision for the Windows build."
+      "status": "supported",
+      "reason": "Engine option with xterm.js 6.1's rules: blank rows on growth, no reflow before conpty 21376, the conpty wrapping heuristic. Columns a non-reflowing shrink cuts off are dropped (xterm.js keeps them hidden and shows them again when widened), as on the alternate screen."
     },
     "options.convertEol": {
       "status": "unsupported",
