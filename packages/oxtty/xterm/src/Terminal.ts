@@ -11,7 +11,7 @@ import { LocalEngineView, Viewport } from './engine-view';
 import { InputController } from './input/InputController';
 import { MouseController } from './mouse/MouseController';
 import { CoreService, OptionsService } from './input/services';
-import type { Dimensions, Renderer, RendererOptions, Theme } from './renderer/types';
+import type { Dimensions, Highlight, Renderer, RendererOptions, Theme } from './renderer/types';
 import { WebglRenderer } from './renderer/WebglRenderer';
 import { SelectionController } from './selection/SelectionController';
 import { WriteQueue, isHighSurrogate } from './WriteQueue';
@@ -160,6 +160,7 @@ export class Terminal {
   private _customWheelEventHandler: ((event: WheelEvent) => boolean) | undefined;
   /** Renderer and DOM listeners added by `open`. */
   private _openListeners: (() => void)[] = [];
+  private readonly _highlights = new Map<string, readonly Highlight[]>();
   private _frame = 0;
   /** Redraws asked for while a frame is being prepared land in that frame. */
   private _preparingFrame = false;
@@ -334,6 +335,7 @@ export class Terminal {
     // The renderer puts its canvas into `screen` and may replace it (WebGL context recreated): never keep it.
     const renderer = rendererFactory(screen, this.cols, this.rows, options);
     this._renderer = renderer;
+    for (const [layer, highlights] of this._highlights) renderer.setHighlights?.(layer, highlights);
     this._input.open(element, helpers, renderer);
     const terminal = this;
     const mouse = new MouseController({
@@ -573,6 +575,12 @@ export class Terminal {
   /** Selects buffer lines `start`…`end` whole. */
   public selectLines(start: number, end: number): void {
     this._selection?.service.selectLines(start, end);
+  }
+
+  /** Internal, not in xterm.d.ts: built-in addons (search, links) paint cells through here, in viewport rows. */
+  public _setHighlights(layer: string, highlights: readonly Highlight[]): void {
+    this._highlights.set(layer, highlights);
+    this._renderer?.setHighlights?.(layer, highlights);
   }
 
   public dispose(): void {

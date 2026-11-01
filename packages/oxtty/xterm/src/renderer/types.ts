@@ -46,6 +46,19 @@ export interface SelectionRange {
   columnSelect: boolean;
 }
 
+/** Cells the host paints over (search matches, hovered links), in viewport cells, end column exclusive. */
+export interface Highlight {
+  row: number;
+  start: number;
+  end: number;
+  /** CSS colours; unset keeps the cell's own. */
+  background?: string;
+  foreground?: string;
+  /** Outline drawn around the cells (the active search match). */
+  border?: string;
+  underline?: boolean;
+}
+
 export interface Dimensions {
   /** CSS pixels of one cell and of the whole canvas. */
   css: { cell: { width: number; height: number }; canvas: { width: number; height: number } };
@@ -66,6 +79,8 @@ export interface Renderer {
    */
   render(viewport: Viewport, changed: readonly number[], hostDirty?: Iterable<number> | 'all'): void;
   setSelection(selection: SelectionRange | undefined): void;
+  /** Replaces one named layer (`'search'`, `'link'`); layers draw in the order they were first set, under the selection. */
+  setHighlights?(layer: string, highlights: readonly Highlight[]): void;
   /** Focus picks the cursor style (`cursorInactiveStyle`) and runs the blink, which the renderer times itself. */
   setFocused(focused: boolean): void;
   /**
