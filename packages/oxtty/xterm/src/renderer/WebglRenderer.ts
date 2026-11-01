@@ -111,6 +111,9 @@ export class WebglRenderer implements Renderer {
     const onFontsLoaded = (): void => this._handleFontsLoaded();
     fonts?.addEventListener('loadingdone', onFontsLoaded);
     this._disposables.push(() => fonts?.removeEventListener('loadingdone', onFontsLoaded));
+    const onWindowResize = (): void => void this._checkDevicePixelRatio();
+    window.addEventListener('resize', onWindowResize);
+    this._disposables.push(() => window.removeEventListener('resize', onWindowResize));
     const visibility = new IntersectionObserver(entries => this._handleVisibility(entries[entries.length - 1].isIntersecting));
     visibility.observe(_container);
     this._disposables.push(() => visibility.disconnect());
@@ -405,15 +408,19 @@ export class WebglRenderer implements Renderer {
     this._requestRedraw('all');
   }
 
+  // Zoom and moving to another screen: the canvas's device pixel size changes, and zoom also resizes the window
+  private _checkDevicePixelRatio(): boolean {
+    if (this._coreBrowser.dpr === this._dpr) return false;
+    // The char atlas needs to be regenerated and the cell size changes
+    this._dpr = this._coreBrowser.dpr;
+    this._handleResize();
+    this._onDimensionsChange.fire();
+    this._requestRedraw('all');
+    return true;
+  }
+
   private _handleDevicePixels(width: number, height: number): void {
-    if (this._coreBrowser.dpr !== this._dpr) {
-      // The char atlas needs to be regenerated and the cell size changes
-      this._dpr = this._coreBrowser.dpr;
-      this._handleResize();
-      this._onDimensionsChange.fire();
-      this._requestRedraw('all');
-      return;
-    }
+    if (this._checkDevicePixelRatio()) return;
     // While the actual canvas size has changed, keep device canvas dimensions as the value before the change as it's an
     // exact multiple of the cell sizes
     if (this._canvas.width === width && this._canvas.height === height) return;
