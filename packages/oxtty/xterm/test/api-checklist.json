@@ -1,0 +1,468 @@
+{
+  "about": "Every xterm.js member wmux uses (non-test src/renderer at the wt-wmux-base checkout, @xterm/xterm 6.1.0-beta.336 and its addons) and its status in oxtty/xterm.",
+  "statuses": {
+    "supported": "Implemented (public members are in xterm/xterm.d.ts).",
+    "step 2": "M2 step 2: input (keyboard, IME, paste, focus, mouse).",
+    "step 4": "M2 step 4: selection.",
+    "later": "Planned after these steps.",
+    "unsupported": "Not planned; the reason says what replaces it."
+  },
+  "members": {
+    "init": {
+      "status": "supported",
+      "reason": "Re-exported from oxtty/xterm; `await init()` once is the only extra step, constructing before it throws."
+    },
+    "Terminal.constructor": {
+      "status": "supported",
+      "reason": "Synchronous like xterm.js."
+    },
+    "options.cols": {
+      "status": "supported",
+      "reason": "Init-only, like xterm.js; change with resize()."
+    },
+    "options.rows": {
+      "status": "supported",
+      "reason": "Init-only, like xterm.js; change with resize()."
+    },
+    "options.scrollback": {
+      "status": "supported",
+      "reason": "Constructor only: the engine fixes it at creation, a runtime change throws (wmux only reads it)."
+    },
+    "options.cursorBlink": {
+      "status": "supported",
+      "reason": "Renderer option."
+    },
+    "options.cursorStyle": {
+      "status": "supported",
+      "reason": "Renderer option."
+    },
+    "options.fontSize": {
+      "status": "supported",
+      "reason": "Renderer option, get/set at runtime; fires onDimensionsChange when the cell changes."
+    },
+    "options.fontFamily": {
+      "status": "supported",
+      "reason": "Renderer option."
+    },
+    "options.theme": {
+      "status": "supported",
+      "reason": "Renderer option; also pushed to the engine (setColors) so OSC 4/10/11/12 queries answer the real colours."
+    },
+    "options.minimumContrastRatio": {
+      "status": "supported",
+      "reason": "Renderer option."
+    },
+    "options.scrollbar": {
+      "status": "supported",
+      "reason": "Only the width the fit keeps free (xterm.js 14px default); no scrollbar is drawn yet."
+    },
+    "options.allowProposedApi": {
+      "status": "supported",
+      "reason": "Accepted, no effect: there is no proposed-API gate."
+    },
+    "options.scrollOnUserInput": {
+      "status": "step 2",
+      "reason": "Input."
+    },
+    "options.disableStdin": {
+      "status": "step 2",
+      "reason": "Input."
+    },
+    "options.altClickMovesCursor": {
+      "status": "step 2",
+      "reason": "Mouse input."
+    },
+    "options.vtExtensions.kittyKeyboard": {
+      "status": "step 2",
+      "reason": "Key encoding is input; the engine already tracks the kitty mode."
+    },
+    "options.vtExtensions.colorSchemeQuery": {
+      "status": "unsupported",
+      "reason": "wmux turns it off for headless parity; the engine has no colour-scheme query reply."
+    },
+    "options.vtExtensions.kittySgrBoldFaintControl": {
+      "status": "unsupported",
+      "reason": "wmux turns it off for headless parity; the engine follows xterm.js with it off."
+    },
+    "options.macOptionClickForcesSelection": {
+      "status": "step 4",
+      "reason": "Selection."
+    },
+    "options.linkHandler": {
+      "status": "later",
+      "reason": "Links step (OSC 8 + regex detection)."
+    },
+    "options.screenReaderMode": {
+      "status": "later",
+      "reason": "Accessibility."
+    },
+    "options.windowsPty": {
+      "status": "later",
+      "reason": "xterm.js ConPTY heuristics; needs a decision for the Windows build."
+    },
+    "options.convertEol": {
+      "status": "unsupported",
+      "reason": "Always false (wmux passes false); omit it."
+    },
+    "options.windowOptions": {
+      "status": "unsupported",
+      "reason": "The engine answers no window operations; wmux only saves and restores it around the image addon."
+    },
+    "Terminal.open": {
+      "status": "supported",
+      "reason": "Builds div.terminal.xterm > div.xterm-screen > (div.xterm-helpers, canvas); a second open moves the element."
+    },
+    "Terminal.write": {
+      "status": "supported",
+      "reason": "Strings and Uint8Array, callback after parse, write(\"\", cb) as a parse barrier; time-sliced like xterm.js."
+    },
+    "Terminal.writeln": {
+      "status": "supported",
+      "reason": "write(data) then write(\"\\r\\n\", callback)."
+    },
+    "Terminal.resize": {
+      "status": "supported",
+      "reason": "Fires onResize; no-op for the same size."
+    },
+    "Terminal.reset": {
+      "status": "supported",
+      "reason": "RIS applied at once (clears scrollback, like xterm.js reset)."
+    },
+    "Terminal.refresh": {
+      "status": "supported",
+      "reason": "Marks the rows for the next frame."
+    },
+    "Terminal.dispose": {
+      "status": "supported",
+      "reason": "Drops pending writes and timers, disposes addons, renderer and engine."
+    },
+    "Terminal.loadAddon": {
+      "status": "supported",
+      "reason": "Fit addons are activated; webgl and unicode11 are absorbed; anything else throws."
+    },
+    "Terminal.scrollToLine": {
+      "status": "supported",
+      "reason": "Engine scrollDisplay."
+    },
+    "Terminal.scrollToBottom": {
+      "status": "supported",
+      "reason": "Engine scrollToBottom."
+    },
+    "Terminal.element": {
+      "status": "supported",
+      "reason": "Set by open()."
+    },
+    "Terminal.rows": {
+      "status": "supported",
+      "reason": "From the engine."
+    },
+    "Terminal.cols": {
+      "status": "supported",
+      "reason": "From the engine."
+    },
+    "Terminal.dimensions": {
+      "status": "supported",
+      "reason": "Renderer dimensions; replaces the _core._renderService.dimensions workaround."
+    },
+    "Terminal.modes": {
+      "status": "supported",
+      "reason": "From engine mode bits; mouseTrackingMode never reports x10, reverseWraparoundMode and win32InputMode are always false."
+    },
+    "Terminal.unicode.activeVersion": {
+      "status": "supported",
+      "reason": "Always \"11\" (engine tables); setting another version throws."
+    },
+    "Terminal.focus": {
+      "status": "step 2",
+      "reason": "Needs the hidden textarea."
+    },
+    "Terminal.textarea": {
+      "status": "step 2",
+      "reason": "Input; the place for it (.xterm-helpers) already exists."
+    },
+    "Terminal.attachCustomKeyEventHandler": {
+      "status": "step 2",
+      "reason": "Input."
+    },
+    "Terminal.getSelection": {
+      "status": "step 4",
+      "reason": "Selection."
+    },
+    "Terminal.hasSelection": {
+      "status": "step 4",
+      "reason": "Selection."
+    },
+    "Terminal.clearSelection": {
+      "status": "step 4",
+      "reason": "Selection."
+    },
+    "Terminal.select": {
+      "status": "step 4",
+      "reason": "Selection."
+    },
+    "Terminal.parser.registerOscHandler": {
+      "status": "later",
+      "reason": "Needs an engine hook. OSC 52 is covered by the clipboard option; OSC 133/7792 and the viewer OSC 4/10/11/12 handlers are not."
+    },
+    "Terminal.parser.registerCsiHandler": {
+      "status": "later",
+      "reason": "Needs an engine hook (replyParity, shellPromptModeReset, viewerParser)."
+    },
+    "Terminal.parser.registerDcsHandler": {
+      "status": "later",
+      "reason": "Needs an engine hook (viewerParser DECRQSS)."
+    },
+    "Terminal.registerLinkProvider": {
+      "status": "later",
+      "reason": "Links step."
+    },
+    "Terminal.registerMarker": {
+      "status": "later",
+      "reason": "Markers need line tracking through scrollback trimming."
+    },
+    "Terminal.markers": {
+      "status": "later",
+      "reason": "With registerMarker."
+    },
+    "IMarker.id/line/dispose/onDispose": {
+      "status": "later",
+      "reason": "With registerMarker."
+    },
+    "Terminal.onData": {
+      "status": "supported",
+      "reason": "Engine replies after every write drain (no frame needed); input from step 2."
+    },
+    "Terminal.onBinary": {
+      "status": "supported",
+      "reason": "Event exists; fired by mouse input from step 2, never by output."
+    },
+    "Terminal.onResize": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "Terminal.onScroll": {
+      "status": "supported",
+      "reason": "Fires when buffer.active.viewportY changes (scroll calls, output, resize)."
+    },
+    "Terminal.onRender": {
+      "status": "supported",
+      "reason": "Rows drawn by each frame."
+    },
+    "Terminal.onCursorMove": {
+      "status": "supported",
+      "reason": "Checked after each write drain, scroll and resize."
+    },
+    "Terminal.onWriteParsed": {
+      "status": "supported",
+      "reason": "After each write drain."
+    },
+    "Terminal.onTitleChange": {
+      "status": "supported",
+      "reason": "OSC 0/2 after each write drain."
+    },
+    "Terminal.onBell": {
+      "status": "supported",
+      "reason": "Once per BEL after each write drain."
+    },
+    "Terminal.onDimensionsChange": {
+      "status": "supported",
+      "reason": "Font option changes and renderer-reported changes (late fonts, devicePixelRatio)."
+    },
+    "Terminal.onSelectionChange": {
+      "status": "step 4",
+      "reason": "Selection."
+    },
+    "buffer.onBufferChange": {
+      "status": "supported",
+      "reason": "Fires when the alternate screen is entered or left."
+    },
+    "buffer.active.type": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "buffer.active.baseY": {
+      "status": "supported",
+      "reason": "Engine historyLength."
+    },
+    "buffer.active.viewportY": {
+      "status": "supported",
+      "reason": "historyLength - displayOffset."
+    },
+    "buffer.active.cursorX": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "buffer.active.cursorY": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "buffer.active.length": {
+      "status": "supported",
+      "reason": "historyLength + rows."
+    },
+    "buffer.active.getLine": {
+      "status": "supported",
+      "reason": "A copy of the line at call time (xterm.js returns a live view)."
+    },
+    "buffer.active.getNullCell": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "IBufferLine.translateToString": {
+      "status": "supported",
+      "reason": "Matches xterm.js except that trimRight also drops trailing typed spaces (the engine does not tell them from erased cells)."
+    },
+    "IBufferLine.isWrapped": {
+      "status": "supported",
+      "reason": "xterm.js meaning: continues the previous line."
+    },
+    "IBufferLine.length": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "IBufferLine.getCell": {
+      "status": "supported",
+      "reason": "The reuse argument is accepted and ignored."
+    },
+    "IBufferCell.getChars": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "IBufferCell.getWidth": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "IBufferCell.isDim": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "FitAddon.fit": {
+      "status": "supported",
+      "reason": "Built-in FitAddon export, and @xterm/addon-fit 0.12 works as is (it reads only public members)."
+    },
+    "FitAddon.proposeDimensions": {
+      "status": "supported",
+      "reason": "Same formula as @xterm/addon-fit 0.12."
+    },
+    "FitAddon.dispose": {
+      "status": "supported",
+      "reason": "As xterm.js."
+    },
+    "FitAddon subclass (FixedGeometryFitAddon)": {
+      "status": "supported",
+      "reason": "super.fit/proposeDimensions work; its _core._renderService.dimensions read moves to terminal.dimensions."
+    },
+    "WebglAddon (load)": {
+      "status": "supported",
+      "reason": "Absorbed: the WebGL renderer is built in, the addon is never activated."
+    },
+    "WebglAddon.onContextLoss": {
+      "status": "supported",
+      "reason": "Absorbed; never fires because the renderer restores a lost context itself."
+    },
+    "WebglAddon.dispose": {
+      "status": "supported",
+      "reason": "Absorbed; no-op (there is no DOM renderer to fall back to)."
+    },
+    "WebglAddon.clearTextureAtlas": {
+      "status": "supported",
+      "reason": "Absorbed; full redraw."
+    },
+    "Unicode11Addon (load)": {
+      "status": "supported",
+      "reason": "Absorbed: activate() is run against a stand-in that only has unicode.register and must register version 11."
+    },
+    "SearchAddon.findNext/findPrevious/clearDecorations": {
+      "status": "later",
+      "reason": "Search moves into the engine; loadAddon throws until then."
+    },
+    "SerializeAddon.serialize": {
+      "status": "unsupported",
+      "reason": "loadAddon throws; Terminal.ansiSnapshot() (engine) replaces it. coldFrame's scrollback:0 + excludeModes variant needs an engine option (later)."
+    },
+    "WebLinksAddon": {
+      "status": "later",
+      "reason": "Links step (OSC 8 + regex detection); loadAddon throws until then."
+    },
+    "ImageAddon": {
+      "status": "later",
+      "reason": "PRD §10 open question; loadAddon throws."
+    },
+    "_core._renderService.dimensions": {
+      "status": "supported",
+      "reason": "Use terminal.dimensions."
+    },
+    "_core._charSizeService.measure/onCharSizeChange": {
+      "status": "supported",
+      "reason": "Use onDimensionsChange; a loaded fit addon refits by itself (charSizeRefit goes away)."
+    },
+    "_core._renderService.setRenderer/handleResize, _core._createRenderer, _core._store": {
+      "status": "unsupported",
+      "reason": "webglTeardown: there is no DOM renderer fallback; the WebGL renderer restores its context."
+    },
+    "_core.coreService.kittyKeyboard": {
+      "status": "step 2",
+      "reason": "Kitty flags live in the engine; input decides the reset path."
+    },
+    "_core.coreService.onUserInput": {
+      "status": "step 2",
+      "reason": "Input can tell user input from replies itself."
+    },
+    "_core._compositionHelper": {
+      "status": "step 2",
+      "reason": "IME."
+    },
+    "WebglAddon._renderer._gl": {
+      "status": "unsupported",
+      "reason": "Context loss is handled inside the renderer."
+    },
+    "WebglAddon._renderer._charAtlas": {
+      "status": "unsupported",
+      "reason": "Atlas health checks belong inside the renderer (atlasGuard goes away)."
+    },
+    "ImageAddon._handlers": {
+      "status": "later",
+      "reason": "With the image addon."
+    },
+    "DOM .xterm": {
+      "status": "supported",
+      "reason": "Root element classes terminal xterm."
+    },
+    "DOM .xterm-screen": {
+      "status": "supported",
+      "reason": "Holds the canvas, sized to it."
+    },
+    "DOM .xterm-helpers": {
+      "status": "supported",
+      "reason": "Present, empty until input (step 2)."
+    },
+    "DOM .xterm-helper-textarea": {
+      "status": "step 2",
+      "reason": "Input."
+    },
+    "DOM .composition-view": {
+      "status": "step 2",
+      "reason": "IME."
+    },
+    "DOM .xterm-scrollable-element .scrollbar": {
+      "status": "later",
+      "reason": "No scrollbar is drawn yet."
+    },
+    "CSS @xterm/xterm/css/xterm.css": {
+      "status": "unsupported",
+      "reason": "open() injects its own styles; drop the import."
+    },
+    "Element reparenting (park and re-append)": {
+      "status": "supported",
+      "reason": "The element can be moved; open() again also moves it."
+    },
+    "Synthetic mouse events on .xterm-screen": {
+      "status": "step 4",
+      "reason": "Selection."
+    },
+    "write() from inside parser handlers": {
+      "status": "later",
+      "reason": "With the parser hooks."
+    }
+  }
+}
