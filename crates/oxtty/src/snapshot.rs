@@ -22,8 +22,9 @@ use std::fmt::{self, Write};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SnapshotRefusal {
-    /// A fullwidth glyph starts in the last column (a resize clipped it);
-    /// printing it again would wrap instead.
+    /// A fullwidth glyph is missing one of its halves: it starts in the last
+    /// column or lost its right half to a resize, or an insert left its right
+    /// half alone. Printing it again would wrap or fill both halves instead.
     WideEdge,
     /// Scroll margins (DECSTBM) narrower than the screen are set; the
     /// snapshot does not carry them.
@@ -367,6 +368,18 @@ fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
     }
 }
 
+/// Whether a wide char in `row` lacks one of its halves.
+fn split_wide(row: &Row<Cell>) -> bool {
+    let mut leader = false;
+    for cell in &row[..] {
+        if cell.flags.contains(Flags::WIDE_CHAR_SPACER) != leader {
+            return true;
+        }
+        leader = cell.flags.contains(Flags::WIDE_CHAR);
+    }
+    leader
+}
+
 fn serialize<T: EventListener>(
     term: &Term<T>,
     older: Option<&History>,
@@ -374,20 +387,19 @@ fn serialize<T: EventListener>(
     // When cutting the cursor paragraph, xterm can leave half of a wide character. Printing that character
     // wraps the line, so reject instead of corrupting it. The inactive grid is serialized only when on the
     // alternate screen, so check it only then (so leftover alternate screen content after leaving does not cause a rejection).
+    // A resize also leaves a left half without its right half mid-row (cut, then widened), and
+    // ICH in the middle of a wide char leaves a right half alone (xterm.js `insertCells`); no
+    // printed text rebuilds either.
     let alt = term.mode().contains(TermMode::ALT_SCREEN);
     for grid in std::iter::once(term.grid()).chain(alt.then(|| term.inactive_grid())) {
         for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
-            if grid[Line(y)][grid.last_column()]
-                .flags
-                .contains(Flags::WIDE_CHAR)
-            {
+            if split_wide(&grid[Line(y)]) {
                 return Err(SnapshotRefusal::WideEdge);
             }
         }
     }
     if let Some(older) = older {
-        let last = term.grid().last_column();
-        if (0..older.len()).any(|i| older.row(i)[last].flags.contains(Flags::WIDE_CHAR)) {
+        if (0..older.len()).any(|i| split_wide(&older.row(i))) {
             return Err(SnapshotRefusal::WideEdge);
         }
     }

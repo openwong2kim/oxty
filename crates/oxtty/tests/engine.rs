@@ -550,3 +550,94 @@ fn a_wide_char_over_a_wide_spacer_leaves_a_narrow_blank() {
     assert_eq!(cells[3].ch, '🚀');
     assert_ne!(cells[3].attrs & attr::WIDE, 0);
 }
+
+/// Row 0 as text with a `|` for each cell that is the right half of a wide char.
+fn cells_text(t: &Engine) -> String {
+    let mut cells = Vec::new();
+    t.row_cells(0, &mut cells);
+    cells
+        .iter()
+        .map(|c| {
+            if c.attrs & attr::WIDE_SPACER != 0 {
+                '|'
+            } else {
+                c.ch
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn edits_that_cut_a_wide_char_erase_it_whole() {
+    // xterm.js BufferLine: an erase, insert or delete that takes one half of a wide char blanks
+    // the other half too (fuzz seeds 258, 296, 2684, 4172, 5786).
+    for (input, row) in [
+        ("a가b\x1b[1;3H\x1b[X", "a  b  "),
+        ("a가b\x1b[1;2H\x1b[X", "a  b  "),
+        ("a가b\x1b[1;3H\x1b[K", "a     "),
+        ("a가b\x1b[1;2H\x1b[1K", "   b  "),
+        ("a가b\x1b[1;2H\x1b[1J", "   b  "),
+        ("a가b\x1b[1;3H\x1b[J", "a     "),
+        ("a가b\x1b[1;3H\x1b[P", "a b   "),
+        ("a가b\x1b[1;2H\x1b[P", "a b   "),
+        ("abcd가\x1b[1;1H\x1b[@", " abcd "),
+        ("a가b\x1b[1;3H\x1b[4hZ", "a Z b "),
+        ("abcd가\x1b[1;1H\x1b[4hZ", "Zabcd "),
+        ("abc가\x1b[1;1H\x1b[4h가", "가|abc "),
+    ] {
+        let mut t = Engine::new(6, 2, 0);
+        t.feed(input.as_bytes());
+        assert_eq!(cells_text(&t), row, "{input:?}");
+    }
+    // ICH at a right half leaves that half alone, as in xterm.js `insertCells`.
+    let mut t = Engine::new(6, 2, 0);
+    t.feed("a가b\x1b[1;3H\x1b[@".as_bytes());
+    assert_eq!(cells_text(&t), "a  |b ");
+    // Writing over that lone half leaves the cell to its left alone.
+    t.feed("Z한".as_bytes());
+    assert_eq!(cells_text(&t), "a Z한| ");
+}
+
+#[test]
+fn writing_over_a_clipped_wide_char_keeps_its_neighbour() {
+    // A shrink leaves 🚀 in the last column without a right half; writing there must not blank
+    // the 😀 spacer to its left (fuzz seed 1912).
+    let mut t = Engine::new(5, 1, 0);
+    t.feed("\\😀🚀".as_bytes());
+    t.resize(4, 1);
+    t.feed(b"x");
+    assert_eq!(cells_text(&t), "\\😀|x");
+}
+
+#[test]
+fn a_restored_cursor_drops_its_pending_wrap() {
+    // xterm.js `restoreCursor` clamps the saved column, one past the edge, to the screen.
+    for (save, restore) in [
+        ("\x1b7", "\x1b8"),
+        ("\x1b[s", "\x1b[u"),
+        ("\x1b[?1048h", "\x1b[?1048l"),
+        ("\x1b[?1049h", "\x1b[?1049l"),
+    ] {
+        let mut t = Engine::new(5, 2, 0);
+        t.feed(format!("12345{save}{restore}Z").as_bytes());
+        assert_eq!(t.row_text(0).as_deref(), Some("1234Z"), "{save:?}");
+    }
+    // After widening, that column is a real one (fuzz seeds 22754, 82656).
+    let mut t = Engine::new(2, 1, 0);
+    t.feed(b"H \x1b[s");
+    t.resize(3, 1);
+    t.feed(b"\x1b[uZ");
+    assert_eq!(t.row_text(0).as_deref(), Some("H Z"));
+}
+
+#[test]
+#[ignore = "grid/resize.rs: grow_columns only moves a pending-wrap cursor past the edge when it reflows, so the alternate screen keeps it in the old last column (fuzz seed 310)"]
+fn widening_the_alternate_screen_frees_a_pending_wrap() {
+    let mut t = Engine::new(5, 3, 100);
+    t.feed(b"\x1b[?1049habcde");
+    t.resize(7, 3);
+    // xterm keeps the cursor one past the old edge, which is now a column.
+    assert_eq!((t.cursor().line, t.cursor().col), (0, 5));
+    t.feed(b"Z");
+    assert_eq!(t.row_text(0).as_deref(), Some("abcdeZ"));
+}

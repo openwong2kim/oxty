@@ -43,6 +43,20 @@ fn refuses_wide_glyph_clipped_to_last_column() {
 }
 
 #[test]
+fn refuses_wide_glyph_missing_a_half_mid_row() {
+    // Cut by a shrink, then widened: the left half is followed by a plain blank (fuzz seed 7660).
+    let mut t = Engine::new(4, 1, 0);
+    t.feed("🚀𘀄".as_bytes());
+    t.resize(3, 1);
+    t.resize(4, 1);
+    assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::WideEdge));
+    // ICH at a right half moves it away from its blanked left half.
+    let mut t = Engine::new(6, 2, 0);
+    t.feed("a가b\x1b[1;3H\x1b[@".as_bytes());
+    assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::WideEdge));
+}
+
+#[test]
 fn refuses_narrow_margins_but_not_full_screen_ones() {
     let mut t = Engine::new(10, 6, 0);
     t.feed(b"\x1b[2;4rhello");

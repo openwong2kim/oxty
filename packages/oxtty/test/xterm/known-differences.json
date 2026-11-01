@@ -31,5 +31,11 @@
     "reason": "DECSTBM margins narrower than the screen are not carried in the snapshot and are refused (same scope as the wmux serializer). When to carry them awaits an owner decision" },
   { "id": "dl-top-scrolls-into-history", "proofs": ["A", "B"], "cases": ["known/dl-top-history"], "blocksSwap": false,
     "fields": ["baseY", "lines", "lines.wrapped"],
-    "reason": "DL (CSI M) on the first line of the primary screen makes Alacritty push the deleted line into scrollback (Grid::scroll_up from line 0 rotates into history) while xterm drops it. The alternate screen has no scrollback so it is equal, and DL on the first line of the primary screen is rare" }
+    "reason": "DL (CSI M) on the first line of the primary screen makes Alacritty push the deleted line into scrollback (Grid::scroll_up from line 0 rotates into history) while xterm drops it. The alternate screen has no scrollback so it is equal, and DL on the first line of the primary screen is rare" },
+  { "id": "ich-splits-wide", "proofs": ["B"], "cases": ["known/ich-wide-right-half"], "blocksSwap": false,
+    "refusal": "unsupported-wide-edge",
+    "reason": "ICH at the right half of a wide char blanks the left half and moves the right half on alone (xterm.js insertCells; oxtty does the same). Printed text cannot rebuild a lone right half, so the snapshot is refused" },
+  { "id": "invalid-utf8", "proofs": ["A", "B"], "cases": ["known/invalid-utf8"], "blocksSwap": false,
+    "fields": ["cursor.x", "lines.cells.chars", "lines.cells.width"],
+    "reason": "For bytes that are not UTF-8 (a lone continuation byte here) vte writes a U+FFFD cell and xterm writes nothing. The snapshot carries the U+FFFD, so the restored xterm has it too. Programs do not write invalid UTF-8 in normal output" }
 ]
