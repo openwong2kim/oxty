@@ -159,36 +159,30 @@ test('replies and titles before a hooked sequence reach the host before its hand
   assert.deepEqual(ox.log, [['data', '\x1b[1;1R'], ['title', 'title'], ['handler', 'x'], ['data', '\x1b[0n']]);
 });
 
-test('hooks inside a synchronized update run when it ends, also on the timed flush', async () => {
-  const t = new m.Terminal({ cols: 20, rows: 2 });
-  const seen = [];
-  t.parser.registerCsiHandler({ final: 'n' }, () => { seen.push(text(t)[0]); return true; });
-  await write(t, '\x1b[?2026hA\x1b[6nB');
-  assert.deepEqual(seen, []);
-  // The engine flushes an unended update after 150 ms and the terminal runs the handlers then.
-  await sleep(250);
-  assert.deepEqual(seen, ['A']);
-  assert.equal(text(t)[0], 'AB');
-  await write(t, '\x1b[?2026hC\x1b[6nD\x1b[?2026l');
-  assert.deepEqual(seen, ['A', 'ABC']);
-  assert.equal(text(t)[0], 'ABCD');
-  t.dispose();
+test('hooks inside a synchronized update run where they are, as in xterm.js', async () => {
+  const [ox, xt] = await compare({ cols: 20, rows: 2 }, async (t, log) => {
+    t.parser.registerCsiHandler({ final: 'n' }, () => { log.push(['dsr', text(t)[0], t.modes.synchronizedOutputMode]); return true; });
+    await write(t, '\x1b[?2026hA\x1b[6nB');
+    log.push(['parsed', text(t)[0]]);
+    await write(t, '\x1b[?2026lC\x1b[?2026h\x1b[6nD\x1b[?2026l');
+    log.push(['parsed', text(t)[0], t.modes.synchronizedOutputMode]);
+  });
+  assert.deepEqual(ox, xt);
+  assert.deepEqual(ox.log, [['dsr', 'A', true], ['parsed', 'AB'], ['dsr', 'ABC', true], ['parsed', 'ABCD', false]]);
 });
 
-test('an async handler met on the timed flush holds later writes until it settles', async () => {
+test('an async handler inside a synchronized update holds later writes until it settles; the update times out', async () => {
   const t = new m.Terminal({ cols: 20, rows: 2 });
   let release;
   t.parser.registerOscHandler(1337, () => new Promise((resolve) => { release = resolve; }));
-  await write(t, '\x1b[?2026hA\x1b]1337;x\x07B');
-  await sleep(250);
-  assert.equal(text(t)[0], 'A');
   const parsed = [];
+  t.write('\x1b[?2026hA\x1b]1337;x\x07B', () => parsed.push('AB'));
   t.write('C', () => parsed.push('C'));
-  await sleep(20);
-  assert.deepEqual([text(t)[0], parsed], ['A', []]);
+  await sleep(250);
+  assert.deepEqual([text(t)[0], parsed, t.modes.synchronizedOutputMode], ['A', [], false]);
   release(true);
   await write(t, '');
-  assert.deepEqual([text(t)[0], parsed], ['ABC', ['C']]);
+  assert.deepEqual([text(t)[0], parsed], ['ABC', ['AB', 'C']]);
   t.dispose();
 });
 

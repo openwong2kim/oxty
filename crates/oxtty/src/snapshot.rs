@@ -5,7 +5,7 @@
 //! `src/daemon/util/ansiStreamScan.ts` (incomplete escape tail, UTF-8 carry, margin rejection).
 //! The same author redistributes it under Apache-2.0 in oxtty.
 //!
-//! Output = serialize(grid) ‖ raw tail. During sync: serialize(grid before BSU) ‖ `CSI ?2026h` ‖ raw pending bytes.
+//! Output = serialize(grid) ‖ raw tail. During sync: serialize(grid) ‖ `CSI ?2026h` ‖ raw tail.
 //! Cursor visibility carries the engine state (`SHOW_CURSOR`) as is — the vt option
 //! `ris_keeps_cursor_visibility` aligns RIS behavior with xterm.js.
 use crate::history::History;
@@ -192,7 +192,7 @@ fn incomplete_utf8_suffix_len(buf: &[u8]) -> usize {
 /// The body of [`crate::Engine::ansi_snapshot_with`]. The rejection order is the same as wmux: margins → tail overflow → wide edge.
 pub(crate) fn ansi<T: EventListener>(
     term: &Term<T>,
-    held_sync: Option<&[u8]>,
+    sync: bool,
     tail: &RawTail,
     older: Option<&History>,
     options: SnapshotOptions,
@@ -202,14 +202,13 @@ pub(crate) fn ansi<T: EventListener>(
     {
         return Err(SnapshotRefusal::Margins);
     }
-    // During sync, all raw bytes after BSU are the tail (the parser is in ground right after BSU) — no overflow check needed.
-    let tail = match held_sync {
-        _ if options.exclude_modes => &[][..],
-        Some(held) => held,
-        None => tail.pending()?,
+    let tail = if options.exclude_modes {
+        &[][..]
+    } else {
+        tail.pending()?
     };
     let mut out = serialize(term, older, options)?;
-    if held_sync.is_some() && !options.exclude_modes {
+    if sync && !options.exclude_modes {
         out.push_str("\x1b[?2026h");
     }
     let mut bytes = out.into_bytes();

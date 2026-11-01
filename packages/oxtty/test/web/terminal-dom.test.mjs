@@ -112,6 +112,47 @@ test('the opened terminal next to xterm.js', async (t) => {
       for (const [ox, xt] of quiet) assert.deepEqual(ox, xt);
     });
 
+    await t.test('a synchronized update applies its output at once and holds the frames until it ends, like xterm.js', async () => {
+      await setup();
+      await frames();
+      const facts = await page.evaluate(async () => {
+        const all = (data) => Promise.all(window.made.map((term) => new Promise((resolve) => term.write(data, resolve))));
+        const raf = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        // Each render with whether the update was still open when it was drawn.
+        const seen = window.made.map((term) => {
+          const list = [];
+          term.onRender((e) => list.push([e.start, e.end, term.modes.synchronizedOutputMode]));
+          return list;
+        });
+        const now = () => window.made.map((term) => [term.buffer.active.getLine(0).translateToString(true), term.modes.synchronizedOutputMode]);
+        // The renders since the last call: none drawn while the update was open, and whether one redrew every row.
+        const renders = () => seen.map((list) => {
+          const taken = list.splice(0);
+          return [taken.some(([, , open]) => open), taken.some(([start, end]) => start === 0 && end === 3)];
+        });
+        await all('\x1b[?2026hhello');
+        const inside = now();
+        await raf();
+        const drawnOpen = seen.map((list) => list.some(([, , open]) => open));
+        await all(' world\x1b[?2026l');
+        await raf();
+        const ended = [now(), renders()];
+        // An update the program never ends is ended by the timeout (oxtty 150 ms, xterm.js 1000 ms).
+        const [ox] = window.made;
+        await new Promise((resolve) => ox.write('\x1b[?2026h!', resolve));
+        const held = now()[0];
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await raf();
+        return { inside, drawnOpen, ended, held, timedOut: [now()[0], renders()[0]] };
+      });
+      assert.deepEqual(facts.inside, [['hello', true], ['hello', true]]);
+      // A slow run may hit oxtty's 150 ms timeout before the program ends the update: then that redraws every row.
+      assert.deepEqual(facts.drawnOpen, [false, false]);
+      assert.deepEqual(facts.ended, [[['hello world', false], ['hello world', false]], [[false, true], [false, true]]]);
+      assert.deepEqual(facts.held, ['hello world!', true]);
+      assert.deepEqual(facts.timedOut, [['hello world!', false], [false, true]]);
+    });
+
     await t.test('a font size change fires onDimensionsChange with the new cell and resizes the screen', async () => {
       await setup();
       await frames();

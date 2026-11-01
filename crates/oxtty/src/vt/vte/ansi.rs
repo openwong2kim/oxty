@@ -16,10 +16,8 @@ use core::fmt::{self, Display, Formatter, Write};
 use core::ops::Mul;
 use core::ops::{Add, Sub};
 use core::str::FromStr;
-use core::time::Duration;
-use core::{iter, mem, str};
+use core::{iter, str};
 use std::collections::HashSet;
-use std::time::Instant;
 
 use bitflags::bitflags;
 #[doc(inline)]
@@ -30,21 +28,6 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 
 use super::{Params, ParamsIter};
-
-/// Maximum time before a synchronized update is aborted.
-const SYNC_UPDATE_TIMEOUT: Duration = Duration::from_millis(150);
-
-/// Maximum number of bytes read in one synchronized update (2MiB).
-const SYNC_BUFFER_SIZE: usize = 0x20_0000;
-
-/// Number of bytes in the BSU/ESU CSI sequences.
-const SYNC_ESCAPE_LEN: usize = 8;
-
-/// BSU CSI sequence for beginning or extending synchronized updates.
-const BSU_CSI: [u8; SYNC_ESCAPE_LEN] = *b"\x1b[?2026h";
-
-/// ESU CSI sequence for terminating synchronized updates.
-const ESU_CSI: [u8; SYNC_ESCAPE_LEN] = *b"\x1b[?2026l";
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Hyperlink {
@@ -237,12 +220,9 @@ fn parse_number(input: &[u8]) -> Option<u8> {
 
 /// Internal state for VTE processor.
 #[derive(Debug, Default)]
-struct ProcessorState<T: Timeout> {
+struct ProcessorState {
     /// Last processed character for repetition.
     preceding_char: Option<char>,
-
-    /// State for synchronized terminal updates.
-    sync_state: SyncState<T>,
 
     /// Sequences parsing stops at before their default action (oxtty).
     hooks: HashSet<(HookKind, u32)>,
@@ -255,9 +235,6 @@ struct ProcessorState<T: Timeout> {
 
     /// A hook's default action is running, so hooks do not apply (oxtty).
     hook_default: bool,
-
-    /// The bytes of an ending synchronized update, kept while applying them stopped at a hook (oxtty).
-    replay: Option<Replay>,
 }
 
 /// Largest OSC or DCS payload handed to a hook, as xterm.js `PAYLOAD_LIMIT`. A longer one is not stopped at.
@@ -288,48 +265,18 @@ pub fn hook_id(intermediates: &[u8], action: u8) -> u32 {
     intermediates.iter().fold(0u32, |id, &b| id << 8 | b as u32) << 8 | action as u32
 }
 
-/// Applying the bytes of an ending synchronized update: `buffer[pos..end]` is left, then the sync buffer becomes
-/// `buffer[end..]` (a new BSU) or ends.
-#[derive(Debug)]
-struct Replay {
-    buffer: Vec<u8>,
-    pos: usize,
-    end: usize,
-    bsu_offset: Option<usize>,
-}
-
-#[derive(Debug)]
-struct SyncState<T: Timeout> {
-    /// Handler for synchronized updates.
-    timeout: T,
-
-    /// Bytes read during the synchronized update.
-    buffer: Vec<u8>,
-}
-
-impl<T: Timeout> Default for SyncState<T> {
-    fn default() -> Self {
-        Self { buffer: Vec::with_capacity(SYNC_BUFFER_SIZE), timeout: Default::default() }
-    }
-}
-
 /// The processor wraps a `super::Parser` to ultimately call methods on a
 /// Handler.
 #[derive(Default)]
-pub struct Processor<T: Timeout = StdSyncHandler> {
-    state: ProcessorState<T>,
+pub struct Processor {
+    state: ProcessorState,
     parser: super::Parser,
 }
 
-impl<T: Timeout> Processor<T> {
+impl Processor {
     #[inline]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Synchronized update timeout.
-    pub fn sync_timeout(&self) -> &T {
-        &self.state.sync_state.timeout
     }
 
     /// Process a new byte from the PTY.
@@ -355,26 +302,14 @@ impl<T: Timeout> Processor<T> {
     /// Like [`Processor::advance`], but stops right after a hooked sequence and returns how many bytes it took.
     /// The sequence's default action has not run yet: see [`Processor::pending_hook`] and
     /// [`Processor::finish_hook`]. While a hook is pending it takes nothing.
-    ///
-    /// The bytes of a synchronized update are parsed when it ends, so its hooks are met then (the call that ends
-    /// it takes all its bytes and stops at the first one). After a hook there, the next call (`bytes` may be
-    /// empty) applies the rest of the update first.
     pub fn advance_until_hook<H>(&mut self, handler: &mut H, bytes: &[u8]) -> usize
     where
         H: Handler,
     {
-        if self.state.hook.is_none() {
-            self.continue_replay(handler);
-        }
         let mut processed = 0;
         while processed != bytes.len() && self.state.hook.is_none() {
-            if self.state.sync_state.timeout.pending_timeout() {
-                processed += self.advance_sync(handler, &bytes[processed..]);
-            } else {
-                let mut performer = Performer::new(&mut self.state, handler);
-                processed +=
-                    self.parser.advance_until_terminated(&mut performer, &bytes[processed..]);
-            }
+            let mut performer = Performer::new(&mut self.state, handler);
+            processed += self.parser.advance_until_terminated(&mut performer, &bytes[processed..]);
         }
         processed
     }
@@ -419,176 +354,24 @@ impl<T: Timeout> Processor<T> {
             self.state.hook_default = false;
         }
     }
-
-    /// End a synchronized update.
-    ///
-    /// Hooked sequences run their default action.
-    pub fn stop_sync<H>(&mut self, handler: &mut H)
-    where
-        H: Handler,
-    {
-        self.stop_sync_until_hook(handler);
-        while self.state.hook.is_some() {
-            self.finish_hook(handler, true);
-            self.advance_until_hook(handler, &[]);
-        }
-    }
-
-    /// Like [`Processor::stop_sync`], but stops at a hooked sequence like [`Processor::advance_until_hook`].
-    pub fn stop_sync_until_hook<H>(&mut self, handler: &mut H)
-    where
-        H: Handler,
-    {
-        if self.state.hook.is_some() {
-            return;
-        }
-        if self.state.replay.is_some() {
-            self.continue_replay(handler);
-        } else if self.state.sync_state.timeout.pending_timeout() {
-            self.stop_sync_internal(handler, None);
-        }
-    }
-
-    /// The bytes held by a synchronized update, not parsed yet.
-    pub fn sync_bytes(&self) -> &[u8] {
-        &self.state.sync_state.buffer
-    }
-
-    /// End a synchronized update.
-    ///
-    /// The `bsu_offset` parameter should be passed if the sync buffer contains
-    /// a new BSU escape that is not part of the current synchronized
-    /// update.
-    fn stop_sync_internal<H>(&mut self, handler: &mut H, bsu_offset: Option<usize>)
-    where
-        H: Handler,
-    {
-        let buffer = mem::take(&mut self.state.sync_state.buffer);
-        let end = bsu_offset.unwrap_or(buffer.len());
-        self.state.replay = Some(Replay { buffer, pos: 0, end, bsu_offset });
-        self.continue_replay(handler);
-    }
-
-    /// Applies the rest of an ending synchronized update, unless it stops at a hook again.
-    fn continue_replay<H>(&mut self, handler: &mut H)
-    where
-        H: Handler,
-    {
-        let Some(mut replay) = self.state.replay.take() else { return };
-        // Process all synchronized bytes.
-        //
-        // NOTE: A BSU among them terminates `advance_until_terminated` too; it is processed automatically during
-        // the synchronized update, so parsing just goes on.
-        while replay.pos < replay.end {
-            let mut performer = Performer::new(&mut self.state, handler);
-            replay.pos +=
-                self.parser.advance_until_terminated(&mut performer, &replay.buffer[replay.pos..replay.end]);
-            if self.state.hook.is_some() {
-                self.state.replay = Some(replay);
-                return;
-            }
-        }
-        self.state.sync_state.buffer = replay.buffer;
-
-        match replay.bsu_offset {
-            // Just clear processed bytes if there is a new BSU.
-            //
-            // NOTE: We do not need to re-process for a new ESU since the `advance_sync`
-            // function checks for BSUs in reverse.
-            Some(bsu_offset) => {
-                let new_len = self.state.sync_state.buffer.len() - bsu_offset;
-                self.state.sync_state.buffer.copy_within(bsu_offset.., 0);
-                self.state.sync_state.buffer.truncate(new_len);
-            },
-            // Report mode and clear state if no new BSU is present.
-            None => {
-                handler.unset_private_mode(NamedPrivateMode::SyncUpdate.into());
-                self.state.sync_state.timeout.clear_timeout();
-                self.state.sync_state.buffer.clear();
-            },
-        }
-    }
-
-    /// Number of bytes in the synchronization buffer.
-    #[inline]
-    pub fn sync_bytes_count(&self) -> usize {
-        self.state.sync_state.buffer.len()
-    }
-
-    /// Process a new byte during a synchronized update.
-    ///
-    /// Returns the number of bytes processed.
-    #[cold]
-    fn advance_sync<H>(&mut self, handler: &mut H, bytes: &[u8]) -> usize
-    where
-        H: Handler,
-    {
-        // Advance sync parser or stop sync if we'd exceed the maximum buffer size.
-        if self.state.sync_state.buffer.len() + bytes.len() >= SYNC_BUFFER_SIZE - 1 {
-            // Terminate the synchronized update.
-            self.stop_sync_internal(handler, None);
-            if self.state.hook.is_some() {
-                return 0;
-            }
-
-            // Just parse the bytes normally.
-            let mut performer = Performer::new(&mut self.state, handler);
-            self.parser.advance_until_terminated(&mut performer, bytes)
-        } else {
-            self.state.sync_state.buffer.extend(bytes);
-            self.advance_sync_csi(handler, bytes.len());
-            bytes.len()
-        }
-    }
-
-    /// Handle BSU/ESU CSI sequences during synchronized update.
-    fn advance_sync_csi<H>(&mut self, handler: &mut H, new_bytes: usize)
-    where
-        H: Handler,
-    {
-        // Get constraints within which a new escape character might be relevant.
-        let buffer_len = self.state.sync_state.buffer.len();
-        let start_offset = (buffer_len - new_bytes).saturating_sub(SYNC_ESCAPE_LEN - 1);
-        let end_offset = buffer_len.saturating_sub(SYNC_ESCAPE_LEN - 1);
-        let search_buffer = &self.state.sync_state.buffer[start_offset..end_offset];
-
-        // Search for termination/extension escapes in the added bytes.
-        //
-        // NOTE: It is technically legal to specify multiple private modes in the same
-        // escape, but we only allow EXACTLY `\e[?2026h`/`\e[?2026l` to keep the parser
-        // more simple.
-        let mut bsu_offset = None;
-        for index in memchr::memchr_iter(0x1B, search_buffer).rev() {
-            let offset = start_offset + index;
-            let escape = &self.state.sync_state.buffer[offset..offset + SYNC_ESCAPE_LEN];
-
-            if escape == BSU_CSI {
-                self.state.sync_state.timeout.set_timeout(SYNC_UPDATE_TIMEOUT);
-                bsu_offset = Some(offset);
-            } else if escape == ESU_CSI {
-                self.stop_sync_internal(handler, bsu_offset);
-                break;
-            }
-        }
-    }
 }
 
 /// Helper type that implements `super::Perform`.
 ///
 /// Processor creates a Performer when running advance and passes the Performer
 /// to `super::Parser`.
-struct Performer<'a, H: Handler, T: Timeout> {
-    state: &'a mut ProcessorState<T>,
+struct Performer<'a, H: Handler> {
+    state: &'a mut ProcessorState,
     handler: &'a mut H,
 
     /// Whether the parser should be prematurely terminated.
     terminated: bool,
 }
 
-impl<'a, H: Handler + 'a, T: Timeout> Performer<'a, H, T> {
+impl<'a, H: Handler + 'a> Performer<'a, H> {
     /// Create a performer.
     #[inline]
-    pub fn new<'b>(state: &'b mut ProcessorState<T>, handler: &'b mut H) -> Performer<'b, H, T> {
+    pub fn new<'b>(state: &'b mut ProcessorState, handler: &'b mut H) -> Performer<'b, H> {
         Performer { state, handler, terminated: Default::default() }
     }
 
@@ -631,53 +414,6 @@ fn csi_bytes(id: u32, params: &[Vec<u16>]) -> Vec<u8> {
     bytes.extend_from_slice(intermediates);
     bytes.push(ident[3]);
     bytes
-}
-
-#[derive(Default)]
-pub struct StdSyncHandler {
-    timeout: Option<Instant>,
-}
-
-impl StdSyncHandler {
-    /// Synchronized update expiration time.
-    #[inline]
-    pub fn sync_timeout(&self) -> Option<Instant> {
-        self.timeout
-    }
-}
-
-impl Timeout for StdSyncHandler {
-    #[inline]
-    fn set_timeout(&mut self, duration: Duration) {
-        self.timeout = Some(Instant::now() + duration);
-    }
-
-    #[inline]
-    fn clear_timeout(&mut self) {
-        self.timeout = None;
-    }
-
-    #[inline]
-    fn pending_timeout(&self) -> bool {
-        self.timeout.is_some()
-    }
-}
-
-/// Interface for creating timeouts and checking their expiry.
-///
-/// This is internally used by the [`Processor`] to handle synchronized
-/// updates.
-pub trait Timeout: Default {
-    /// Sets the timeout for the next synchronized update.
-    ///
-    /// The `duration` parameter specifies the duration of the timeout. Once the
-    /// specified duration has elapsed, the synchronized update rotuine can be
-    /// performed.
-    fn set_timeout(&mut self, duration: Duration);
-    /// Clear the current timeout.
-    fn clear_timeout(&mut self);
-    /// Returns whether a timeout is currently active and has not yet expired.
-    fn pending_timeout(&self) -> bool;
 }
 
 /// Type that handles actions from the parser.
@@ -1477,10 +1213,9 @@ pub enum ScpUpdateMode {
     PresentationToData,
 }
 
-impl<'a, H, T> super::Perform for Performer<'a, H, T>
+impl<'a, H> super::Perform for Performer<'a, H>
 where
     H: Handler + 'a,
-    T: Timeout,
 {
     #[inline]
     fn print(&mut self, c: char) {
@@ -1852,12 +1587,6 @@ where
             },
             ('h', [b'?']) => {
                 for param in params_iter.map(|param| param[0]) {
-                    // Handle sync updates opaquely.
-                    if param == NamedPrivateMode::SyncUpdate as u16 {
-                        self.state.sync_state.timeout.set_timeout(SYNC_UPDATE_TIMEOUT);
-                        self.terminated = true;
-                    }
-
                     handler.set_private_mode(PrivateMode::new(param))
                 }
             },
@@ -2267,28 +1996,6 @@ pub mod C0 {
 mod tests {
     use super::*;
 
-    #[derive(Default)]
-    pub struct TestSyncHandler {
-        is_sync: usize,
-    }
-
-    impl Timeout for TestSyncHandler {
-        #[inline]
-        fn set_timeout(&mut self, _: Duration) {
-            self.is_sync += 1;
-        }
-
-        #[inline]
-        fn clear_timeout(&mut self) {
-            self.is_sync = 0;
-        }
-
-        #[inline]
-        fn pending_timeout(&self) -> bool {
-            self.is_sync != 0
-        }
-    }
-
     struct MockHandler {
         index: CharsetIndex,
         charset: StandardCharset,
@@ -2346,7 +2053,7 @@ mod tests {
     fn parse_control_attribute() {
         static BYTES: &[u8] = &[0x1B, b'[', b'1', b'm'];
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, BYTES);
@@ -2358,7 +2065,7 @@ mod tests {
     fn parse_terminal_identity_csi() {
         let bytes: &[u8] = &[0x1B, b'[', b'1', b'c'];
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, bytes);
@@ -2384,7 +2091,7 @@ mod tests {
     fn parse_terminal_identity_esc() {
         let bytes: &[u8] = &[0x1B, b'Z'];
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, bytes);
@@ -2394,7 +2101,7 @@ mod tests {
 
         let bytes: &[u8] = &[0x1B, b'#', b'Z'];
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, bytes);
@@ -2410,7 +2117,7 @@ mod tests {
             b'2', b'5', b'5', b'm',
         ];
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, BYTES);
@@ -2440,7 +2147,7 @@ mod tests {
         ];
 
         let mut handler = MockHandler::default();
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
 
         parser.advance(&mut handler, BYTES);
     }
@@ -2448,7 +2155,7 @@ mod tests {
     #[test]
     fn parse_designate_g0_as_line_drawing() {
         static BYTES: &[u8] = &[0x1B, b'(', b'0'];
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, BYTES);
@@ -2460,7 +2167,7 @@ mod tests {
     #[test]
     fn parse_designate_g1_as_line_drawing_and_invoke() {
         static BYTES: &[u8] = &[0x1B, b')', b'0', 0x0E];
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, &BYTES[..3]);
@@ -2521,7 +2228,7 @@ mod tests {
     fn parse_osc4_set_color() {
         let bytes: &[u8] = b"\x1b]4;0;#fff\x1b\\";
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, bytes);
@@ -2533,7 +2240,7 @@ mod tests {
     fn parse_osc104_reset_color() {
         let bytes: &[u8] = b"\x1b]104;1;\x1b\\";
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, bytes);
@@ -2545,7 +2252,7 @@ mod tests {
     fn parse_osc104_reset_all_colors() {
         let bytes: &[u8] = b"\x1b]104;\x1b\\";
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, bytes);
@@ -2558,7 +2265,7 @@ mod tests {
     fn parse_osc104_reset_all_colors_no_semicolon() {
         let bytes: &[u8] = b"\x1b]104\x1b\\";
 
-        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
         parser.advance(&mut handler, bytes);
@@ -2568,123 +2275,12 @@ mod tests {
     }
 
     #[test]
-    fn partial_sync_updates() {
-        let mut parser = Processor::<TestSyncHandler>::new();
+    fn sync_update_is_parsed_at_once() {
+        let mut parser = Processor::new();
         let mut handler = MockHandler::default();
 
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-        assert!(handler.attr.is_none());
-
-        // Start synchronized update.
-
-        parser.advance(&mut handler, b"\x1b[?20");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-        assert!(handler.attr.is_none());
-
-        parser.advance(&mut handler, b"26h");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 1);
-        assert!(handler.attr.is_none());
-
-        // Dispatch some data.
-
-        parser.advance(&mut handler, b"random \x1b[31m stuff");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 1);
-        assert!(handler.attr.is_none());
-
-        // Extend synchronized update.
-
-        parser.advance(&mut handler, b"\x1b[?20");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 1);
-        assert!(handler.attr.is_none());
-
-        parser.advance(&mut handler, b"26h");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 2);
-        assert!(handler.attr.is_none());
-
-        // Terminate synchronized update.
-
-        parser.advance(&mut handler, b"\x1b[?20");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 2);
-        assert!(handler.attr.is_none());
-
-        parser.advance(&mut handler, b"26l");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-        assert!(handler.attr.is_some());
-    }
-
-    #[test]
-    fn sync_bursts_buffer() {
-        let mut parser = Processor::<TestSyncHandler>::new();
-        let mut handler = MockHandler::default();
-
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-        assert!(handler.attr.is_none());
-
-        // Repeat test twice to ensure internal state is reset properly.
-        for _ in 0..2 {
-            // Start synchronized update.
-            parser.advance(&mut handler, b"\x1b[?2026h");
-            assert_eq!(parser.state.sync_state.timeout.is_sync, 1);
-            assert!(handler.attr.is_none());
-
-            // Ensure sync works.
-            parser.advance(&mut handler, b"\x1b[31m");
-            assert_eq!(parser.state.sync_state.timeout.is_sync, 1);
-            assert!(handler.attr.is_none());
-
-            // Exceed sync buffer dimensions.
-            parser.advance(&mut handler, "a".repeat(SYNC_BUFFER_SIZE).as_bytes());
-            assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-            assert!(handler.attr.take().is_some());
-
-            // Ensure new events are dispatched directly.
-            parser.advance(&mut handler, b"\x1b[31m");
-            assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-            assert!(handler.attr.take().is_some());
-        }
-    }
-
-    #[test]
-    fn mixed_sync_escape() {
-        let mut parser = Processor::<TestSyncHandler>::new();
-        let mut handler = MockHandler::default();
-
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-        assert!(handler.attr.is_none());
-
-        // Start synchronized update with immediate SGR.
         parser.advance(&mut handler, b"\x1b[?2026h\x1b[31m");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 1);
-        assert!(handler.attr.is_none());
-
-        // Terminate synchronized update and check for SGR.
-        parser.advance(&mut handler, b"\x1b[?2026l");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
         assert!(handler.attr.is_some());
-    }
-
-    #[test]
-    fn sync_bsu_with_esu() {
-        let mut parser = Processor::<TestSyncHandler>::new();
-        let mut handler = MockHandler::default();
-
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-        assert!(handler.attr.is_none());
-
-        // Start synchronized update with immediate SGR.
-        parser.advance(&mut handler, b"\x1b[?2026h\x1b[1m");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 1);
-        assert!(handler.attr.is_none());
-
-        // Terminate synchronized update, but immediately start a new one.
-        parser.advance(&mut handler, b"\x1b[?2026l\x1b[?2026h\x1b[4m");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 2);
-        assert_eq!(handler.attr.take(), Some(Attr::Bold));
-
-        // Terminate again, expecting one buffered SGR.
-        parser.advance(&mut handler, b"\x1b[?2026l");
-        assert_eq!(parser.state.sync_state.timeout.is_sync, 0);
-        assert_eq!(handler.attr.take(), Some(Attr::Underline));
     }
 
     #[test]

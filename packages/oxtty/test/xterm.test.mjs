@@ -282,7 +282,6 @@ test('A: the same cells are empty as in xterm.js, in every case', async () => {
     const o = new Terminal({ cols: c.cols, rows: c.rows, scrollback: c.scrollback });
     for (const events of [c.input, [c.tail]]) {
       await play(events, x, o);
-      o.flushSync();
       assert.deepEqual(empties(x, o), [], c.id);
     }
     compared++;

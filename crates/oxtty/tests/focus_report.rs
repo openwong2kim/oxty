@@ -30,11 +30,12 @@ fn a_hook_that_takes_the_sequence_stops_the_report() {
 }
 
 #[test]
-fn a_report_held_by_a_synchronized_update_comes_when_it_ends() {
+fn a_report_inside_a_synchronized_update_comes_at_once() {
     let mut t = Engine::new(10, 3, 0);
     t.set_focus(Some(false));
-    t.feed(b"\x1b[?2026h\x1b[?1004h");
-    assert_eq!(t.take_replies(), b"");
-    t.feed(b"\x1b[?2026l");
-    assert_eq!(t.take_replies(), b"\x1b[O");
+    t.feed(b"\x1b[?2026h\x1b[?1004h\x1b[6n");
+    assert_eq!(
+        t.take_reply_list(),
+        [b"\x1b[O".to_vec(), b"\x1b[1;1R".to_vec()]
+    );
 }

@@ -159,37 +159,23 @@ fn feed_runs_hook_defaults() {
 }
 
 #[test]
-fn hooks_in_a_synchronized_update_stop_when_it_ends() {
+fn hooks_in_a_synchronized_update_stop_where_they_are() {
     let mut t = term();
     t.set_hook(HookKind::Csi, hook_id(b"", b'n'), true);
     let bytes = b"\x1b[?2026hA\x1b[6nB\x1b[?2026lC";
-    // The update holds its bytes: the call that ends it takes them all and stops at the hook inside.
-    assert_eq!(t.feed_until_hook(&bytes[..14]), 14);
-    assert!(t.pending_hook().is_none());
-    assert_eq!(t.feed_until_hook(&bytes[14..]), bytes.len() - 14);
+    // As in xterm.js, the update's bytes are parsed at once, so its hooks are met as they come.
+    assert_eq!(t.feed_until_hook(bytes), 13);
     assert_eq!(t.pending_hook().unwrap().params, [vec![6]]);
     assert_eq!(t.row_text(0).unwrap(), "A");
     assert!(t.sync_pending());
-    t.finish_hook(false);
-    assert!(t.sync_pending());
-    assert_eq!(t.feed_until_hook(b""), 0);
+    // A timed-out update ends without parsing anything.
+    t.flush_sync();
     assert!(!t.sync_pending());
+    assert!(t.pending_hook().is_some());
+    t.finish_hook(false);
+    assert_eq!(t.feed_until_hook(&bytes[13..]), bytes.len() - 13);
     assert_eq!(t.row_text(0).unwrap(), "ABC");
     assert_eq!(t.take_replies(), b"");
-}
-
-#[test]
-fn flush_sync_stops_at_a_hook() {
-    let mut t = term();
-    t.set_hook(HookKind::Osc, 133, true);
-    t.feed_until_hook(b"\x1b[?2026hA\x1b]133;B\x07B");
-    t.flush_sync();
-    assert_eq!(t.pending_hook().unwrap().data, b"B");
-    assert_eq!(t.row_text(0).unwrap(), "A");
-    t.finish_hook(true);
-    t.feed_until_hook(b"");
-    assert_eq!(t.row_text(0).unwrap(), "AB");
-    assert!(!t.sync_pending());
 }
 
 #[test]

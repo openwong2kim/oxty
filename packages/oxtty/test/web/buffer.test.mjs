@@ -111,7 +111,7 @@ test('events read unbound deliver, their disposables unsubscribe, and nothing su
   assert.deepEqual(late, []);
 });
 
-test('reset applies at once, also while a synchronized update holds output', async () => {
+test('reset applies at once, also while a synchronized update is open', async () => {
   const t = new m.Terminal({ cols: 10, rows: 2 });
   await write(t, '\x1b[?2026hheld\x1b[?2004h');
   assert.equal(t.modes.synchronizedOutputMode, true);

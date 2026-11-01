@@ -26,7 +26,7 @@ window.api = {
     pair = { ox, xt, data };
     await frame();
   },
-  /** Writes to both and waits until both parsed it and oxtty drew a frame (input reads modes from the frame). */
+  /** Writes to both and waits until both parsed it and oxtty drew a frame. */
   async write(data) {
     const { ox, xt } = pair;
     await Promise.all([new Promise((r) => ox.write(data, r)), new Promise((r) => xt.write(data, r))]);

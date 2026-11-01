@@ -4,7 +4,7 @@ use oxtty::vt::event::VoidListener;
 use oxtty::vt::index::Column;
 use oxtty::vt::term::test::TermSize;
 use oxtty::vt::term::{Config, Term};
-use oxtty::vt::vte::ansi::{Processor, StdSyncHandler};
+use oxtty::vt::vte::ansi::Processor;
 
 #[test]
 fn widening_frees_a_pending_wrap_on_both_screens() {
@@ -22,7 +22,7 @@ fn widening_frees_a_pending_wrap_on_both_screens() {
 #[test]
 fn upstream_keeps_the_pending_wrap_on_the_alternate_screen() {
     let mut term = Term::new(Config::default(), &TermSize::new(5, 3), VoidListener);
-    Processor::<StdSyncHandler>::new().advance(&mut term, b"\x1b[?1049habcde");
+    Processor::new().advance(&mut term, b"\x1b[?1049habcde");
     term.resize(TermSize::new(7, 3));
     assert_eq!(term.grid().cursor.point.column, Column(4));
     assert!(term.grid().cursor.input_needs_wrap);

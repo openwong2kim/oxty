@@ -130,10 +130,16 @@ single crate.
 - The PTY and event-loop modules (`tty`, `event_loop`, `sync`, `thread`) and
   their dependencies are removed: the engine only takes bytes, and they do not
   build for `wasm32-unknown-unknown`. `Term`, `Grid` and the parser are
-  unchanged. The caller must use a clock-free `vte::ansi::Timeout` (the default
-  `StdSyncHandler` calls `Instant::now()`, which traps on wasm32 as soon as a
-  synchronized update `CSI ?2026h` starts) and expire it with
-  `Processor::stop_sync`.
+  unchanged.
+- A synchronized update (`CSI ? 2026 h` … `CSI ? 2026 l`) no longer holds
+  bytes back: as in xterm.js, the output is parsed and applied at once and
+  only the host's frames wait. `Processor` lost its sync buffer, its
+  `Timeout` parameter (`StdSyncHandler`, whose `Instant::now()` traps on
+  wasm32) and `stop_sync`; BSU and ESU reach the handler as private modes.
+  `Term` keeps the update as `TermMode::SYNC_UPDATE`: DECRQM reports it,
+  and RIS and DECSTR (`soft_reset`) end it, as xterm.js resets its
+  `synchronizedOutput` mode. The host ends a timed-out update with
+  `unset_private_mode`.
 - History kept outside the grid: `grid::HistorySink` receives the rows a full
   history drops, oldest first (`Grid::set_history_sink`; `scroll_up` hands
   them over before rotating, `clear_history` calls `HistorySink::clear`).
@@ -186,10 +192,7 @@ single crate.
   not stopped at, and CAN/SUB aborting an OSC or DCS runs no hook (the OSC
   still applies, as vte does). `finish_hook` runs the default action (a CSI
   is parsed again from its parameters, as vte's `Params` cannot be built) or
-  drops it. Applying an ending synchronized update parses from a `Replay`
-  that a hook can pause; the next `advance_until_hook` goes on with it.
-  `Processor::sync_bytes` exposes the held bytes, and `advance`/`stop_sync`
-  run hook defaults themselves, as before hooks existed. One `debug!`
+  drops it. `advance` runs hook defaults itself, as before hooks existed. One `debug!`
   argument lost a borrow for a newer clippy. To upgrade, diff this file
   against the old crate's `src/ansi.rs` and apply that to the new one.
 - xterm.js `windowsPty` behaviour is three options, each upstream by

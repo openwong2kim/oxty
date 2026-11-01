@@ -1275,7 +1275,7 @@ mod oracle {
     use crate::vt::grid::Cursor;
     use crate::vt::term::Config;
     use crate::vt::term::test::TermSize;
-    use crate::vt::vte::ansi::{Processor, StdSyncHandler};
+    use crate::vt::vte::ansi::Processor;
 
     /// Reproducible pseudo-random numbers (xorshift64*).
     struct Rng(u64);
@@ -1362,7 +1362,7 @@ mod oracle {
     struct Side {
         term: Term<VoidListener>,
         history: TermHistory,
-        parser: Processor<StdSyncHandler>,
+        parser: Processor,
     }
 
     impl Side {

@@ -81,6 +81,9 @@ bitflags! {
         const MOUSE_X10               = 1 << 23;
         /// oxtty: SGR mouse reports in pixels (`CSI ? 1016 h`).
         const SGR_PIXELS_MOUSE        = 1 << 24;
+        /// oxtty: a synchronized update (`CSI ? 2026 h`) is open. Output is applied at once, as in xterm.js; the
+        /// host holds its frames until the program ends the update or it times out.
+        const SYNC_UPDATE             = 1 << 25;
         const MOUSE_MODE              = Self::MOUSE_REPORT_CLICK.bits() | Self::MOUSE_MOTION.bits() | Self::MOUSE_DRAG.bits() | Self::MOUSE_X10.bits();
         const KITTY_KEYBOARD_PROTOCOL = Self::DISAMBIGUATE_ESC_CODES.bits()
                                       | Self::REPORT_EVENT_TYPES.bits()
@@ -786,7 +789,7 @@ impl<T> Term<T> {
 
     /// oxtty: DECSTR (`CSI ! p`) soft reset. vte drops this sequence, so `oxtty::Engine` finds it in the input and calls this.
     /// Resets the same items as xterm.js `softReset`: makes the cursor visible, turns off insert, origin, application cursor, application keypad,
-    /// bracketed paste and focus reporting, and turns on auto-wrap. The scroll region becomes the whole screen, the pen and character sets
+    /// bracketed paste, focus reporting and a synchronized update, and turns on auto-wrap. The scroll region becomes the whole screen, the pen and character sets
     /// go back to defaults, and the saved cursor goes to the top left with the default pen. The cursor position and screen content are unchanged.
     pub fn soft_reset(&mut self) {
         self.mode.insert(TermMode::SHOW_CURSOR | TermMode::LINE_WRAP);
@@ -796,7 +799,8 @@ impl<T> Term<T> {
                 | TermMode::APP_CURSOR
                 | TermMode::APP_KEYPAD
                 | TermMode::BRACKETED_PASTE
-                | TermMode::FOCUS_IN_OUT,
+                | TermMode::FOCUS_IN_OUT
+                | TermMode::SYNC_UPDATE,
         );
         self.scroll_region = Line(0)..Line(self.screen_lines() as i32);
         self.grid.cursor.template = Default::default();
@@ -2513,7 +2517,7 @@ impl<T: EventListener> Handler for Term<T> {
                 style.blinking = true;
                 self.event_proxy.send_event(Event::CursorBlinkingChange);
             },
-            NamedPrivateMode::SyncUpdate => (),
+            NamedPrivateMode::SyncUpdate => self.mode.insert(TermMode::SYNC_UPDATE),
         }
     }
 
@@ -2576,7 +2580,7 @@ impl<T: EventListener> Handler for Term<T> {
                 style.blinking = false;
                 self.event_proxy.send_event(Event::CursorBlinkingChange);
             },
-            NamedPrivateMode::SyncUpdate => (),
+            NamedPrivateMode::SyncUpdate => self.mode.remove(TermMode::SYNC_UPDATE),
         }
     }
 
@@ -2619,7 +2623,7 @@ impl<T: EventListener> Handler for Term<T> {
                 NamedPrivateMode::BracketedPaste => {
                     self.mode.contains(TermMode::BRACKETED_PASTE).into()
                 },
-                NamedPrivateMode::SyncUpdate => ModeState::Reset,
+                NamedPrivateMode::SyncUpdate => self.mode.contains(TermMode::SYNC_UPDATE).into(),
                 NamedPrivateMode::ColumnMode => ModeState::NotSupported,
             },
             PrivateMode::Unknown(9) => self.mode.contains(TermMode::MOUSE_X10).into(),

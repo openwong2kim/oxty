@@ -103,13 +103,13 @@ test('replies, title, bell', () => {
   assert.deepEqual(t.takeReplyList(), []);
 });
 
-test('synchronized output: program ends it', () => {
+test('synchronized output: applied at once, open until the program ends it', () => {
   const t = make();
   t.write('\x1b[?2026hSYNC');
   assert.equal(t.syncPending(), true);
-  assert.equal(t.rowText(0), '');
-  t.write('\x1b[?2026l');
   assert.equal(t.rowText(0), 'SYNC');
+  t.write('\x1b[?2026l');
+  assert.equal(t.syncPending(), false);
   t.dispose();
 });
 
@@ -117,10 +117,10 @@ test('synchronized output: timeout flushes and notifies', async () => {
   let flushed = 0;
   const t = make({ syncTimeoutMs: 20, onSyncFlush: () => flushed++ });
   t.write('\x1b[?2026hLATE');
-  assert.equal(t.rowText(0), '');
+  assert.equal(t.rowText(0), 'LATE');
   await new Promise((r) => setTimeout(r, 60));
   assert.equal(flushed, 1);
-  assert.equal(t.rowText(0), 'LATE');
+  assert.equal(t.syncPending(), false);
   t.dispose();
 });
 
@@ -311,14 +311,14 @@ test('parser hooks: writeUntilHook stops at a hooked sequence, finishHook decide
   assert.deepEqual(Array.from(t.takeReplies()), Array.from(new TextEncoder().encode('\x1b[1;5R')));
   t.setHook('csi', 0x6e, false);
   assert.equal(t.writeUntilHook('\x1b[6n'), true);
-  // Hooks held by a synchronized update stop the flush; resume applies the rest.
+  // Hooks inside a synchronized update stop where they are; flushSync only ends the update.
   t.setHook('csi', 0x6e, true);
-  assert.equal(t.writeUntilHook('\x1b[?2026hE\x1b[6nF'), true);
+  assert.equal(t.writeUntilHook('\x1b[?2026hE\x1b[6nF'), false);
   assert.equal(t.flushSync(), false);
+  assert.equal(t.syncPending(), false);
   t.finishHook(false);
   assert.equal(t.resume(), true);
   assert.equal(t.rowText(0), 'abcdEF');
-  assert.equal(t.syncPending(), false);
   t.dispose();
 });
 

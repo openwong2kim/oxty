@@ -43,7 +43,7 @@ const SCROLL_WHEEL_SENSITIVITY: f64 = 50.0;
 #[derive(Default)]
 pub(super) struct Mouse {
     encoder: MouseEncoder,
-    /// [`mouse_event`] bits the protocol of the last frame reports; `None` until `bind`.
+    /// [`mouse_event`] bits the protocol of the last parsed write reports; `None` until `bind`.
     events: Option<u8>,
     /// MouseService's document listeners for releases and drags after a reported press.
     document_up: bool,
@@ -117,7 +117,7 @@ pub(super) fn bind(shared: &Shared, core: &Core) {
     sync_modes_with(shared, core, true);
 }
 
-/// Follows the mouse modes of the frame just applied to the viewport (xterm.js `onProtocolChange`).
+/// Follows the mouse modes of the last parsed write (xterm.js `onProtocolChange`).
 pub(super) fn sync_modes(shared: &Rc<Shared>, force: bool) {
     let disable_selection = match shared.core.try_borrow() {
         Ok(core) if !core.disposed => sync_modes_with(shared, &core, force),
@@ -130,7 +130,7 @@ pub(super) fn sync_modes(shared: &Rc<Shared>, force: bool) {
 
 /// Returns whether the selection was disabled, which clears it once the core borrow is dropped.
 fn sync_modes_with(shared: &Shared, core: &Core, force: bool) -> bool {
-    let modes = core.viewport.modes;
+    let modes = shared.input.modes.get();
     let events = mouse_events(modes);
     let changed = {
         let mut m = shared.input.mouse.borrow_mut();
@@ -407,7 +407,7 @@ fn context(shared: &Shared) -> Option<Context> {
     let number = |key: &str, default: f64| option(&core.options, key).as_f64().unwrap_or(default);
     Some(Context {
         dimensions,
-        modes: v.modes,
+        modes: shared.input.modes.get(),
         grid: MouseGrid {
             cols: v.cols,
             rows: v.rows,
@@ -609,7 +609,7 @@ fn selection_mouse_up(shared: &Rc<Shared>, event: &MouseEvent) {
             cols,
             rows,
             dimensions(&core),
-            core.viewport.modes & mode::APP_CURSOR != 0,
+            shared.input.modes.get() & mode::APP_CURSOR != 0,
             scrollback,
         )
     }) else {

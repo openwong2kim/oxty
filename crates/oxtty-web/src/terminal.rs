@@ -170,10 +170,6 @@ impl Terminal {
             let slot = slot.clone();
             Closure::<dyn FnMut()>::new(move || {
                 let weak = slot.borrow().clone();
-                // Hook: parser handlers of a hook the flush stopped at run now (the engine's own timer task).
-                if let Some(shared) = weak.upgrade() {
-                    crate::parser::after_sync_flush(&shared);
-                }
                 timer::queue(move || {
                     if let Some(shared) = weak.upgrade() {
                         shared.after_change();
@@ -565,6 +561,8 @@ impl Shared {
             }
             (core.view.take_events(), get(&core.options, "clipboard"))
         };
+        // Hook: input encodes with the modes this parse left, as xterm.js has them at once.
+        crate::input::follow_modes(self, events.modes, events.kitty_flags);
         // One `onData` per reply, as xterm.js `triggerDataEvent`s them. Replies are not user input: `disableStdin`
         // drops them, they do not scroll the view.
         for reply in &events.replies {
@@ -757,7 +755,11 @@ impl Shared {
             if core.disposed || core.element.is_none() {
                 return;
             }
-            let frame = core.view.take_frame();
+            let Some(frame) = core.view.take_frame() else {
+                // A synchronized update holds the picture; when it ends every row is drawn, as in xterm.js.
+                core.dirty = Dirty::All;
+                return;
+            };
             let changed = core.viewport.apply(frame);
             let switched = crate::selection::follow(self, &core.viewport);
             // Without a renderer (none yet, or no WebGL2) the viewport still follows the engine: input reads it.

@@ -382,8 +382,8 @@ export class Terminal {
     }
   }
 
-  // Synchronized output (CSI ? 2026 h) holds the screen until the program
-  // ends it; if it never does, flush after a timeout like other terminals.
+  // Synchronized output (CSI ? 2026 h) holds the renderer's frames until the
+  // program ends it; if it never does, end it after a timeout like other terminals.
   #armSync() {
     const pending = wasm.oxtty_sync_pending(this.#h) === 1;
     if (pending && !this.#syncTimer) {
@@ -619,7 +619,7 @@ export class Terminal {
     return wasm.oxtty_sync_pending(this.#handle()) === 1;
   }
 
-  /** Applies the output a synchronized update holds. Returns false when it stopped at a hook (see `writeUntilHook`). */
+  /** Ends a synchronized update, as its timeout does. Returns false while a hook is pending (see `writeUntilHook`). */
   flushSync() {
     const h = this.#handle();
     wasm.oxtty_flush_sync(h);

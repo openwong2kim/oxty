@@ -42,10 +42,7 @@ export type AnsiSnapshot =
 
 #[wasm_bindgen(raw_module = "./index.js")]
 extern "C" {
-    /// A synchronized update (`CSI ? 2026 h`) is holding output.
-    #[wasm_bindgen(method, catch, js_class = "Terminal", js_name = syncPending)]
-    fn sync_pending(this: &Engine) -> Result<bool, JsValue>;
-    /// Applies the output a synchronized update holds.
+    /// Ends a synchronized update.
     #[wasm_bindgen(method, catch, js_class = "Terminal", js_name = flushSync)]
     fn flush_sync(this: &Engine) -> Result<bool, JsValue>;
 }
@@ -95,8 +92,8 @@ impl Terminal {
         modes
     }
 
-    /// Full reset (RIS), applied at once: output a synchronized update holds is applied first, writes still
-    /// queued are parsed afterwards (as in xterm.js, whose write buffer `reset` leaves alone).
+    /// Full reset (RIS), applied at once: a synchronized update ends, writes still queued are parsed afterwards (as
+    /// in xterm.js, whose write buffer `reset` leaves alone).
     pub fn reset(&self) {
         {
             let Ok(mut core) = self.shared.core.try_borrow_mut() else {

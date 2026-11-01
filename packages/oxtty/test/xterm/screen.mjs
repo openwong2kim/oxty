@@ -9,7 +9,6 @@
 // - Colors: 'default' or (mode | value). xterm CM_P16/P256/RGB bits == oxtty NAMED/INDEXED/RGB bits.
 // - Underline uses getUnderlineStyle() (isUnderline() is true on OSC 8 links). Underline color only when underlined, 'default' without SGR 58.
 // - Fields oxtty does not model are constants (OXTTY_CONSTANT). If such a field turns on in xterm, it shows up as a difference.
-// - oxtty synchronized output: flushSync() before reading, because xterm applies to the buffer immediately even during ?2026.
 
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -138,10 +137,9 @@ const UNDERLINES = [
 ];
 const mouse = (m) => (m & Mode.MOUSE_MOTION ? 'any' : m & Mode.MOUSE_DRAG ? 'drag' : m & Mode.MOUSE_CLICK ? 'vt200' : 'none');
 
-/** @returns {Screen} Uses only the oxtty public API. Side effect: applies held synchronized output (rule above). */
+/** @returns {Screen} Uses only the oxtty public API. */
 export function oxttyScreen(t) {
   const synchronizedOutput = t.syncPending();
-  t.flushSync();
   const history = t.historyLength;
   const c = t.cursor();
   const m = t.modes();

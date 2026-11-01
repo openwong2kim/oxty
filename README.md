@@ -54,7 +54,7 @@ flowchart LR
   as UTF-8 text plus runs of equal attributes: a 120-column log line takes
   about 100 bytes instead of 1440 in xterm.js. Rows decode on read.
 - **Built for TUIs.** Synchronized output (`CSI ? 2026 h`), used heavily by
-  coding agents, is held until the program ends the update.
+  coding agents, holds frames until the program ends the update.
 - **Checked against xterm.js.** Every fixture is fed to oxtty and to
   `@xterm/headless`, and the test fails on any difference that is not listed
   with a reason.
@@ -236,11 +236,13 @@ what xterm.js and its clipboard addon send.
 <details>
 <summary><b>Synchronized output</b></summary>
 
-`CSI ? 2026 h` is honoured: output is held until the program ends the update.
-The engine has no clock — vte's default timer calls `Instant::now()`, which
-traps on `wasm32-unknown-unknown` — so the host flushes stalled updates. The
-npm wrapper does this for you after 150 ms and calls `onSyncFlush`; Rust and
-N-API hosts call `flush_sync()` themselves.
+`CSI ? 2026 h` is honoured as in xterm.js: the output is applied at once (the
+rows read the new content) and `sync_pending()` is true until the program ends
+the update, so a renderer holds its frames meanwhile. The engine has no clock
+(`Instant::now()` traps on `wasm32-unknown-unknown`), so the host ends stalled
+updates. The npm wrapper does this for you after 150 ms and calls
+`onSyncFlush`, and `oxtty/xterm` holds its frames on its own; Rust and N-API
+hosts check `sync_pending()` and call `flush_sync()` themselves.
 
 </details>
 
@@ -253,9 +255,8 @@ unfinished escape or UTF-8 tail. It returns `{ ok: false, reason }`
 (`unsupported-wide-edge`, `margins`, `partial-tail-overflow`) when ANSI cannot
 express the state; replay the raw bytes instead.
 
-During a synchronized update the payload is the screen from before it,
-followed by `CSI ? 2026 h` and the held output raw, so the receiver is inside
-the same update. Taking a snapshot never changes the engine, so it is safe on
+During a synchronized update `CSI ? 2026 h` comes before the unfinished tail,
+so the receiver is inside the same update. Taking a snapshot never changes the engine, so it is safe on
 the terminal a renderer is drawing.
 
 Not carried over yet: charset designation and shift, the DECSC saved cursor,

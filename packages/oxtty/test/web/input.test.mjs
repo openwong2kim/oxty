@@ -191,6 +191,77 @@ test('input matches xterm.js', async (t) => {
       assert.deepEqual(typed, ['\x1b[1;1R', 'p', 'a']);
     });
 
+    await t.test('keys, pastes, mouse and focus reports right after the write that changed the modes use them, like xterm.js', async () => {
+      await setup(page, { vtExtensions: { kittyKeyboard: true } });
+      // Each step writes to a terminal and acts in the same task the write callback resolves in: no frame between.
+      const sent = await page.evaluate(async () => {
+        const key = (t, init) => t.textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+        const steps = [
+          ['\x1b[>1u', (t) => key(t, { key: ' ', code: 'Space', keyCode: 32, which: 32 })],
+          ['', (t) => key(t, { key: 'Escape', code: 'Escape', keyCode: 27, which: 27 })],
+          ['\x1b[<u\x1b[?1h', (t) => key(t, { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38, which: 38 })],
+          ['\x1b[?1l\x1b[?2004h', (t) => t.paste('p')],
+          ['\x1b[?2004l\x1b[?1000h\x1b[?1006h', (t) => {
+            const screen = t.element.querySelector('.xterm-screen');
+            const { left, top } = screen.getBoundingClientRect();
+            screen.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, detail: 1, clientX: left + 2, clientY: top + 2 }));
+          }],
+          ['\x1b[?1000l\x1b[?1006l\x1b[?1004h', (t) => (t.focus(), t.blur())],
+        ];
+        const out = [];
+        for (const [data, act] of steps) {
+          for (const name of ['ox', 'xt']) {
+            const t = window.api.terminal(name);
+            await new Promise((resolve) => t.write(data, resolve));
+            act(t);
+          }
+          out.push(window.api.take());
+        }
+        return out;
+      });
+      for (const { ox, xt } of sent) assert.deepEqual(ox, xt);
+      assert.deepEqual(sent.map(({ ox }) => ox), [[' '], ['\x1b[27u'], ['\x1bOA'], ['\x1b[200~p\x1b[201~'], ['\x1b[<0;1;1M'], ['\x1b[O', '\x1b[I', '\x1b[O']]);
+    });
+
+    await t.test('input() sends its data as if typed, or as is with wasUserInput false, like xterm.js', async () => {
+      await setup(page, { scrollback: 50 });
+      await write(page, 'abc\r\n'.repeat(20));
+      const facts = await page.evaluate(() => ['ox', 'xt'].map((name) => {
+        const t = window.api.terminal(name);
+        const state = () => {
+          const { viewportY, baseY } = t.buffer.active;
+          return [viewportY === baseY, t.hasSelection()];
+        };
+        const run = (fn) => {
+          t.scrollLines(-5);
+          t.select(0, t.buffer.active.viewportY, 3);
+          fn();
+          return state();
+        };
+        const typed = run(() => t.input('\x1b[A'));
+        const sent = run(() => t.input('raw', false));
+        t.options.disableStdin = true;
+        t.input('dropped');
+        t.input('dropped', false);
+        t.options.disableStdin = false;
+        return { typed, sent };
+      }));
+      assert.deepEqual(facts[0], facts[1]);
+      assert.deepEqual(facts[0], { typed: [true, false], sent: [false, true] });
+      assert.deepEqual(await take(page), { ox: ['\x1b[A', 'raw'], xt: ['\x1b[A', 'raw'] });
+      const order = await page.evaluate(() => {
+        const t = window.api.terminal('ox');
+        const seen = [];
+        const subs = [t.onUserInput(() => seen.push('user')), t.onData((d) => seen.push(d))];
+        t.input('a');
+        t.input('b', false);
+        subs.forEach((s) => s.dispose());
+        return seen;
+      });
+      assert.deepEqual(order, ['user', 'a', 'b']);
+      await take(page);
+    });
+
     await t.test('kitty keyboard: vtExtensions, flags and reset (oxtty API)', async () => {
       const escape = async () => {
         await press(page, 'Escape')('ox');

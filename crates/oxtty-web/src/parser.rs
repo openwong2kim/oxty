@@ -137,14 +137,6 @@ pub(crate) fn feed(shared: &Rc<Shared>, slice: &JsValue) -> Result<Parsed, JsVal
     run_hooks(shared)
 }
 
-/// The engine applied a synchronized update that ran out of time, which may have stopped at a hook. Called from
-/// the engine's own timer task, so the handlers run before anything else is parsed.
-pub(crate) fn after_sync_flush(shared: &Rc<Shared>) {
-    if shared.parser.hooked() && !paused(shared) {
-        let _ = run_hooks(shared);
-    }
-}
-
 /// Drops the handlers: they may hold the terminal, and the engine is gone.
 pub(crate) fn dispose(shared: &Shared) {
     shared.parser.handlers.borrow_mut().clear();

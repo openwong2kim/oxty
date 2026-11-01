@@ -73,7 +73,7 @@
     },
     "options.vtExtensions.kittyKeyboard": {
       "status": "supported",
-      "reason": "Turns the engine's kitty protocol on (setKittyKeyboard); keys go through oxtty::input's kitty encoder (ported from xterm.js 6.1) with the flags of the last frame. Turning it off drops the pushed flags."
+      "reason": "Turns the engine's kitty protocol on (setKittyKeyboard); keys go through oxtty::input's kitty encoder (ported from xterm.js 6.1) with the flags as of the last parsed write, so a key right after a push uses it as in xterm.js. Turning it off drops the pushed flags."
     },
     "options.vtExtensions.colorSchemeQuery": {
       "status": "unsupported",
@@ -178,6 +178,10 @@
     "Terminal.textarea": {
       "status": "supported",
       "reason": "The hidden textarea in .xterm-helpers, set by open(); keydown, keypress, input, composition and paste are handled as in xterm.js 6.1 (crates/oxtty-web/src/input)."
+    },
+    "Terminal.input": {
+      "status": "supported",
+      "reason": "xterm.js CoreTerminal.input (CoreService.triggerDataEvent): onData with the data as is; with wasUserInput (default true) it scrolls to the bottom under scrollOnUserInput, fires onUserInput and clears the selection like typing; disableStdin drops it either way. input.test.mjs compares it with xterm.js."
     },
     "Terminal.attachCustomKeyEventHandler": {
       "status": "supported",
@@ -411,7 +415,7 @@
     },
     "_core.coreService.kittyKeyboard": {
       "status": "supported",
-      "reason": "oxtty API: xtermKittyFlags(term) becomes term.kittyKeyboardFlags (the flags the encoder uses, from the last frame) and resetXtermKitty(term) becomes term.resetKittyKeyboard() (both screens, applied at once). Resetting in stream order at OSC 133;A still needs registerOscHandler (later).",
+      "reason": "oxtty API: xtermKittyFlags(term) becomes term.kittyKeyboardFlags (the flags the encoder uses, as of the last parsed write) and resetXtermKitty(term) becomes term.resetKittyKeyboard() (both screens, applied at once). Resetting in stream order at OSC 133;A still needs registerOscHandler (later).",
       "exercisedBy": "kittyKeyboardFlags[\\s\\S]*resetKittyKeyboard"
     },
     "_core.coreService.onUserInput": {

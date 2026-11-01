@@ -105,32 +105,35 @@ fn keeps_split_utf8_raw() {
 }
 
 #[test]
-fn held_sync_is_carried_raw_and_repeatable() {
+fn open_sync_is_carried_and_repeatable() {
     let mut t = Engine::new(20, 4, 0);
     t.feed(b"\x1b[?2026hhello");
     let first = snapshot(&mut t);
     assert!(t.sync_pending());
     assert_eq!(snapshot(&mut t), first);
-    assert!(first.ends_with(b"\x1b[?2026hhello"));
+    assert!(first.ends_with(b"\x1b[?2026h"));
+    let mut copy = Engine::new(20, 4, 0);
+    copy.feed(&first);
+    assert_eq!(
+        (copy.sync_pending(), copy.row_text(0).unwrap()),
+        (true, "hello".into())
+    );
     t.feed(b" world\x1b[?2026l");
     assert!(!t.sync_pending());
     assert_eq!(t.row_text(0).unwrap(), "hello world");
 }
 
 #[test]
-fn held_sync_is_judged_on_the_screen_before_it() {
+fn open_sync_is_judged_on_the_screen_it_has_applied() {
     let mut t = Engine::new(10, 4, 0);
-    // Even if the update clears the margins, it has not been applied yet, so reject.
-    t.feed(b"\x1b[2;3r\x1b[?2026h\x1b[r");
+    // The update's output is applied at once, so margins it sets are refused and margins it clears are not.
+    t.feed(b"\x1b[?2026h\x1b[2;3r");
     assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::Margins));
-    assert!(t.sync_pending());
-    // Conversely, margins and long incomplete sequences inside the update are carried over as raw bytes, so they are not grounds for rejection.
-    t.feed(b"\x1b[?2026l\x1b[?2026h\x1b[2;3rX\x1b]0;");
-    t.feed(&[b'a'; 5000]);
-    t.feed(b"\x07\x1b[3");
+    t.feed(b"\x1b[rX\x1b[3");
     let first = snapshot(&mut t);
     assert_eq!(snapshot(&mut t), first);
-    assert!(first.ends_with(b"\x07\x1b[3"));
+    // The unfinished sequence comes after the update starts again.
+    assert!(first.ends_with(b"\x1b[?2026h\x1b[3"));
     let mut copy = Engine::new(10, 4, 0);
     copy.feed(&first);
     for e in [&mut t, &mut copy] {
@@ -166,7 +169,7 @@ fn snapshot_leaves_the_live_engine_untouched() {
     };
     assert_eq!(
         (t.take_damage(), t.row_text(1).unwrap(), t.sync_pending()),
-        (none, "".into(), true)
+        (none, "frame".into(), true)
     );
     assert_eq!(snapshot(&mut t), first);
 }
@@ -183,7 +186,7 @@ fn snapshot_during_sync_replays_into_the_same_update() {
             copy.row_text(0).unwrap(),
             copy.row_text(1).unwrap()
         ),
-        (true, "before".into(), "".into())
+        (true, "before".into(), "frame".into())
     );
     for e in [&mut t, &mut copy] {
         e.feed(b"mX\x1b[?2026l");
@@ -201,7 +204,7 @@ fn rows(e: &Engine) -> Vec<String> {
 /// Taking a snapshot at every split point across sync boundaries leaves the engine unchanged, and the receiver is inside the same update.
 #[test]
 fn snapshot_at_every_split_of_synchronized_output() {
-    // BSU right after ESU (fed at once, vte keeps everything from the new BSU in its buffer), a wide character and an incomplete CSI inside sync.
+    // BSU right after ESU, a wide character and an incomplete CSI inside sync.
     let input =
         "pre\r\n\x1b[?2026hA\x1b[31mB\x1b[?2026l\x1b[?2026hC한\x1b[4\x1b[?2026lD\x1b[?2026hE"
             .as_bytes();
@@ -403,7 +406,7 @@ fn exclude_modes_paints_only_the_screen() {
         "default modes"
     );
     assert!(copy.cursor().visible);
-    // A synchronized update in progress is not carried: the screen from before it is what shows
+    // A synchronized update in progress is not carried
     t.feed(b"m\x1b[?2026hheld");
     let cold = t
         .ansi_snapshot_with(SnapshotOptions {

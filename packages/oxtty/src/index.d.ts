@@ -8,9 +8,9 @@ export interface TerminalOptions {
   rows?: number;
   /** Lines of history to keep (default 1000, max 100000). */
   scrollback?: number;
-  /** Flush a synchronized update the program never ended after this many ms (default 150). */
+  /** End a synchronized update the program never ended after this many ms (default 150). */
   syncTimeoutMs?: number;
-  /** Called after such a timed flush, so the renderer can redraw. */
+  /** Called after such a timed end, so the renderer can redraw. */
   onSyncFlush?: () => void;
   /**
    * Called when the engine crashed (a trap in the shared WebAssembly
@@ -61,8 +61,8 @@ export interface CellExtra {
 /**
  * `payload` written to a fresh xterm.js of the same size and scrollback
  * rebuilds this screen; it ends with the unfinished escape sequence or UTF-8
- * character the output stopped in. During a synchronized update it is the
- * screen from before the update, then `CSI ? 2026 h` and the held output raw.
+ * character the output stopped in. During a synchronized update `CSI ? 2026 h`
+ * comes before that unfinished end, so the receiver is inside the same update.
  * On refusal replay the raw output instead.
  */
 export type AnsiSnapshot =
@@ -190,8 +190,12 @@ export class Terminal {
   replyClipboard(selection: 'c' | 'p', text: string): boolean;
   /** Colours (0xRRGGBB, COLOR_SLOTS of them: palette 0–255, foreground, background, cursor) that answer OSC 4/10/11/12 queries; null stops answering. */
   setColors(colors: ArrayLike<number> | null): void;
+  /**
+   * A synchronized update (`CSI ? 2026 h`) is open. Its output is applied at once, as in xterm.js; a renderer
+   * holds its frames (does not take damage) until it ends.
+   */
   syncPending(): boolean;
-  /** Applies the output a synchronized update holds. False when it stopped at a hook (see `writeUntilHook`). */
+  /** Ends a synchronized update, as its timeout does. False while a hook is pending (see `writeUntilHook`). */
   flushSync(): boolean;
   /**
    * Stops parsing at sequences of `kind` with `id`, or no longer does (`on` false). For CSI and DCS the id is the
@@ -202,7 +206,7 @@ export class Terminal {
   /**
    * Like `write`, but stops right after a hooked sequence, before its default action. True when all of `data` was
    * parsed; false when stopped: read `pendingHook()`, run or skip the default with `finishHook()`, then `resume()`.
-   * Throws until then. The output of a synchronized update is parsed when it ends, so its hooks are met then.
+   * Throws until then.
    */
   writeUntilHook(data: string | Uint8Array): boolean;
   pendingHook(): Hook | null;

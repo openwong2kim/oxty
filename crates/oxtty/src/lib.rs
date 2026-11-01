@@ -49,7 +49,9 @@ use crate::vt::term::cell::{Cell as AlacCell, Flags};
 use crate::vt::term::{ClipboardType, Config, Osc52, Term, TermDamage, TermMode};
 use crate::vt::vte::ansi::Hook as VtHook;
 use crate::vt::vte::ansi::Rgb;
-use crate::vt::vte::ansi::{Color, CursorShape as AlacCursorShape, Processor, Timeout};
+use crate::vt::vte::ansi::{
+    Color, CursorShape as AlacCursorShape, Handler, NamedPrivateMode, Processor,
+};
 pub use crate::vt::vte::ansi::{HookKind, hook_id};
 
 /// Smallest and largest accepted dimensions.
@@ -60,8 +62,8 @@ pub const MAX_ROWS: u16 = 1000;
 /// Upper bound on retained scrollback lines.
 pub const MAX_SCROLLBACK: usize = 100_000;
 
-/// How long a synchronized update (`CSI ? 2026 h`) may hold output back
-/// before the host should call [`Engine::flush_sync`]. Matches Alacritty.
+/// How long a synchronized update (`CSI ? 2026 h`) may hold the host's
+/// frames back before it should call [`Engine::flush_sync`]. Matches Alacritty.
 pub const SYNC_TIMEOUT: Duration = Duration::from_millis(150);
 
 /// Cell attribute bits returned in [`Cell::attrs`]. Stable across versions.
@@ -361,29 +363,6 @@ impl EventListener for Listener {
     }
 }
 
-/// Synchronized-update timeout without a clock.
-///
-/// vte's default `StdSyncHandler` calls `Instant::now()`, which traps on
-/// `wasm32-unknown-unknown` the moment a program sends `CSI ? 2026 h`.
-/// Here the host owns time: it sees [`Engine::sync_pending`] and calls
-/// [`Engine::flush_sync`] after [`SYNC_TIMEOUT`].
-#[derive(Default)]
-struct HostTimeout {
-    pending: bool,
-}
-
-impl Timeout for HostTimeout {
-    fn set_timeout(&mut self, _: Duration) {
-        self.pending = true;
-    }
-    fn clear_timeout(&mut self) {
-        self.pending = false;
-    }
-    fn pending_timeout(&self) -> bool {
-        self.pending
-    }
-}
-
 struct Size {
     cols: usize,
     rows: usize,
@@ -411,7 +390,7 @@ fn size(cols: u16, rows: u16) -> Size {
 /// The terminal engine.
 pub struct Engine {
     term: Term<Listener>,
-    parser: Processor<HostTimeout>,
+    parser: Processor,
     inbox: Listener,
     tail: snapshot::RawTail,
     // Compressed history. When on, Alacritty keeps only the newest TermHistory::RECENT rows and hands
@@ -622,17 +601,13 @@ impl Engine {
 
     /// Like [`Engine::feed`], but stops right after a hooked sequence and returns how many bytes it took. The
     /// sequence's default action has not run: read it with [`Engine::pending_hook`], call [`Engine::finish_hook`],
-    /// then call this again with the bytes it did not take — even none, as it first goes on with output parsing
+    /// then call this again with the bytes it did not take — even none, as it first goes on with what parsing
     /// stopped in. Takes nothing while a hook is pending.
-    ///
-    /// The output held by a synchronized update is parsed when the update ends, so its hooks are met by the call
-    /// that ends it (which then takes all of its bytes) or by [`Engine::flush_sync`].
     pub fn feed_until_hook(&mut self, bytes: &[u8]) -> usize {
         if self.parser.pending_hook().is_some() {
             return 0;
         }
-        // What parsing stopped in: the rest of a synchronized update being applied, then a DECSTR's reset.
-        self.advance(&[]);
+        // What parsing stopped in: a DECSTR's reset.
         self.settle();
         let mut fed = 0;
         while fed < bytes.len() && self.parser.pending_hook().is_none() {
@@ -716,17 +691,14 @@ impl Engine {
         self.follow_markers();
     }
 
-    /// The soft reset of a parsed DECSTR, once no hook holds it back. As in xterm.js, DECSTR also ends a
-    /// synchronized update, which may stop at a hook first.
+    /// The soft reset of a parsed DECSTR, once no hook holds it back. As in xterm.js, it also ends a
+    /// synchronized update.
     fn settle(&mut self) {
         if !self.decstr_owed || self.parser.pending_hook().is_some() {
             return;
         }
-        self.flush_sync();
-        if self.parser.pending_hook().is_none() {
-            self.term.soft_reset();
-            self.decstr_owed = false;
-        }
+        self.term.soft_reset();
+        self.decstr_owed = false;
     }
 
     /// The host's focus, for the report xterm.js sends when the program turns on focus events (`CSI ? 1004 h`):
@@ -1185,19 +1157,19 @@ impl Engine {
         std::mem::take(&mut self.inbox.inbox().bells)
     }
 
-    /// A synchronized update is holding output back. Call
-    /// [`Engine::flush_sync`] if it is still pending after [`SYNC_TIMEOUT`].
+    /// A synchronized update (`CSI ? 2026 h`) is open. Output is applied at
+    /// once, as in xterm.js (the rows read the new content); a host that
+    /// draws should not take frames meanwhile, and call [`Engine::flush_sync`]
+    /// if the update is still open after [`SYNC_TIMEOUT`]. RIS and DECSTR end
+    /// it too.
     pub fn sync_pending(&self) -> bool {
-        self.parser.sync_timeout().pending_timeout()
+        self.term.mode().contains(TermMode::SYNC_UPDATE)
     }
 
-    /// Ends a pending synchronized update and applies the held output. A hooked sequence in it stops parsing as
-    /// in [`Engine::feed_until_hook`], which applies the rest after [`Engine::finish_hook`].
+    /// Ends an open synchronized update, as its timeout does in xterm.js.
     pub fn flush_sync(&mut self) {
-        if self.sync_pending() {
-            self.parser.stop_sync_until_hook(&mut self.term);
-            self.after_parse();
-        }
+        self.term
+            .unset_private_mode(NamedPrivateMode::SyncUpdate.into());
     }
 
     /// Bytes that rebuild this screen in a fresh xterm.js terminal of the same
@@ -1206,12 +1178,11 @@ impl Engine {
     /// UTF-8 character the output ended in the middle of, so the program's
     /// next bytes continue there as they do here.
     ///
-    /// During a synchronized update the payload is the screen from before the
-    /// update, then `CSI ? 2026 h` and the held output raw, so the receiver
-    /// is inside the same update and ends it on the same bytes. Refusals are
-    /// judged on that earlier screen.
+    /// During a synchronized update `CSI ? 2026 h` comes before that raw end,
+    /// so the receiver is inside the same update and ends it on the same
+    /// bytes.
     ///
-    /// The engine is not changed (no damage, the update stays held), so it is
+    /// The engine is not changed (no damage, the update stays open), so it is
     /// safe on an engine being drawn, and calling this twice gives the same
     /// bytes.
     ///
@@ -1224,9 +1195,14 @@ impl Engine {
     /// [`Engine::ansi_snapshot`] with less history or without the modes, as `@xterm/addon-serialize` offers
     /// (`{ scrollback: 0, excludeModes: true }` paints just the screen the terminal shows).
     pub fn ansi_snapshot_with(&self, options: SnapshotOptions) -> Result<Vec<u8>, SnapshotRefusal> {
-        let held = self.sync_pending().then_some(self.parser.sync_bytes());
         let history = self.history.as_ref().map(TermHistory::lock);
-        snapshot::ansi(&self.term, held, &self.tail, history.as_deref(), options)
+        snapshot::ansi(
+            &self.term,
+            self.sync_pending(),
+            &self.tail,
+            history.as_deref(),
+            options,
+        )
     }
 }
 

@@ -30,9 +30,9 @@ test('native sync flush and scrollback', () => {
   const t = new Terminal(20, 5);
   t.write('\x1b[?2026hHELD');
   assert.equal(t.syncPending(), true);
-  assert.equal(t.rowText(0), '');
-  t.flushSync();
   assert.equal(t.rowText(0), 'HELD');
+  t.flushSync();
+  assert.equal(t.syncPending(), false);
   for (let i = 0; i < 10; i++) t.write(`\r\nline ${i}`);
   assert.ok(t.historyLength > 0);
   assert.equal(typeof t.trimmedLines, 'number');

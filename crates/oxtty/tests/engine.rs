@@ -201,18 +201,23 @@ fn title_and_bell() {
 }
 
 #[test]
-fn synchronized_output_waits_for_end_or_host_flush() {
+fn synchronized_output_is_applied_at_once_and_open_until_end_or_host_flush() {
     let mut t = term();
+    // As in xterm.js, the buffer has the output inside the update; only the host's frames wait.
     t.feed(b"\x1b[?2026hSYNC");
     assert!(t.sync_pending());
-    assert_eq!(t.row_text(0).unwrap(), "");
+    assert_eq!(t.row_text(0).unwrap(), "SYNC");
+    t.feed(b"\x1b[?2026$p");
+    assert_eq!(t.take_replies(), b"\x1b[?2026;1$y");
     t.feed(b"\x1b[?2026l");
     assert!(!t.sync_pending());
-    assert_eq!(t.row_text(0).unwrap(), "SYNC");
     t.feed(b"\x1b[?2026hLATE");
     t.flush_sync();
     assert!(!t.sync_pending());
     assert_eq!(t.row_text(0).unwrap(), "SYNCLATE");
+    t.feed(b"\x1b[?2026$p\x1b[?2026h\x1bc");
+    assert!(!t.sync_pending());
+    assert_eq!(t.take_replies(), b"\x1b[?2026;2$y");
 }
 
 #[test]

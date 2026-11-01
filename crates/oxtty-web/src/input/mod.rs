@@ -1,8 +1,10 @@
 //! Keyboard, IME, paste, focus and mouse input: the hidden textarea and the DOM listeners of xterm.js 6.1
 //! (`CoreBrowserTerminal`, `CompositionHelper`, `MouseService`), ported to Rust around the encoders of
-//! `oxtty::input`. Encoding reads modes and kitty flags from the last frame ([`crate::engine::Viewport`], PRD D7);
-//! the engine is only called for terminal actions (scrolling, the kitty switch, the host focus it reports when the
-//! program asks) and the `kittyKeyboardFlags` getter (public API, like `modes`), and the scroll position and the lines Alt+click walks come from `buffer.active`.
+//! `oxtty::input`. Encoding reads modes and kitty flags as of the last parsed write ([`crate::engine::Events`],
+//! PRD D7), so a key right after the write that changed them is encoded as in xterm.js; the engine is only called
+//! for terminal actions (scrolling, the kitty switch, the host focus it reports when the program asks) and the
+//! `kittyKeyboardFlags` getter (public API, like `modes`), and the scroll position and the lines Alt+click walks
+//! come from `buffer.active`.
 //!
 //! Memory: one DOM listener closure per terminal. Every listener the terminal registers (textarea, element,
 //! screen, document, window) is that closure, which dispatches on the event's type and current target; the
@@ -23,7 +25,7 @@ mod move_to_cell;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use js_sys::Function;
+use js_sys::{Function, JsString};
 use oxtty::input::{encode_focus, encode_paste, KeyOptions, Platform};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -253,6 +255,9 @@ pub(crate) struct Input {
     mouse: RefCell<mouse::Mouse>,
     /// `vtExtensions.kittyKeyboard` as last given to the engine.
     kitty_keyboard: Cell<bool>,
+    /// The engine's mode bits and kitty keyboard flags as of the last parsed write, which the encoders use.
+    modes: Cell<u32>,
+    kitty_flags: Cell<u32>,
 }
 
 impl Input {
@@ -499,14 +504,26 @@ pub(crate) fn set_option(shared: &Rc<Shared>, key: &str) {
     }
 }
 
-/// After a frame was applied to the viewport: mouse listeners follow the protocol, the textarea follows the cursor,
-/// and an open composition view is placed again (xterm.js does that on every render).
-pub(crate) fn after_frame(shared: &Rc<Shared>) {
+/// The modes and kitty flags after a parse (or of a frame): the encoders use them from now on, and the mouse
+/// listeners follow the protocol (xterm.js `onProtocolChange`).
+pub(crate) fn follow_modes(shared: &Rc<Shared>, modes: u32, kitty_flags: u32) {
+    shared.input.modes.set(modes);
+    shared.input.kitty_flags.set(kitty_flags);
     mouse::sync_modes(shared, false);
-    let cursor = shared.core.try_borrow().ok().map(|core| {
-        let c = core.viewport.cursor;
-        (c.line, c.col)
-    });
+}
+
+/// After a frame was applied to the viewport: its modes are the newest (an engine that restarted has the defaults),
+/// the textarea follows the cursor, and an open composition view is placed again (xterm.js does that on every
+/// render).
+pub(crate) fn after_frame(shared: &Rc<Shared>) {
+    let Some((modes, kitty_flags, cursor)) = shared.core.try_borrow().ok().map(|core| {
+        let v = &core.viewport;
+        (v.modes, v.kitty_flags, (v.cursor.line, v.cursor.col))
+    }) else {
+        return;
+    };
+    follow_modes(shared, modes, kitty_flags);
+    let cursor = Some(cursor);
     let moved = shared
         .input
         .dom_mut(|dom| std::mem::replace(&mut dom.cursor, cursor) != cursor)
@@ -590,7 +607,7 @@ fn custom_handler_allows(handler: &RefCell<Option<Function>>, event: &JsValue) -
     }
 }
 
-/// The key options and the modes of the last frame, read together.
+/// The key options and the modes of the last parsed write, read together.
 struct KeyContext {
     options: KeyOptions,
     modes: u32,
@@ -610,9 +627,9 @@ fn key_context(shared: &Shared) -> Option<KeyContext> {
             platform: platform(),
             mac_option_is_meta: option(&core.options, "macOptionIsMeta").is_truthy(),
         },
-        modes: core.viewport.modes,
+        modes: shared.input.modes.get(),
         kitty_flags: if shared.input.kitty_keyboard.get() {
-            core.viewport.kitty_flags as u8
+            shared.input.kitty_flags.get() as u8
         } else {
             0
         },
@@ -631,7 +648,7 @@ fn handle_focus(shared: &Rc<Shared>, focused: bool) {
             return;
         }
         let _ = core.view.engine().set_focus(focused);
-        encode_focus(focused, core.viewport.modes)
+        encode_focus(focused, shared.input.modes.get())
     };
     if !focused {
         // Text can safely be removed on blur. Doing it earlier could interfere with screen readers reading it out.
@@ -678,7 +695,7 @@ fn paste(shared: &Rc<Shared>, text: &str) {
             return;
         };
         let ignore = option(&core.options, "ignoreBracketedPasteMode") == JsValue::TRUE;
-        core.viewport.modes & if ignore { !mode::BRACKETED_PASTE } else { !0 }
+        shared.input.modes.get() & if ignore { !mode::BRACKETED_PASTE } else { !0 }
     };
     send_data(shared, &encode_paste(text, modes).into(), true);
     if let Some(textarea) = shared.input.textarea() {
@@ -810,6 +827,18 @@ impl Terminal {
         paste(&self.shared, data);
     }
 
+    /// xterm.js `input` (`CoreTerminal.input`): `data` goes to `onData` as is. With `wasUserInput` (the default) it
+    /// counts as typed: it scrolls to the bottom (`scrollOnUserInput`), fires `onUserInput` and clears the selection.
+    /// `disableStdin` drops it either way.
+    pub fn input(
+        &self,
+        data: JsString,
+        #[wasm_bindgen(js_name = wasUserInput, unchecked_optional_param_type = "boolean")]
+        was_user_input: Option<bool>,
+    ) {
+        send_data(&self.shared, &data.into(), was_user_input.unwrap_or(true));
+    }
+
     /// `handler` sees every keydown, keypress and keyup first; returning false stops the terminal from handling it.
     #[wasm_bindgen(js_name = attachCustomKeyEventHandler)]
     pub fn attach_custom_key_event_handler(
@@ -848,8 +877,9 @@ impl Terminal {
         if let Ok(mut core) = self.shared.core.try_borrow_mut() {
             if !core.disposed {
                 let _ = core.view.engine().reset_kitty_keyboard();
-                // The next frame brings the same 0 from the engine.
+                // The next parse and frame bring the same 0 from the engine.
                 core.viewport.kitty_flags = 0;
+                self.shared.input.kitty_flags.set(0);
             }
         }
     }

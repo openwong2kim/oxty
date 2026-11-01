@@ -6,7 +6,7 @@ use oxtty::vt::index::{Column, Line};
 use oxtty::vt::term::cell::{Cell as AlacCell, Flags};
 use oxtty::vt::term::test::TermSize;
 use oxtty::vt::term::{Config, Term, TermMode};
-use oxtty::vt::vte::ansi::{Color, Processor, StdSyncHandler};
+use oxtty::vt::vte::ansi::{Color, Processor};
 use oxtty::{Cell, CellExtra, Engine, TermHistory};
 
 /// Reproducible pseudo-random numbers (xorshift64*).
@@ -319,10 +319,7 @@ fn term_history_matches_plain_term() {
         let mut packed = Term::new(config(TermHistory::RECENT), &size(cols, rows), VoidListener);
         let history = TermHistory::attach(&mut packed, scrollback);
         let mut plain = Term::new(config(scrollback), &size(cols, rows), VoidListener);
-        let (mut a, mut b) = (
-            Processor::<StdSyncHandler>::new(),
-            Processor::<StdSyncHandler>::new(),
-        );
+        let (mut a, mut b) = (Processor::new(), Processor::new());
         for step in 0..600 {
             if rng.below(15) == 0 {
                 let (c, r) = (rng.below(110) as usize + 2, rng.below(16) as usize + 1);

@@ -60,6 +60,9 @@ extern "C" {
     pub fn reset_kitty_keyboard(this: &Engine) -> Result<(), JsValue>;
     #[wasm_bindgen(method, catch, js_name = kittyFlags)]
     pub fn kitty_flags(this: &Engine) -> Result<u32, JsValue>;
+    /// A synchronized update (`CSI ? 2026 h`) is open: its output is applied, frames wait until it ends.
+    #[wasm_bindgen(method, catch, js_name = syncPending)]
+    pub fn sync_pending(this: &Engine) -> Result<bool, JsValue>;
     #[wasm_bindgen(method, catch, js_name = takeDamage)]
     fn take_damage_js(this: &Engine) -> Result<JsValue, JsValue>;
     /// An array of `Uint8Array`, one per reply.
@@ -232,8 +235,8 @@ pub struct ClipboardWrite {
     pub text: String,
 }
 
-/// What the program asked of the host since the last call. Taken after every write drain, not per frame, so
-/// replies flow while the page is hidden.
+/// What the program asked of the host since the last call, and the modes it left. Taken after every write drain,
+/// not per frame, so replies flow while the page is hidden and input encodes with the modes at once.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Events {
     /// Bytes for the PTY (status reports, OSC 52 and colour query answers), one entry per reply: one `onData` each.
@@ -246,6 +249,11 @@ pub struct Events {
     pub clipboard_writes: Vec<ClipboardWrite>,
     /// `'c'` or `'p'` per read, in order.
     pub clipboard_reads: Vec<char>,
+    /// Bitwise OR of [`mode`] bits now. Input encoding reads them from here, as xterm.js encodes a key typed right
+    /// after the write that changed them.
+    pub modes: u32,
+    /// Active kitty keyboard flags now, read by key encoding like `modes`.
+    pub kitty_flags: u32,
 }
 
 /// Everything a renderer needs to bring its picture up to date.
@@ -267,15 +275,17 @@ pub struct Frame {
     pub history_length: u32,
     /// Lines dropped off the top of the scrollback so far: the selection keeps its text in place.
     pub trimmed_lines: f64,
-    /// Bitwise OR of [`mode`] bits; input encoding reads them from here (one frame late in a Worker build).
+    /// Bitwise OR of [`mode`] bits (input encoding takes them from [`Events`]).
     pub modes: u32,
-    /// Active kitty keyboard flags, read by key encoding like `modes`.
+    /// Active kitty keyboard flags.
     pub kitty_flags: u32,
 }
 
 pub trait EngineView {
     fn take_events(&mut self) -> Events;
-    fn take_frame(&mut self) -> Frame;
+    /// `None` while a synchronized update holds the picture, as xterm.js's `RenderService` holds its renders: the
+    /// engine has applied the output (the buffer API reads it), the frame comes once the update ends.
+    fn take_frame(&mut self) -> Option<Frame>;
 }
 
 /// [`EngineView`] over an engine on the same thread.
@@ -316,6 +326,8 @@ impl EngineView for LocalEngineView {
             title: e.take_title().ok().flatten(),
             bells: e.take_bells().unwrap_or(0),
             resets: e.take_resets().unwrap_or(0),
+            modes: e.modes().unwrap_or(0),
+            kitty_flags: e.kitty_flags().unwrap_or(0),
             ..Events::default()
         };
         while let Ok(write) = e.take_clipboard_write_js() {
@@ -335,8 +347,11 @@ impl EngineView for LocalEngineView {
         events
     }
 
-    fn take_frame(&mut self) -> Frame {
+    fn take_frame(&mut self) -> Option<Frame> {
         let e = &self.engine;
+        if e.sync_pending().unwrap_or(false) {
+            return None;
+        }
         let (cols, rows, display_offset) = (e.cols(), e.rows(), e.display_offset());
         let damage = e.take_damage_js().unwrap_or(JsValue::NULL);
         let full = self.full
@@ -382,7 +397,7 @@ impl EngineView for LocalEngineView {
         if cursor.line >= rows as i32 {
             cursor.visible = false;
         }
-        Frame {
+        Some(Frame {
             cols,
             rows,
             full,
@@ -395,7 +410,7 @@ impl EngineView for LocalEngineView {
             trimmed_lines: e.trimmed_lines(),
             modes: e.modes().unwrap_or(0),
             kitty_flags: e.kitty_flags().unwrap_or(0),
-        }
+        })
     }
 }
 

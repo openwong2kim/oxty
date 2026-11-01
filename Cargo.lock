@@ -287,7 +287,6 @@ dependencies = [
  "bitflags",
  "cursor-icon",
  "log",
- "memchr",
  "regex-automata",
  "serde",
  "serde_json",
