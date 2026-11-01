@@ -78,6 +78,8 @@ single crate.
   turned on by `oxtty::Engine`, answers DA1 with `CSI ? 1 ; 2 c` and DA2 with
   `CSI > 0 ; 276 ; 0 c` as xterm.js does, instead of `CSI ? 6 c` and
   Alacritty's version.
+- `Term::cursor_style_set` tells a cursor style the program chose (DECSCUSR
+  1–6) from the configured default, so a host can keep its own default.
 - `Term::soft_reset` is DECSTR (`CSI ! p`), which vte drops. It resets what
   xterm.js `softReset` does: cursor shown, IRM/DECOM/DECCKM/DECKPAM, bracketed
   paste and focus reports off, autowrap on, full scroll region, default pen

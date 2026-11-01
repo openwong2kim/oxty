@@ -17,7 +17,7 @@ test('korean and ascii in one row, wide cells flagged', () => {
   assert.equal(String.fromCodePoint(cells[0]), '안');
   assert.ok(cells[3] & Attr.WIDE);
   assert.ok(cells[4 + 3] & Attr.WIDE_SPACER);
-  assert.deepEqual(t.cursor(), { line: 1, col: 0, visible: true, shape: 'block', blink: false });
+  assert.deepEqual(t.cursor(), { line: 1, col: 0, visible: true, shape: 'block', blink: false, styled: false });
   t.dispose();
 });
 

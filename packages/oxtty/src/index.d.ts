@@ -28,6 +28,8 @@ export interface Cursor {
   /** Set by the program with DECSCUSR (`CSI Ps SP q`). */
   shape: 'block' | 'underline' | 'bar';
   blink: boolean;
+  /** The program chose `shape` and `blink`; when false they are defaults (block, steady) and the host's own style applies. */
+  styled: boolean;
 }
 
 export interface Damage {

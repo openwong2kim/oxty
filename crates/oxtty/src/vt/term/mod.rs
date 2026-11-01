@@ -1154,6 +1154,12 @@ impl<T> Term<T> {
         self.config.semantic_escape_chars = semantic_escape_chars.into();
     }
 
+    /// oxtty: whether the program set the cursor style (DECSCUSR 1–6); `false` after `CSI 0 SP q` or a reset.
+    #[inline]
+    pub fn cursor_style_set(&self) -> bool {
+        self.cursor_style.is_some()
+    }
+
     /// Active terminal cursor style.
     ///
     /// While vi mode is active, this will automatically return the vi mode cursor style.

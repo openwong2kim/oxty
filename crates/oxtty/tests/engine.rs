@@ -265,6 +265,23 @@ fn cursor_shape_follows_decscusr() {
 }
 
 #[test]
+fn cursor_tells_a_program_chosen_steady_block_from_the_default() {
+    // A host with its own cursor style keeps it until the program picks one, even a steady block.
+    let mut t = term();
+    assert!(!t.cursor().styled);
+    t.feed(b"\x1b[2 q");
+    let c = t.cursor();
+    assert_eq!(
+        (c.shape, c.blinking, c.styled),
+        (CursorShape::Block, false, true)
+    );
+    t.feed(b"\x1b[0 q");
+    assert!(!t.cursor().styled);
+    t.feed(b"\x1b[6 q\x1bc");
+    assert!(!t.cursor().styled, "RIS drops the program's style");
+}
+
+#[test]
 fn row_extras_carry_combining_underline_colour_and_links() {
     let mut t = term();
     t.feed("e\u{301}\x1b[4:3;58;2;255;0;0mX\x1b[0m".as_bytes());

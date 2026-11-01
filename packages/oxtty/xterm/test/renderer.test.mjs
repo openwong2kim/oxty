@@ -152,9 +152,10 @@ test('cursor: DECSCUSR shape over the cursorStyle default, cursorInactiveStyle w
     const out = { block: probe(p) };
     out.bar = probe(p.write('\x1b[6 q').frame());
     out.underline = probe(p.write('\x1b[4 q').frame());
-    p.write('\x1b[2 q').frame();
     p.renderer.setOptions({ cursorStyle: 'bar' });
-    out.optionBar = probe(p);
+    // A steady block the program asked for beats the option; `CSI 0 SP q` hands the cursor back to it
+    out.steadyBlock = probe(p.write('\x1b[2 q').frame());
+    out.optionBar = probe(p.write('\x1b[0 q').frame());
     p.renderer.setFocused(false);
     out.outline = probe(p);
     p.renderer.setOptions({ cursorInactiveStyle: 'none' });
@@ -164,7 +165,7 @@ test('cursor: DECSCUSR shape over the cursorStyle default, cursorInactiveStyle w
     out.hidden = probe(p);
     return out;
   }, CURSOR_THEME);
-  assert.deepEqual(r, { block: '1111', bar: '0100', underline: '0010', optionBar: '0100', outline: '0111', none: '0000', hidden: '0000' });
+  assert.deepEqual(r, { block: '1111', bar: '0100', underline: '0010', steadyBlock: '1111', optionBar: '0100', outline: '0111', none: '0000', hidden: '0000' });
 });
 
 test('cursor blink is timed by the renderer and asks for the cursor row', async () => {

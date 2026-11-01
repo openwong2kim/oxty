@@ -107,7 +107,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    4
+    5
 }
 
 #[no_mangle]
@@ -249,7 +249,7 @@ pub extern "C" fn oxtty_cursor(h: u32) -> u32 {
     })
 }
 
-/// Cursor shape (0 block, 1 underline, 2 bar), with bit 8 set when blinking.
+/// Cursor shape (0 block, 1 underline, 2 bar), with bit 8 set when blinking and bit 9 when the program set the style.
 #[no_mangle]
 pub extern "C" fn oxtty_cursor_style(h: u32) -> u32 {
     with(h, 0, |t| {
@@ -259,7 +259,7 @@ pub extern "C" fn oxtty_cursor_style(h: u32) -> u32 {
             CursorShape::Underline => 1,
             CursorShape::Bar => 2,
         };
-        (c.blinking as u32) << 8 | shape
+        (c.styled as u32) << 9 | (c.blinking as u32) << 8 | shape
     })
 }
 

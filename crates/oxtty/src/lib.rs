@@ -151,6 +151,9 @@ pub struct Cursor {
     pub visible: bool,
     pub shape: CursorShape,
     pub blinking: bool,
+    /// The program chose `shape` and `blinking` (DECSCUSR 1–6). When false they are the defaults
+    /// (block, steady) and a host applies its own cursor style instead.
+    pub styled: bool,
 }
 
 /// What changed in the viewport since the last [`Engine::take_damage`].
@@ -666,6 +669,7 @@ impl Engine {
                 && style.shape != AlacCursorShape::Hidden,
             shape,
             blinking: style.blinking,
+            styled: self.term.cursor_style_set(),
         }
     }
 

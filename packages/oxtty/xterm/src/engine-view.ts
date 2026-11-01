@@ -106,7 +106,7 @@ export class Viewport {
   public rows = 0;
   public cells = new Uint32Array(0);
   public extras = new Map<number, CellExtra[]>();
-  public cursor: Cursor = { line: 0, col: 0, visible: false, shape: 'block', blink: false };
+  public cursor: Cursor = { line: 0, col: 0, visible: false, shape: 'block', blink: false, styled: false };
   public displayOffset = 0;
   public historyLength = 0;
   public modes = 0;

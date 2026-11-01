@@ -11,7 +11,7 @@ test('native binding mirrors the wasm API', () => {
   assert.equal(t.rowText(0), '안녕 red');
   assert.equal(t.cols, 80);
   assert.equal(t.rows, 24);
-  assert.deepEqual(t.cursor(), { line: 2, col: 6, visible: true, shape: 'block', blink: false });
+  assert.deepEqual(t.cursor(), { line: 2, col: 6, visible: true, shape: 'block', blink: false, styled: false });
   assert.equal(t.takeReplies().toString(), '\x1b[3;7R');
   assert.equal(t.takeTitle(), 'native');
   const cells = t.rowCells(0);

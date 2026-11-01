@@ -13,6 +13,8 @@ pub struct Cursor {
     /// `"block"`, `"underline"` or `"bar"`.
     pub shape: String,
     pub blink: bool,
+    /// The program set `shape` and `blink` (DECSCUSR 1–6); otherwise they are defaults the host may replace.
+    pub styled: bool,
 }
 
 #[napi(object)]
@@ -163,6 +165,7 @@ impl Terminal {
             visible: c.visible,
             shape: shape.into(),
             blink: c.blinking,
+            styled: c.styled,
         }
     }
 

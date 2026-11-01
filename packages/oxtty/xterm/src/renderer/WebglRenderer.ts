@@ -67,7 +67,7 @@ export class WebglRenderer implements Renderer {
   private _dpr: number;
 
   private _blink: CursorBlinkStateManager | undefined;
-  private _cursor: Cursor = { line: 0, col: 0, visible: false, shape: 'block', blink: false };
+  private _cursor: Cursor = { line: 0, col: 0, visible: false, shape: 'block', blink: false, styled: false };
   private _cursorRow = -1;
   private _fullRedraw = true;
   private readonly _dirty = new Set<number>();
@@ -181,7 +181,7 @@ export class WebglRenderer implements Renderer {
 
     const cursor = viewport.cursor;
     if (cursor.line !== this._cursor.line || cursor.col !== this._cursor.col) this._blink?.restartBlinkAnimation();
-    const blinkChanged = cursor.shape !== this._cursor.shape || cursor.blink !== this._cursor.blink;
+    const blinkChanged = cursor.shape !== this._cursor.shape || cursor.blink !== this._cursor.blink || cursor.styled !== this._cursor.styled;
     this._cursor = cursor;
     if (blinkChanged) this._updateCursorBlink();
 
@@ -315,9 +315,9 @@ export class WebglRenderer implements Renderer {
     this._rectangles!.updateCursor(this._model);
   }
 
-  // The engine reports a steady block until the program sends DECSCUSR, and that reading means "use the options"
+  // Until the program sends DECSCUSR (or after `CSI 0 SP q`) the options decide
   private _programSetCursor(): boolean {
-    return this._cursor.shape !== 'block' || this._cursor.blink;
+    return this._cursor.styled;
   }
 
   private _cursorStyle(): RendererOptions['cursorStyle'] {
