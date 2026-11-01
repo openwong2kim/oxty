@@ -723,9 +723,9 @@ export class Terminal {
     return n > 0 ? Array.from(wordsOut(n)) : [];
   }
 
-  /** Bytes that rebuild this screen in a fresh xterm.js, or why they cannot. */
-  ansiSnapshot() {
-    const n = wasm.oxtty_ansi_snapshot(this.#handle());
+  /** Bytes that rebuild this screen in a fresh xterm.js, or why they cannot. `options` as @xterm/addon-serialize's `scrollback` and `excludeModes`. */
+  ansiSnapshot({ scrollback, excludeModes = false } = {}) {
+    const n = wasm.oxtty_ansi_snapshot(this.#handle(), scrollback ?? -1, excludeModes ? 1 : 0);
     return n > 0 ? { ok: true, payload: bytesOut(n) } : { ok: false, reason: textOut(-n) };
   }
 

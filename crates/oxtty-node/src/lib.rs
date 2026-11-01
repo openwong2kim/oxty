@@ -47,6 +47,16 @@ pub struct CellExtra {
     pub hyperlink: Option<Hyperlink>,
 }
 
+/// What `ansiSnapshot` leaves out, like `@xterm/addon-serialize` options.
+#[napi(object)]
+#[derive(Default)]
+pub struct AnsiSnapshotOptions {
+    /// Keep only the newest this many history lines (0: the screen alone).
+    pub scrollback: Option<u32>,
+    /// Leave out the modes and what continues the output (unfinished sequence, synchronized update).
+    pub exclude_modes: Option<bool>,
+}
+
 /// `{ ok: true, payload }` or `{ ok: false, reason }`.
 #[napi(object)]
 pub struct AnsiSnapshot {
@@ -519,8 +529,13 @@ impl Terminal {
 
     /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.
     #[napi]
-    pub fn ansi_snapshot(&self) -> AnsiSnapshot {
-        match self.inner.ansi_snapshot() {
+    pub fn ansi_snapshot(&self, options: Option<AnsiSnapshotOptions>) -> AnsiSnapshot {
+        let options = options.unwrap_or_default();
+        let options = oxtty::SnapshotOptions {
+            scrollback: options.scrollback.map(|n| n as usize),
+            exclude_modes: options.exclude_modes.unwrap_or(false),
+        };
+        match self.inner.ansi_snapshot_with(options) {
             Ok(bytes) => AnsiSnapshot {
                 ok: true,
                 payload: Some(bytes.into()),

@@ -360,3 +360,23 @@ test('markers follow their line into the scrollback and are reported when droppe
   assert.deepEqual(t.takeDisposedMarkers(), [], 'removed by the host, not reported');
   t.dispose();
 });
+
+test('ansi snapshot options: the newest history lines only, and the screen without modes', () => {
+  const t = new Terminal({ cols: 10, rows: 2, scrollback: 50 });
+  for (let i = 0; i < 6; i++) t.write(`line ${i}\r\n`);
+  t.write('\x1b[?1h\x1b[?1000h\x1b[?25l\x1b[31');
+  const replay = (s) => {
+    assert.equal(s.ok, true);
+    const copy = new Terminal({ cols: 10, rows: 2, scrollback: 50 });
+    copy.write(s.payload);
+    return copy;
+  };
+  const two = replay(t.ansiSnapshot({ scrollback: 2 }));
+  assert.deepEqual([two.historyLength, two.rowText(-2), two.modes()], [2, 'line 3', t.modes()]);
+  const cold = replay(t.ansiSnapshot({ scrollback: 0, excludeModes: true }));
+  assert.deepEqual([cold.historyLength, cold.rowText(0), cold.rowText(1)], [0, t.rowText(0), t.rowText(1)]);
+  assert.equal(cold.modes(), new Terminal({ cols: 10, rows: 2 }).modes());
+  assert.equal(new TextDecoder().decode(t.ansiSnapshot({ excludeModes: true }).payload).endsWith('\x1b[31'), false);
+  assert.equal(new TextDecoder().decode(t.ansiSnapshot().payload).endsWith('\x1b[31'), true);
+  t.dispose();
+});

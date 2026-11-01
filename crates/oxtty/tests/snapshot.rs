@@ -1,4 +1,4 @@
-use oxtty::{Cell, Damage, Engine, SnapshotRefusal};
+use oxtty::{Cell, Damage, Engine, SnapshotOptions, SnapshotRefusal};
 
 fn snapshot(t: &mut Engine) -> Vec<u8> {
     t.ansi_snapshot().expect("snapshot")
@@ -354,4 +354,63 @@ fn alternate_screen_is_cleared_with_the_default_background() {
     let mut t = Engine::new(6, 3, 20);
     t.feed(b"\x1b[44mblue\x1b[?1049h\x1b[0m\x1b[2J\x1b[Halt");
     assert_round_trip(&mut t, 20);
+}
+
+#[test]
+fn scrollback_option_keeps_the_newest_history_lines() {
+    let mut t = Engine::new(10, 3, 100);
+    for i in 0..8 {
+        t.feed(format!("line {i}\r\n").as_bytes());
+    }
+    let keep = |n| SnapshotOptions {
+        scrollback: Some(n),
+        exclude_modes: false,
+    };
+    let mut copy = Engine::new(10, 3, 100);
+    copy.feed(&t.ansi_snapshot_with(keep(2)).unwrap());
+    assert_eq!(copy.history_len(), 2);
+    assert_eq!(copy.row_text(-2).unwrap(), "line 4");
+    assert_eq!(copy.cursor(), t.cursor());
+    let mut all = Engine::new(10, 3, 100);
+    all.feed(&t.ansi_snapshot_with(keep(1000)).unwrap());
+    assert_same_screen(&t, &all);
+}
+
+#[test]
+fn exclude_modes_paints_only_the_screen() {
+    let mut t = Engine::new(10, 3, 100);
+    for i in 0..5 {
+        t.feed(format!("line {i}\r\n").as_bytes());
+    }
+    // Modes, margins and an unfinished SGR at the end
+    t.feed(b"\x1b[?1h\x1b[?1000h\x1b[?2004h\x1b[?25l\x1b[2;3r\x1b[1;1Hx\x1b[31");
+    assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::Margins));
+    let cold = t
+        .ansi_snapshot_with(SnapshotOptions {
+            scrollback: Some(0),
+            exclude_modes: true,
+        })
+        .unwrap();
+    assert!(!cold.ends_with(b"\x1b[31"), "no unfinished sequence");
+    let mut copy = Engine::new(10, 3, 100);
+    copy.feed(&cold);
+    assert_eq!(copy.history_len(), 0);
+    for line in 0..3 {
+        assert_eq!(copy.row_text(line), t.row_text(line));
+    }
+    assert_eq!(
+        copy.modes(),
+        Engine::new(10, 3, 100).modes(),
+        "default modes"
+    );
+    assert!(copy.cursor().visible);
+    // A synchronized update in progress is not carried: the screen from before it is what shows
+    t.feed(b"m\x1b[?2026hheld");
+    let cold = t
+        .ansi_snapshot_with(SnapshotOptions {
+            scrollback: None,
+            exclude_modes: true,
+        })
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&cold).contains("2026"));
 }

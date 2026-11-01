@@ -53,6 +53,17 @@ impl fmt::Display for SnapshotRefusal {
 
 impl std::error::Error for SnapshotRefusal {}
 
+/// What [`crate::Engine::ansi_snapshot_with`] leaves out, like `@xterm/addon-serialize` options.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SnapshotOptions {
+    /// Keep only the newest this many history lines (`Some(0)`: the screen alone); `None` keeps them all.
+    pub scrollback: Option<usize>,
+    /// Leave out the modes (cursor keys, keypad, mouse, focus reports, bracketed paste, insert, origin, autowrap
+    /// off, cursor visibility) and what continues the output (the unfinished sequence at the end, a synchronized
+    /// update in progress), so the bytes only paint the screen. Scroll margins are then not refused.
+    pub exclude_modes: bool,
+}
+
 /// Maximum length of an incomplete sequence to carry over (wmux `MAX_PENDING_TAIL_CHARS`).
 const MAX_PENDING_TAIL: usize = 4096;
 
@@ -178,24 +189,27 @@ fn incomplete_utf8_suffix_len(buf: &[u8]) -> usize {
         .unwrap_or(0)
 }
 
-/// The body of [`crate::Engine::ansi_snapshot`]. The rejection order is the same as wmux: margins → tail overflow → wide edge.
+/// The body of [`crate::Engine::ansi_snapshot_with`]. The rejection order is the same as wmux: margins → tail overflow → wide edge.
 pub(crate) fn ansi<T: EventListener>(
     term: &Term<T>,
     held_sync: Option<&[u8]>,
     tail: &RawTail,
     older: Option<&History>,
+    options: SnapshotOptions,
 ) -> Result<Vec<u8>, SnapshotRefusal> {
     let region = term.scroll_region();
-    if region.start.0 != 0 || region.end.0 != term.screen_lines() as i32 {
+    if !options.exclude_modes && (region.start.0 != 0 || region.end.0 != term.screen_lines() as i32)
+    {
         return Err(SnapshotRefusal::Margins);
     }
     // During sync, all raw bytes after BSU are the tail (the parser is in ground right after BSU) — no overflow check needed.
     let tail = match held_sync {
+        _ if options.exclude_modes => &[][..],
         Some(held) => held,
         None => tail.pending()?,
     };
-    let mut out = serialize(term, older)?;
-    if held_sync.is_some() {
+    let mut out = serialize(term, older, options)?;
+    if held_sync.is_some() && !options.exclude_modes {
         out.push_str("\x1b[?2026h");
     }
     let mut bytes = out.into_bytes();
@@ -448,8 +462,9 @@ impl Rows {
     }
 }
 
-/// `older` is the compressed history older than this grid (primary screen only).
-fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
+/// `older` is the compressed history older than this grid (primary screen only); the oldest `skip` history rows
+/// are left out.
+fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>, skip: usize) {
     let mut rows = Rows {
         previous_style: String::new(),
         previous_link: None,
@@ -462,8 +477,8 @@ fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
         _ => grid[Line((i - older_len) as i32 - grid.history_size() as i32)].clone(),
     };
     // One row ahead: a wrapped row looks at how the next one starts
-    let mut next = (total > 0).then(|| fetch(0));
-    for i in 0..total {
+    let mut next = (skip < total).then(|| fetch(skip));
+    for i in skip..total {
         let Some(line) = next.take() else { break };
         next = (i + 1 < total).then(|| fetch(i + 1));
         rows.row(
@@ -493,6 +508,7 @@ fn split_wide(row: &Row<Cell>) -> bool {
 fn serialize<T: EventListener>(
     term: &Term<T>,
     older: Option<&History>,
+    options: SnapshotOptions,
 ) -> Result<String, SnapshotRefusal> {
     // When cutting the cursor paragraph, xterm can leave half of a wide character. Printing that character
     // wraps the line, so reject instead of corrupting it. The inactive grid is serialized only when on the
@@ -501,15 +517,31 @@ fn serialize<T: EventListener>(
     // ICH in the middle of a wide char leaves a right half alone (xterm.js `insertCells`); no
     // printed text rebuilds either.
     let alt = term.mode().contains(TermMode::ALT_SCREEN);
+    // History rows of the primary screen left out (`scrollback`), oldest first: compressed ones, then the grid's
+    let primary = if alt {
+        term.inactive_grid()
+    } else {
+        term.grid()
+    };
+    let older_len = older.map_or(0, History::len);
+    let history = older_len + primary.history_size();
+    let skip = options
+        .scrollback
+        .map_or(0, |keep| history.saturating_sub(keep));
     for grid in std::iter::once(term.grid()).chain(alt.then(|| term.inactive_grid())) {
-        for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
+        let skipped = if std::ptr::eq(grid, primary) {
+            skip.saturating_sub(older_len)
+        } else {
+            0
+        };
+        for y in -(grid.history_size() as i32) + skipped as i32..grid.screen_lines() as i32 {
             if split_wide(&grid[Line(y)]) {
                 return Err(SnapshotRefusal::WideEdge);
             }
         }
     }
     if let Some(older) = older {
-        if (0..older.len()).any(|i| split_wide(&older.row(i))) {
+        if (skip.min(older_len)..older_len).any(|i| split_wide(&older.row(i))) {
             return Err(SnapshotRefusal::WideEdge);
         }
     }
@@ -517,7 +549,7 @@ fn serialize<T: EventListener>(
     let modes = term.mode();
     let alt = modes.contains(TermMode::ALT_SCREEN);
     if alt {
-        screen(&mut out, term.inactive_grid(), older);
+        screen(&mut out, term.inactive_grid(), older, skip);
         cursor(&mut out, term.inactive_grid());
         out.push_str("\x1b[?1049h\x1b[0m\x1b[H");
         // Entering clears the alternate screen with the primary pen's background; erased cells are not printed
@@ -530,7 +562,15 @@ fn serialize<T: EventListener>(
             link(&mut out, None);
         }
     }
-    screen(&mut out, term.grid(), if alt { None } else { older });
+    if alt {
+        screen(&mut out, term.grid(), None, 0);
+    } else {
+        screen(&mut out, term.grid(), older, skip);
+    }
+    if options.exclude_modes {
+        cursor(&mut out, term.grid());
+        return Ok(out);
+    }
     // Turning on DECOM sends the cursor home, so emit it before CUP (margins are rejected, so CUP is relative to the whole screen).
     if modes.contains(TermMode::ORIGIN) {
         out.push_str("\x1b[?6h");

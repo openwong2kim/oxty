@@ -36,7 +36,7 @@ mod search;
 mod snapshot;
 pub use history::TermHistory;
 pub use search::{SearchLine, SearchMatch, SearchOptions};
-pub use snapshot::SnapshotRefusal;
+pub use snapshot::{SnapshotOptions, SnapshotRefusal};
 
 use crate::history::History;
 use crate::vt::event::{Event, EventListener};
@@ -1179,9 +1179,15 @@ impl Engine {
     /// On a [`SnapshotRefusal`] these bytes could not reproduce the screen;
     /// replay the raw output instead.
     pub fn ansi_snapshot(&self) -> Result<Vec<u8>, SnapshotRefusal> {
+        self.ansi_snapshot_with(SnapshotOptions::default())
+    }
+
+    /// [`Engine::ansi_snapshot`] with less history or without the modes, as `@xterm/addon-serialize` offers
+    /// (`{ scrollback: 0, excludeModes: true }` paints just the screen the terminal shows).
+    pub fn ansi_snapshot_with(&self, options: SnapshotOptions) -> Result<Vec<u8>, SnapshotRefusal> {
         let held = self.sync_pending().then_some(self.parser.sync_bytes());
         let history = self.history.as_ref().map(TermHistory::lock);
-        snapshot::ansi(&self.term, held, &self.tail, history.as_deref())
+        snapshot::ansi(&self.term, held, &self.tail, history.as_deref(), options)
     }
 }
 

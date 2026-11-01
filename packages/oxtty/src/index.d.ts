@@ -110,6 +110,18 @@ export interface SearchLine {
   cells: Uint32Array;
 }
 
+/** What `ansiSnapshot` leaves out, like `@xterm/addon-serialize`'s `serialize` options. */
+export interface AnsiSnapshotOptions {
+  /** Keep only the newest this many history lines (0: the screen alone). All of them by default. */
+  scrollback?: number;
+  /**
+   * Leave out the modes (cursor keys, keypad, mouse, focus reports, bracketed paste, insert, origin, autowrap off,
+   * cursor visibility) and what continues the output (the unfinished sequence at the end, a synchronized update in
+   * progress), so the bytes only paint the screen. Scroll margins are then not refused.
+   */
+  excludeModes?: boolean;
+}
+
 export class Terminal {
   constructor(options?: TerminalOptions);
   /** Feeds program output. Strings are encoded as UTF-8. */
@@ -223,8 +235,11 @@ export class Terminal {
   removeMarker(id: number): void;
   /** Markers the engine dropped since the last call. */
   takeDisposedMarkers(): number[];
-  /** Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes. */
-  ansiSnapshot(): AnsiSnapshot;
+  /**
+   * Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes.
+   * `{ scrollback: 0, excludeModes: true }` paints just the screen it shows (a cold frame).
+   */
+  ansiSnapshot(options?: AnsiSnapshotOptions): AnsiSnapshot;
   dispose(): void;
 }
 

@@ -8,7 +8,8 @@
 use std::cell::RefCell;
 
 use oxtty::{
-    Clipboard, CursorShape, Damage, Engine, HookKind, WindowsPty, WindowsPtyBackend, COLOR_SLOTS,
+    Clipboard, CursorShape, Damage, Engine, HookKind, SnapshotOptions, WindowsPty,
+    WindowsPtyBackend, COLOR_SLOTS,
 };
 
 /// The same dlmalloc std uses on wasm, but growing linear memory in larger
@@ -479,10 +480,15 @@ pub extern "C" fn oxtty_flush_sync(h: u32) {
 
 /// ANSI snapshot bytes into OUT and their length; on refusal the reason
 /// (`SnapshotRefusal::as_str`) into OUT and minus its length. A payload is
-/// never empty, so 0 means a bad handle.
+/// never empty, so 0 means a bad handle. `scrollback` below 0 keeps all the
+/// history; `flags` bit 0 leaves out the modes (`SnapshotOptions`).
 #[no_mangle]
-pub extern "C" fn oxtty_ansi_snapshot(h: u32) -> i32 {
-    with(h, 0, |t| match t.ansi_snapshot() {
+pub extern "C" fn oxtty_ansi_snapshot(h: u32, scrollback: i32, flags: u32) -> i32 {
+    let options = SnapshotOptions {
+        scrollback: usize::try_from(scrollback).ok(),
+        exclude_modes: flags & 1 != 0,
+    };
+    with(h, 0, |t| match t.ansi_snapshot_with(options) {
         Ok(bytes) => set_out(bytes) as i32,
         Err(why) => -(set_out(why.as_str().as_bytes().to_vec()) as i32),
     })

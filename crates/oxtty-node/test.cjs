@@ -137,3 +137,15 @@ test('native markers', () => {
   assert.equal(t.markerLine(id), null);
   assert.deepEqual(t.takeDisposedMarkers(), [id]);
 });
+
+test('native ansi snapshot options', () => {
+  const t = new Terminal(10, 2, 50);
+  for (let i = 0; i < 6; i++) t.write(`line ${i}\r\n`);
+  t.write('\x1b[?1h');
+  const cold = t.ansiSnapshot({ scrollback: 0, excludeModes: true });
+  const copy = new Terminal(10, 2, 50);
+  copy.write(cold.payload);
+  assert.equal(copy.historyLength, 0);
+  assert.equal(copy.modes() & 2, 0);
+  assert.ok(t.ansiSnapshot().payload.length > cold.payload.length);
+});
