@@ -158,6 +158,7 @@ export const Attr = Object.freeze({
   INVERSE: 1 << 8, HIDDEN: 1 << 9, STRIKEOUT: 1 << 10, BLINK: 1 << 11,
   WIDE: 1 << 12, WIDE_SPACER: 1 << 13, COMBINING: 1 << 14, UNDERLINE_COLOR: 1 << 15, HYPERLINK: 1 << 16, LEADING_WIDE_SPACER: 1 << 17,
   TYPED_SPACE: 1 << 18,
+  IMAGE: 1 << 19,
 });
 
 /** Terminal mode bits (`modes()`). */
@@ -729,6 +730,26 @@ export class Terminal {
   takeDisposedMarkers() {
     const n = wasm.oxtty_take_disposed_markers(this.#handle());
     return n > 0 ? Array.from(wordsOut(n)) : [];
+  }
+
+  /** Covers `cols` × `rows` cells with the tiles of image `id`. @returns {{ tiles: number, covered: number[] }} */
+  placeImage(id, cols, rows, { scrolling = true, cursor = 'vt340' } = {}) {
+    const size = (Math.min(rows, 0xffff) << 16 | Math.min(cols, 0xffff)) >>> 0;
+    const n = wasm.oxtty_place_image(this.#handle(), id, size, (scrolling ? 1 : 0) | (cursor === 'iip' ? 2 : 0));
+    const words = wordsOut(n + 1);
+    return { tiles: words[0] ?? 0, covered: Array.from(words.subarray(1)) };
+  }
+
+  /** `[col, id, tile]` per cell an image tile covers, or null if out of range. @returns {Uint32Array | null} */
+  rowImages(line) {
+    const n = wasm.oxtty_row_images(this.#handle(), line);
+    return n < 0 ? null : wordsOut(n * 3);
+  }
+
+  /** `[fg, bg, attrs]` that text written now gets, packed like `rowCells`. @returns {Uint32Array} */
+  pen() {
+    wasm.oxtty_pen(this.#handle());
+    return wordsOut(3);
   }
 
   /** Bytes that rebuild this screen in a fresh xterm.js, or why they cannot. `options` as @xterm/addon-serialize's `scrollback` and `excludeModes`. */

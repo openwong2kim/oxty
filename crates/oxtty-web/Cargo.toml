@@ -27,6 +27,8 @@ wasm-bindgen-futures = "=0.4.79"
 version = "=0.3.106"
 features = [
     "AddEventListenerOptions",
+    "Blob",
+    "BlobPropertyBag",
     "CanvasGradient",
     "CanvasPattern",
     "CanvasRenderingContext2d",
@@ -48,6 +50,8 @@ features = [
     "HtmlHeadElement",
     "HtmlStyleElement",
     "HtmlTextAreaElement",
+    "ImageBitmap",
+    "ImageBitmapOptions",
     "ImageData",
     "InputEvent",
     "IntersectionObserver",

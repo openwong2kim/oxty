@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 
 use oxtty::{
-    Clipboard, CursorShape, Damage, Engine, HookKind, SnapshotOptions, WindowsPty,
+    Clipboard, CursorShape, Damage, Engine, HookKind, ImageCursor, SnapshotOptions, WindowsPty,
     WindowsPtyBackend, COLOR_SLOTS,
 };
 
@@ -632,5 +632,54 @@ pub extern "C" fn oxtty_take_disposed_markers(h: u32) -> i32 {
         let n = ids.len() as i32;
         OUT32.with_borrow_mut(|out| *out = ids);
         n
+    })
+}
+
+/// `Engine::place_image` of `size` (columns in the low 16 bits, rows in the high; `flags` bit 0: scrolling, bit 1:
+/// the iTerm2 cursor): how many tiles it covered; OUT32 holds the count of tiles written, then the image id of each
+/// covered tile. Four parameters, as the host's export wrapper passes.
+#[no_mangle]
+pub extern "C" fn oxtty_place_image(h: u32, id: u32, size: u32, flags: u32) -> i32 {
+    with(h, 0, |t| {
+        let cursor = if flags & 2 != 0 {
+            ImageCursor::Iip
+        } else {
+            ImageCursor::Vt340
+        };
+        let (cols, rows) = (size as u16, (size >> 16) as u16);
+        let placed = t.place_image(id, cols, rows, flags & 1 != 0, cursor);
+        let n = placed.covered.len() as i32;
+        OUT32.with_borrow_mut(|out| {
+            out.clear();
+            out.push(placed.tiles);
+            out.extend(placed.covered);
+        });
+        n
+    })
+}
+
+/// `Engine::row_images`: their count, or -1 if out of range; OUT32 holds `[col, id, tile]` per cell.
+#[no_mangle]
+pub extern "C" fn oxtty_row_images(h: u32, line: i32) -> i32 {
+    with(h, -1, |t| {
+        let mut cells = Vec::new();
+        if !t.row_images(line, &mut cells) {
+            return -1;
+        }
+        let words = cells
+            .iter()
+            .flat_map(|c| [c.col as u32, c.id, c.tile])
+            .collect();
+        OUT32.with_borrow_mut(|out| *out = words);
+        cells.len() as i32
+    })
+}
+
+/// `Engine::pen`: `[fg, bg, attrs]` in OUT32.
+#[no_mangle]
+pub extern "C" fn oxtty_pen(h: u32) {
+    with(h, (), |t| {
+        let pen = t.pen();
+        OUT32.with_borrow_mut(|out| *out = vec![pen.fg, pen.bg, pen.attrs]);
     })
 }

@@ -25,6 +25,7 @@ use web_sys::{
 
 use super::atlas::{self, TextureAtlas};
 use super::glyphs::{GlyphProgram, GlyphVertices};
+use super::images::{self, ImageLayer, ImageProgram};
 use super::model::RenderModel;
 use super::rects::{RectProgram, RectVertices};
 use crate::timer::{self, Timeout};
@@ -119,6 +120,16 @@ struct AtlasTextures {
 struct Programs {
     glyph: GlyphProgram,
     rect: RectProgram,
+    /// Text still draws without it.
+    image: Option<ImageProgram>,
+}
+
+/// The texture of an image on screen: the pane that drew it last, and whether its current frame used it.
+struct ImageTexture {
+    id: u32,
+    pane: u32,
+    texture: WebGlTexture,
+    used: bool,
 }
 
 struct Gpu {
@@ -128,6 +139,7 @@ struct Gpu {
     live: bool,
     programs: Option<Programs>,
     textures: Vec<AtlasTextures>,
+    image_textures: Vec<ImageTexture>,
     scratch: Vec<f32>,
     listeners: Vec<Listener>,
     restore_timeout: Option<Timeout>,
@@ -182,6 +194,7 @@ pub fn ensure(document: &Document) -> Result<(), JsValue> {
         live: true,
         programs: None,
         textures: Vec::new(),
+        image_textures: Vec::new(),
         scratch: Vec::new(),
         listeners: Vec::new(),
         restore_timeout: None,
@@ -244,14 +257,38 @@ fn with_gpu(f: impl FnOnce(&mut Gpu) + 'static) {
     });
 }
 
+/// Drops the texture of image `id` (the image was deleted).
+pub fn release_image(id: u32) {
+    with_gpu(move |gpu| {
+        gpu.image_textures.retain(|t| {
+            if t.id == id {
+                gpu.gl.delete_texture(Some(&t.texture));
+            }
+            t.id != id
+        });
+    });
+}
+
+/// Textures of images the context holds.
+pub fn image_textures() -> u32 {
+    GPU.with(|g| {
+        g.try_borrow()
+            .ok()
+            .and_then(|g| g.as_ref().map(|g| g.image_textures.len() as u32))
+            .unwrap_or(0)
+    })
+}
+
 /// What a pane draws in one frame.
 pub struct Frame<'a> {
+    pub pane: u32,
     pub width: f64,
     pub height: f64,
     pub rects: &'a RectVertices,
     pub glyphs: &'a GlyphVertices,
     pub model: &'a RenderModel,
     pub cursor: bool,
+    pub images: &'a ImageLayer,
     pub present: &'a Present,
 }
 
@@ -297,6 +334,7 @@ impl Gpu {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
         self.textures.clear();
+        self.image_textures.clear();
         self.programs = None;
         if units < 1.0 || max_size < 1.0 {
             return;
@@ -311,13 +349,23 @@ impl Gpu {
         // Glyphs blend over the backgrounds
         gl.enable(Gl::BLEND);
         gl.blend_func(Gl::SRC_ALPHA, Gl::ONE_MINUS_SRC_ALPHA);
-        self.programs = Some(Programs { glyph, rect });
+        self.programs = Some(Programs {
+            glyph,
+            rect,
+            image: ImageProgram::new(gl),
+        });
     }
 
     fn dispose_programs(&mut self) {
         if let Some(p) = self.programs.take() {
             p.glyph.dispose(&self.gl);
             p.rect.dispose(&self.gl);
+            if let Some(image) = p.image {
+                image.dispose(&self.gl);
+            }
+        }
+        for t in self.image_textures.drain(..) {
+            self.gl.delete_texture(Some(&t.texture));
         }
         for t in self.textures.drain(..) {
             for (texture, _) in t.pages {
@@ -406,6 +454,9 @@ impl Gpu {
         if frame.cursor {
             programs.rect.draw_cursor(&self.gl, frame.rects);
         }
+        if let Some(program) = &programs.image {
+            self.draw_images(program, frame.pane, frame.images);
+        }
         self.programs = Some(programs);
         let ctx = &frame.present.0;
         // The frame replaces the canvas's last one
@@ -418,11 +469,47 @@ impl Gpu {
         true
     }
 
+    /// Draws the pane's image layer, making textures for images it shows for the first time and dropping those of
+    /// its images that went off screen.
+    fn draw_images(&mut self, program: &ImageProgram, pane: u32, layer: &ImageLayer) {
+        for t in self.image_textures.iter_mut().filter(|t| t.pane == pane) {
+            t.used = false;
+        }
+        if !layer.is_empty() {
+            let max_size = atlas::max_texture_size();
+            let (gl, textures) = (&self.gl, &mut self.image_textures);
+            program.draw(gl, layer, |id| {
+                if let Some(t) = textures.iter_mut().find(|t| t.id == id) {
+                    t.pane = pane;
+                    t.used = true;
+                    return Some(t.texture.clone());
+                }
+                let texture = images::upload(gl, id, max_size)?;
+                textures.push(ImageTexture {
+                    id,
+                    pane,
+                    texture: texture.clone(),
+                    used: true,
+                });
+                Some(texture)
+            });
+        }
+        let gl = &self.gl;
+        self.image_textures.retain(|t| {
+            let keep = t.pane != pane || t.used;
+            if !keep {
+                gl.delete_texture(Some(&t.texture));
+            }
+            keep
+        });
+    }
+
     fn handle_context_lost(&mut self) {
         self.live = false;
         // The context's objects are gone with it
         self.programs = None;
         self.textures.clear();
+        self.image_textures.clear();
         self.restore_timeout = Some(Timeout::new(CONTEXT_RESTORE_TIMEOUT, || {
             with_gpu(|gpu| {
                 gpu.restore_timeout = None;

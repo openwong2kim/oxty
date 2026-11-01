@@ -3,7 +3,7 @@
 
 use napi::bindgen_prelude::{Buffer, Either, Uint32Array};
 use napi_derive::napi;
-use oxtty::{Clipboard, HookKind, WindowsPty, WindowsPtyBackend, COLOR_SLOTS};
+use oxtty::{Clipboard, HookKind, ImageCursor, WindowsPty, WindowsPtyBackend, COLOR_SLOTS};
 
 #[napi(object)]
 pub struct Cursor {
@@ -45,6 +45,23 @@ pub struct CellExtra {
     pub text: Option<String>,
     pub underline_color: Option<u32>,
     pub hyperlink: Option<Hyperlink>,
+}
+
+/// What `placeImage` did: tiles written, and the image id of each tile it covered.
+#[napi(object)]
+pub struct ImagePlaced {
+    pub tiles: u32,
+    pub covered: Vec<u32>,
+}
+
+/// How `placeImage` moves the cursor.
+#[napi(object)]
+#[derive(Default)]
+pub struct PlaceImageOptions {
+    /// Default true; false places the image at the top left of the screen and keeps the cursor.
+    pub scrolling: Option<bool>,
+    /// `"vt340"` (default) or `"iip"`.
+    pub cursor: Option<String>,
 }
 
 /// What `ansiSnapshot` leaves out, like `@xterm/addon-serialize` options.
@@ -532,6 +549,55 @@ impl Terminal {
     #[napi]
     pub fn take_disposed_markers(&mut self) -> Vec<u32> {
         self.inner.take_disposed_markers()
+    }
+
+    /// Covers `cols` × `rows` cells with the tiles of image `id`.
+    #[napi]
+    pub fn place_image(
+        &mut self,
+        id: u32,
+        cols: u32,
+        rows: u32,
+        options: Option<PlaceImageOptions>,
+    ) -> ImagePlaced {
+        let options = options.unwrap_or_default();
+        let cursor = match options.cursor.as_deref() {
+            Some("iip") => ImageCursor::Iip,
+            _ => ImageCursor::Vt340,
+        };
+        let clamp = |n: u32| n.min(u16::MAX as u32) as u16;
+        let placed = self.inner.place_image(
+            id,
+            clamp(cols),
+            clamp(rows),
+            options.scrolling.unwrap_or(true),
+            cursor,
+        );
+        ImagePlaced {
+            tiles: placed.tiles,
+            covered: placed.covered,
+        }
+    }
+
+    /// `[col, id, tile]` per cell an image tile covers, or `null` if out of range.
+    #[napi]
+    pub fn row_images(&self, line: i32) -> Option<Uint32Array> {
+        let mut cells = Vec::new();
+        self.inner.row_images(line, &mut cells).then(|| {
+            Uint32Array::new(
+                cells
+                    .iter()
+                    .flat_map(|c| [c.col as u32, c.id, c.tile])
+                    .collect(),
+            )
+        })
+    }
+
+    /// `[fg, bg, attrs]` that text written now gets.
+    #[napi]
+    pub fn pen(&self) -> Uint32Array {
+        let pen = self.inner.pen();
+        Uint32Array::new(vec![pen.fg, pen.bg, pen.attrs])
     }
 
     /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.

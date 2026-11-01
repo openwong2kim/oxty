@@ -202,6 +202,12 @@ single crate.
 - `Term::set_focus_report` gives the host's focus; with it, setting private
   mode 1004 sends `CSI I` or `CSI O` as a `PtyWrite` each time, as xterm.js
   reports focus when the mode is set. Unset (upstream), nothing is sent.
+- `CellExtra` has an `image: Option<ImageTile>` (`term/cell.rs`): which tile
+  of which host image covers the cell, as `@xterm/addon-image` keeps it in
+  xterm.js extended attributes. `Cell::set_image`/`Cell::image` set and read it,
+  and dropping the extra when its last field is cleared counts it.
+  `Term::set_image_tile` (`term/mod.rs`) puts a tile on a screen cell and
+  damages it. Writing or erasing a cell replaces its extra, so the tile goes.
 
 These changes are compatibility policy, not upstream behaviour.
 

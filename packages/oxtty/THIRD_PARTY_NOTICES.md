@@ -188,6 +188,23 @@ Source: https://github.com/xtermjs/xterm.js
 
 ---
 
+## xterm.js @xterm/addon-image 0.10.0-beta.331 and xterm-wasm-parts 0.4.1
+
+Inline images in `dist/xterm_web_bg.wasm` (`crates/oxtty-web/src/image`,
+`crates/oxtty-web/src/render/images.rs`, `crates/oxtty/src/images.rs` and
+`crates/oxtty/src/graphics/iip.rs` in https://github.com/openwong2kim/oxtty) are a
+Rust port of `@xterm/addon-image` 0.10.0-beta.331 (xterm.js commit
+08829c7eb6279dda2a9e86df901353a1a89858ca): `addons/addon-image/src/ImageAddon.ts`,
+`SixelHandler.ts`, `IIPHandler.ts`, `IIPHeaderParser.ts`, `IIPMetrics.ts`,
+`ImageStorage.ts`, `ImageRenderer.ts`, `SixelImageStorage.ts` and
+`IIPImageStorage.ts`, Copyright (c) 2020-2023 The xterm.js authors, and of the
+base64 rules of `xterm-wasm-parts` 0.4.1 (`lib/base64/Base64Decoder.wasm.js`,
+Copyright (c) 2023-2026 The xterm.js authors), under the MIT license reproduced in
+the input encoding section above.
+Source: https://github.com/xtermjs/xterm.js
+
+---
+
 ## xterm.js 6.1.0-beta.336 and @xterm/addon-web-links 0.13.0-beta.330 — links
 
 The links and the built-in `WebLinksAddon` of `dist/xterm_web_bg.wasm`
@@ -214,3 +231,34 @@ are a Rust port of xterm.js 6.1.0-beta.336 (commit
 scrollable files derive from VS Code, Copyright (c) Microsoft Corporation. Both
 under the MIT license reproduced in the input encoding section above.
 Source: https://github.com/xtermjs/xterm.js
+
+---
+
+## sixel 0.16.0
+
+The sixel decoder of `dist/xterm_web_bg.wasm` (`crates/oxtty/src/graphics/sixel.rs`)
+is a Rust port of the decoder of the `sixel` package 0.16.0 by Joerg Breitbart
+(https://github.com/jerch/node-sixel, commit 5cd50615e29f54b956188ec2a12d999add9099be):
+`wasm/decoder.cpp`, `lib/Decoder.js` and `lib/Colors.js`.
+
+```
+Copyright (c) 2019, Joerg Breitbart
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```

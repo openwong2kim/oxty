@@ -131,6 +131,17 @@ pub struct CellExtra {
     zerowidth: Vec<char>,
     underline_color: Option<Color>,
     hyperlink: Option<Hyperlink>,
+    // oxtty: an image tile drawn over the cell (sixel and iTerm2 images, as @xterm/addon-image stores them).
+    image: Option<ImageTile>,
+}
+
+/// oxtty: tile `tile` (`row * cols + col`) of image `id`, which is `cols` tiles wide, covers the cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ImageTile {
+    pub id: u32,
+    pub tile: u32,
+    pub cols: u32,
 }
 
 /// Content and attributes of a single cell in the terminal grid.
@@ -188,7 +199,9 @@ impl Cell {
             && self
                 .extra
                 .as_ref()
-                .is_none_or(|extra| extra.zerowidth.is_empty() && extra.hyperlink.is_none())
+                .is_none_or(|extra| {
+                    extra.zerowidth.is_empty() && extra.hyperlink.is_none() && extra.image.is_none()
+                })
         {
             self.extra = None;
         } else {
@@ -209,7 +222,11 @@ impl Cell {
             && self
                 .extra
                 .as_ref()
-                .is_none_or(|extra| extra.zerowidth.is_empty() && extra.underline_color.is_none());
+                .is_none_or(|extra| {
+                    extra.zerowidth.is_empty()
+                        && extra.underline_color.is_none()
+                        && extra.image.is_none()
+                });
 
         if should_drop {
             self.extra = None;
@@ -223,6 +240,30 @@ impl Cell {
     #[inline]
     pub fn hyperlink(&self) -> Option<Hyperlink> {
         self.extra.as_ref()?.hyperlink.clone()
+    }
+
+    /// oxtty: sets the image tile over this cell; returns the one it replaced.
+    pub fn set_image(&mut self, image: Option<ImageTile>) -> Option<ImageTile> {
+        let old = self.image();
+        let should_drop = image.is_none()
+            && self.extra.as_ref().is_none_or(|extra| {
+                extra.zerowidth.is_empty()
+                    && extra.underline_color.is_none()
+                    && extra.hyperlink.is_none()
+            });
+        if should_drop {
+            self.extra = None;
+        } else {
+            let extra = self.extra.get_or_insert(Default::default());
+            Arc::make_mut(extra).image = image;
+        }
+        old
+    }
+
+    /// oxtty: the image tile over this cell.
+    #[inline]
+    pub fn image(&self) -> Option<ImageTile> {
+        self.extra.as_ref()?.image
     }
 }
 

@@ -32,6 +32,7 @@ pub mod emitter;
 pub mod engine;
 pub mod events;
 pub mod fit;
+pub mod image;
 mod input;
 pub mod links;
 pub mod markers;

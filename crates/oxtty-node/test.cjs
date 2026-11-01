@@ -159,3 +159,12 @@ test('native ansi snapshot options', () => {
   assert.equal(copy.modes() & 2, 0);
   assert.ok(t.ansiSnapshot().payload.length > cold.payload.length);
 });
+
+test('native image tiles', () => {
+  const t = new Terminal(10, 4);
+  t.write('\x1b[31m');
+  assert.deepEqual(t.placeImage(5, 2, 2, { cursor: 'iip' }), { tiles: 4, covered: [] });
+  assert.deepEqual(Array.from(t.rowImages(1)), [0, 5, 2, 1, 5, 3]);
+  assert.deepEqual(t.cursor().col, 2);
+  assert.equal(t.pen()[0], (1 << 24) | 1);
+});

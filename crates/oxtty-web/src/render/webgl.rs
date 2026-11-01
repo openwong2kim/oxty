@@ -36,6 +36,7 @@ use super::cell::{CellData, CM_RGB, RGB_MASK};
 use super::color::{css_to_color, ColorSet};
 use super::glyphs::GlyphVertices;
 use super::gpu::{self, Listener, Present};
+use super::images::ImageLayer;
 use super::model::{
     resolve, CursorModel, RenderModel, ResolvedHighlight, SelectionModel, COMBINED_CHAR_BIT_MASK,
     RENDER_MODEL_BG_OFFSET, RENDER_MODEL_EXT_OFFSET, RENDER_MODEL_FG_OFFSET,
@@ -201,6 +202,7 @@ struct Inner {
     present: Present,
     rects: RectVertices,
     glyphs: GlyphVertices,
+    images: ImageLayer,
     atlas: Option<Rc<RefCell<TextureAtlas>>>,
     model: RenderModel,
     cell: CellData,
@@ -276,6 +278,7 @@ impl WebglRenderer {
             canvas,
             present,
             glyphs: GlyphVertices::new(cols, rows, dims),
+            images: ImageLayer::default(),
             atlas: None,
             model: RenderModel::default(),
             cell: CellData::default(),
@@ -721,14 +724,17 @@ impl Inner {
             self.resolve_highlights();
         }
         self.update_model(viewport, &lines);
+        self.images.update(viewport, &self.dims, self.dpr);
 
         let drawn = gpu::draw(gpu::Frame {
+            pane: self.id,
             width: self.dims.device_canvas.width,
             height: self.dims.device_canvas.height,
             rects: &self.rects,
             glyphs: &self.glyphs,
             model: &self.model,
             cursor: self.blink.as_ref().is_none_or(Blink::is_cursor_visible),
+            images: &self.images,
             present: &self.present,
         });
         if drawn {
@@ -1013,6 +1019,12 @@ impl Renderer for WebglRenderer {
             .try_borrow_mut()
             .map(|mut i| std::mem::take(&mut i.requests))
             .unwrap_or_default()
+    }
+
+    fn set_image_placeholder(&mut self, show: bool) {
+        if let Ok(mut i) = self.inner.try_borrow_mut() {
+            i.images.placeholder = show;
+        }
     }
 
     fn debug(&self) -> JsValue {

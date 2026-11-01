@@ -105,7 +105,7 @@
     },
     "options.windowOptions": {
       "status": "unsupported",
-      "reason": "The engine answers no window operations; wmux only saves and restores it around the image addon."
+      "reason": "Kept as an option and set by the image addon (enableSizeReports); the CSI 14/16/18 t answers it allows come with the parser hooks."
     },
     "Terminal.open": {
       "status": "supported",
@@ -394,7 +394,7 @@
     },
     "ImageAddon": {
       "status": "later",
-      "reason": "PRD §10 open question; loadAddon throws."
+      "reason": "Rust (crates/oxtty-web/src/image): loadAddon takes the built-in ImageAddon or absorbs @xterm/addon-image; sixel decoded in Rust, PNG/JPEG/GIF by createImageBitmap, tiles in engine cells, page-wide storage limit, WebGL image layer. Supported once the parser hooks route DCS q, OSC 1337 and the addon's CSI handlers to it."
     },
     "_core._renderService.dimensions": {
       "status": "unsupported",
@@ -432,7 +432,7 @@
     },
     "ImageAddon._handlers": {
       "status": "later",
-      "reason": "With the image addon."
+      "reason": "A Map with 'sixel' and 'iip' stand-ins; a decoded sixel goes through handlers.get('sixel').unhook with _dec.width/height and _aborted, so wmux's sixel cap wraps it. Supported with ImageAddon."
     },
     "DOM .xterm": {
       "status": "supported",

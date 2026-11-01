@@ -17,7 +17,7 @@ use crate::vt::event::{Event, EventListener};
 use crate::vt::grid::{Dimensions, Grid, GridIterator, Scroll};
 use crate::vt::index::{self, Boundary, Column, Direction, Line, Point, Side};
 use crate::vt::selection::{Selection, SelectionRange, SelectionType};
-use crate::vt::term::cell::{Cell, Flags, LineLength};
+use crate::vt::term::cell::{Cell, Flags, ImageTile, LineLength};
 use crate::vt::term::color::Colors;
 use crate::vt::vi_mode::{ViModeCursor, ViMotion};
 use crate::vt::vte::ansi::{
@@ -775,6 +775,19 @@ impl<T> Term<T> {
     /// Mutable access to the raw grid data structure.
     pub fn grid_mut(&mut self) -> &mut Grid<Cell> {
         &mut self.grid
+    }
+
+    /// oxtty: puts an image tile on a cell of the active screen (`None` clears it) and damages the cell; returns
+    /// the tile it replaced.
+    pub fn set_image_tile(&mut self, point: Point, tile: Option<ImageTile>) -> Option<ImageTile> {
+        if point.line.0 < 0
+            || point.line.0 as usize >= self.screen_lines()
+            || point.column.0 >= self.columns()
+        {
+            return None;
+        }
+        self.damage.damage_point(Point::new(point.line.0 as usize, point.column));
+        self.grid[point.line][point.column].set_image(tile)
     }
 
     /// oxtty: DECSTR (`CSI ! p`) soft reset. vte drops this sequence, so `oxtty::Engine` finds it in the input and calls this.

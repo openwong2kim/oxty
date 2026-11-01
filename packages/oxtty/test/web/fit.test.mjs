@@ -155,7 +155,7 @@ test('loadAddon absorbs @xterm/addon-unicode11 and @xterm/addon-webgl and throws
     return out;
   });
   assert.equal(r.unicode11, null);
-  assert.match(r.search, /unsupported addon SearchAddon; only the built-in FitAddon, SearchAddon, WebLinksAddon and WebglAddon, @xterm\/addon-webgl and @xterm\/addon-unicode11/);
+  assert.match(r.search, /unsupported addon SearchAddon; only the built-in FitAddon, SearchAddon, WebLinksAddon, WebglAddon and ImageAddon, @xterm\/addon-webgl, @xterm\/addon-image and @xterm\/addon-unicode11/);
   assert.equal(r.webgl, null);
   assert.equal(r.builtInWebgl, null);
   assert.deepEqual(r.renders[0], { start: 0, end: 23 }, 'clearTextureAtlas redraws every row');

@@ -29,12 +29,15 @@ use std::time::Duration;
 #[rustfmt::skip]
 pub mod vt;
 
+pub mod graphics;
 mod history;
+mod images;
 pub mod input;
 mod markers;
 mod search;
 mod snapshot;
 pub use history::TermHistory;
+pub use images::{ImageCell, ImageCursor, ImagePlaced};
 pub use search::{SearchLine, SearchMatch, SearchOptions};
 pub use snapshot::{SnapshotOptions, SnapshotRefusal};
 
@@ -91,6 +94,8 @@ pub mod attr {
     /// A space the program printed. Other blank cells were erased or never written: xterm.js reads them as empty,
     /// so trimming the end of a line drops them but keeps typed spaces.
     pub const TYPED_SPACE: u32 = 1 << 18;
+    /// An image tile covers the cell; see [`crate::Engine::row_images`].
+    pub const IMAGE: u32 = 1 << 19;
 }
 
 /// Terminal mode bits returned by [`Engine::modes`]. Stable across versions.
@@ -737,7 +742,8 @@ impl Engine {
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].
     pub fn resize(&mut self, cols: u16, rows: u16) {
-        let reflow = size(cols, rows).cols != self.term.columns();
+        let old_cols = self.term.columns();
+        let reflow = size(cols, rows).cols != old_cols;
         let anchors = self.anchor_markers(reflow);
         match &self.history {
             Some(history) => {
@@ -750,6 +756,7 @@ impl Engine {
         self.entered_seen = self.primary().history_entered();
         self.history_seen = self.primary_history_len();
         self.place_markers(anchors, reflow);
+        self.extend_images(old_cols);
     }
 
     /// Lines that have left the top of the primary screen's scrollback so far (a full history dropping its oldest
@@ -1259,6 +1266,9 @@ fn flatten(cell: &AlacCell) -> Cell {
     }
     if cell.hyperlink().is_some() {
         attrs |= attr::HYPERLINK;
+    }
+    if cell.image().is_some() {
+        attrs |= attr::IMAGE;
     }
     Cell {
         ch: cell.c,

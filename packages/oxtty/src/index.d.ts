@@ -241,6 +241,18 @@ export class Terminal {
   /** Markers the engine dropped since the last call. */
   takeDisposedMarkers(): number[];
   /**
+   * Covers `cols` × `rows` cells with the tiles of image `id` (a host that keeps the pixels, as @xterm/addon-image):
+   * from the cursor, feeding lines as needed, or with `scrolling: false` from the top left of the screen with the
+   * cursor staying. The cursor ends on the last row, at the image's left column (`'vt340'`) or right of it
+   * (`'iip'`). Columns past the right edge are cut off. Returns the tiles written and the image id of each tile it
+   * covered. Text or an erase over a cell removes its tile; tiles scroll and leave with their lines.
+   */
+  placeImage(id: number, cols: number, rows: number, options?: { scrolling?: boolean; cursor?: 'vt340' | 'iip' }): { tiles: number; covered: number[] };
+  /** `[col, id, tile]` per cell of the row an image tile covers (`tile` is `row * cols + col` in the image), or null if out of range. */
+  rowImages(line: number): Uint32Array | null;
+  /** `[fg, bg, attrs]` that text written now gets, packed like `rowCells`. */
+  pen(): Uint32Array;
+  /**
    * Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes.
    * `{ scrollback: 0, excludeModes: true }` paints just the screen it shows (a cold frame).
    */
@@ -259,6 +271,8 @@ export declare const Attr: Readonly<{
   LEADING_WIDE_SPACER: number;
   /** A space the program printed. Other blanks were erased or never written (xterm.js empty cells). */
   TYPED_SPACE: number;
+  /** An image tile covers the cell; see `rowImages`. */
+  IMAGE: number;
 }>;
 
 export declare const Mode: Readonly<{

@@ -123,6 +123,8 @@ pub(crate) struct Shared {
     pub selection: RefCell<crate::selection::Selection>,
     pub links: crate::links::Links,
     pub parser: crate::parser::ParserState,
+    /// Hook: the image addon's state, while one is loaded.
+    pub images: RefCell<Option<Rc<crate::image::State>>>,
     state: Cell<State>,
     /// Serialises OSC 52 reads so each answers the oldest pending read.
     clipboard_reads: RefCell<Promise>,
@@ -208,6 +210,7 @@ impl Terminal {
             selection: RefCell::default(),
             links: Default::default(),
             parser: Default::default(),
+            images: RefCell::new(None),
             state: Cell::new(State::default()),
             clipboard_reads: RefCell::new(Promise::resolve(&JsValue::UNDEFINED)),
             drain_timer: RefCell::new(None),
@@ -318,6 +321,7 @@ impl Terminal {
         self.shared.apply_scrollbar();
         self.shared.create_renderer()?;
         self.shared.apply_screen_reader_mode();
+        crate::image::after_open(&self.shared);
         self.shared.schedule_frame();
         Ok(())
     }
@@ -426,6 +430,7 @@ impl Terminal {
         drop(core);
         crate::markers::drop_all(&self.shared);
         crate::parser::dispose(&self.shared);
+        crate::image::dispose(&self.shared);
         self.shared.drain_timer.borrow_mut().take();
         self.shared.frame.borrow_mut().take();
         self.shared.options_proxy.borrow_mut().take();
@@ -560,6 +565,9 @@ impl Shared {
             self.events.bell.fire(&[]);
         }
         crate::selection::handle_resets(self, events.resets);
+        if events.resets > 0 {
+            crate::image::full_reset(self);
+        }
         let write: Option<Function> = get(&clipboard, "write").dyn_into().ok();
         for w in events.clipboard_writes {
             if let Some(write) = &write {
@@ -676,6 +684,9 @@ impl Shared {
         let (old, new) = (self.state.get(), self.read_state());
         self.state.set(new);
         crate::markers::sync(self);
+        if new.alternate != old.alternate {
+            crate::image::buffer_changed(self);
+        }
         if new.alternate != old.alternate && self.events.buffer_change.has_listeners() {
             let buffer = crate::buffer::active(self);
             self.events.buffer_change.fire(&[&buffer.into()]);
@@ -710,6 +721,7 @@ impl Shared {
         crate::selection::handle_crash(self);
         crate::links::after_resize(self);
         crate::markers::drop_all(self);
+        crate::image::engine_restarted(self);
         self.after_change();
     }
 

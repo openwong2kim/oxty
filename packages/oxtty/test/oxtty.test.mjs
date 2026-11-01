@@ -399,3 +399,20 @@ test('ansi snapshot options: the newest history lines only, and the screen witho
   assert.equal(new TextDecoder().decode(t.ansiSnapshot().payload).endsWith('\x1b[31'), true);
   t.dispose();
 });
+
+test('image tiles: placed from the cursor, flagged in cells, covered by later images and text', () => {
+  const t = make({ cols: 10, rows: 4 });
+  t.write('ab\r\n\x1b[2;3H\x1b[41m');
+  assert.deepEqual(t.placeImage(7, 3, 2), { tiles: 6, covered: [] });
+  assert.deepEqual(Array.from(t.rowImages(1)), [2, 7, 0, 3, 7, 1, 4, 7, 2]);
+  assert.ok(t.rowCells(2)[2 * 4 + 3] & Attr.IMAGE);
+  assert.deepEqual([t.cursor().line, t.cursor().col], [2, 2]);
+  assert.deepEqual(t.placeImage(8, 1, 1, { cursor: 'iip' }), { tiles: 1, covered: [7] });
+  assert.equal(t.cursor().col, 3);
+  t.write('XY');
+  assert.deepEqual(Array.from(t.rowImages(2)), [2, 8, 0]);
+  assert.equal(decodeColor(t.pen()[1]).value, 1);
+  t.placeImage(9, 2, 1, { scrolling: false });
+  assert.deepEqual(Array.from(t.rowImages(0)), [0, 9, 0, 1, 9, 1]);
+  assert.equal(t.rowImages(99), null);
+});

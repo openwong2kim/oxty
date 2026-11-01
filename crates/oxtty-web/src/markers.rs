@@ -48,7 +48,7 @@ fn fire(emitters: Vec<Rc<Emitter>>) {
 
 /// Fires `onDispose` of the markers the engine dropped since the last call. Runs after every parsed write.
 pub(crate) fn sync(shared: &Rc<Shared>) {
-    if shared.markers.borrow().ids.is_empty() {
+    if shared.markers.borrow().ids.is_empty() && !crate::image::has_markers(shared) {
         return;
     }
     let gone: Vec<u32> = {
@@ -70,6 +70,8 @@ pub(crate) fn sync(shared: &Rc<Shared>) {
     if gone.is_empty() {
         return;
     }
+    // Hook: images go with their end markers.
+    crate::image::markers_gone(shared, &gone);
     let emitters = {
         let mut markers = shared.markers.borrow_mut();
         markers.ids.retain(|id| !gone.contains(id));

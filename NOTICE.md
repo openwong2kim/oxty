@@ -100,6 +100,25 @@ The xterm.js authors; the scrollable files derive from VS Code, Copyright (c)
 Microsoft Corporation. MIT license (`crates/oxtty/LICENSE-XTERM`). Each file
 names its source lines.
 
+## xterm.js image addon and the sixel decoder
+
+`crates/oxtty-web/src/image` (the built-in `ImageAddon`, its sixel and iTerm2
+handlers and image storage), `crates/oxtty-web/src/render/images.rs` (the image
+layer) and `crates/oxtty/src/images.rs` (image tiles in cells) are ported from
+`@xterm/addon-image` 0.10.0-beta.331 (xterm.js commit
+08829c7eb6279dda2a9e86df901353a1a89858ca): `ImageAddon.ts`, `SixelHandler.ts`,
+`IIPHandler.ts`, `ImageStorage.ts`, `ImageRenderer.ts`, `SixelImageStorage.ts`
+and `IIPImageStorage.ts`, Copyright (c) 2020-2023 The xterm.js authors, MIT
+license (`crates/oxtty/LICENSE-XTERM`). `crates/oxtty/src/graphics/iip.rs`
+ports its `IIPHeaderParser.ts`, `IIPMetrics.ts` and the base64 rules of
+`xterm-wasm-parts` 0.4.1 (`Base64Decoder.wasm.js`, Copyright (c) 2023-2026 The
+xterm.js authors, MIT). `crates/oxtty/src/graphics/sixel.rs` ports the sixel
+decoder of the `sixel` 0.16.0 package (github.com/jerch/node-sixel commit
+5cd50615e29f54b956188ec2a12d999add9099be: `wasm/decoder.cpp`, `lib/Decoder.js`
+and `lib/Colors.js`), Copyright (c) 2019 Joerg Breitbart, MIT license
+(`packages/oxtty/THIRD_PARTY_NOTICES.md` has its text). Each file names its
+source lines.
+
 ## wmux
 
 The engine integration started in

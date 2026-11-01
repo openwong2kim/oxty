@@ -17,6 +17,7 @@ const IMPORTS = {
   '@xterm/addon-webgl': '/node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs',
   '@xterm/addon-unicode11': '/node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs',
   '@xterm/addon-web-links': '/node_modules/@xterm/addon-web-links/lib/addon-web-links.mjs',
+  '@xterm/addon-image': '/node_modules/@xterm/addon-image/lib/addon-image.mjs',
 };
 
 /**

@@ -102,6 +102,22 @@ extern "C" {
     /// An array of the ids the engine dropped since the last call.
     #[wasm_bindgen(method, catch, js_name = takeDisposedMarkers)]
     pub fn take_disposed_markers(this: &Engine) -> Result<JsValue, JsValue>;
+    /// `{ tiles, covered }`: covers `cols` × `rows` cells with the tiles of image `id` (`options`: `{ scrolling,
+    /// cursor: 'vt340' | 'iip' }`).
+    #[wasm_bindgen(method, catch, js_name = placeImage)]
+    pub fn place_image(
+        this: &Engine,
+        id: u32,
+        cols: u32,
+        rows: u32,
+        options: &Object,
+    ) -> Result<JsValue, JsValue>;
+    /// `[col, id, tile]` per cell of the row an image tile covers; `null` outside the buffer.
+    #[wasm_bindgen(method, catch, js_name = rowImages)]
+    pub fn row_images(this: &Engine, line: i32) -> Result<Option<Uint32Array>, JsValue>;
+    /// `[fg, bg, attrs]` text written now gets.
+    #[wasm_bindgen(method, catch)]
+    pub fn pen(this: &Engine) -> Result<Uint32Array, JsValue>;
     #[wasm_bindgen(method)]
     pub fn dispose(this: &Engine);
     /// Stops parsing at sequences of `kind` (`'csi'`, `'osc'` or `'dcs'`) with `id`, or no longer does.
@@ -163,6 +179,8 @@ pub mod attr {
     pub const LEADING_WIDE_SPACER: u32 = 1 << 17;
     /// A space the program printed; other blanks were erased or never written (xterm.js empty cells).
     pub const TYPED_SPACE: u32 = 1 << 18;
+    /// An image tile covers the cell (`Engine::row_images`).
+    pub const IMAGE: u32 = 1 << 19;
     pub const EXTRAS: u32 = COMBINING | UNDERLINE_COLOR | HYPERLINK;
 }
 
@@ -201,6 +219,8 @@ pub struct CellExtra {
     /// SGR 58, packed like the cell colours.
     pub underline_color: Option<u32>,
     pub hyperlink: Option<Hyperlink>,
+    /// The image id and tile (`row * cols + col` in the image) drawn over the cell.
+    pub image: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -341,6 +361,11 @@ impl EngineView for LocalEngineView {
                     parse_extras(&e.row_extras(line).unwrap_or(JsValue::NULL)),
                 );
             }
+            if row.chunks_exact(4).any(|cell| cell[3] & attr::IMAGE != 0) {
+                if let Ok(Some(cells)) = e.row_images(line) {
+                    add_images(extras.entry(y).or_default(), &cells.to_vec());
+                }
+            }
         }
         let mut cursor = self.cursor();
         cursor.line += display_offset as i32;
@@ -451,6 +476,21 @@ fn selection_char(value: &JsValue) -> char {
     }
 }
 
+/// Merges `[col, id, tile]` triples into a row's extras.
+fn add_images(extras: &mut Vec<CellExtra>, cells: &[u32]) {
+    for cell in cells.chunks_exact(3) {
+        let image = Some((cell[1], cell[2]));
+        match extras.iter_mut().find(|e| e.col == cell[0]) {
+            Some(extra) => extra.image = image,
+            None => extras.push(CellExtra {
+                col: cell[0],
+                image,
+                ..CellExtra::default()
+            }),
+        }
+    }
+}
+
 fn parse_extras(value: &JsValue) -> Vec<CellExtra> {
     if !Array::is_array(value) {
         return Vec::new();
@@ -467,6 +507,7 @@ fn parse_extras(value: &JsValue) -> Vec<CellExtra> {
                     id: get(&hyperlink, "id").as_string().unwrap_or_default(),
                     uri: get(&hyperlink, "uri").as_string().unwrap_or_default(),
                 }),
+                image: None,
             }
         })
         .collect()

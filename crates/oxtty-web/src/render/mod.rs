@@ -13,6 +13,7 @@ mod custom_glyphs;
 mod gl;
 mod glyphs;
 mod gpu;
+mod images;
 mod model;
 pub mod options;
 mod rects;
@@ -179,8 +180,21 @@ pub trait Renderer {
     fn set_focused(&mut self, focused: bool);
     /// Requests since the last call; the terminal polls this when the renderer wakes it (see the crate docs).
     fn take_requests(&mut self) -> Vec<RendererRequest>;
+    /// Whether image tiles whose image is no longer stored show the placeholder (an image addon is loaded with
+    /// `showPlaceholder`); without an addon they show nothing.
+    fn set_image_placeholder(&mut self, _show: bool) {}
     /// Internal state for the tests (`term._rendererDebug()`).
     fn debug(&self) -> JsValue {
         JsValue::UNDEFINED
     }
+}
+
+/// The image `id` was deleted: its texture goes.
+pub(crate) fn release_image(id: u32) {
+    gpu::release_image(id);
+}
+
+/// GPU textures of images, for the tests.
+pub(crate) fn image_textures() -> u32 {
+    gpu::image_textures()
 }
