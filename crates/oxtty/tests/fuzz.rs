@@ -181,9 +181,16 @@ fn check_snapshot(t: &Engine, scrollback: usize) {
     let mut copy = Engine::new(t.cols(), t.rows(), scrollback);
     copy.feed(&payload);
     let (mut a, mut b) = (Vec::new(), Vec::new());
+    // A snapshot writes the blank a wrapped wide char left as an ordinary blank (xterm.js has no such mark either).
+    let unmark = |cells: &mut Vec<Cell>| {
+        cells
+            .iter_mut()
+            .for_each(|c| c.attrs &= !oxtty::attr::LEADING_WIDE_SPACER)
+    };
     for line in 0..t.rows() as i32 {
         t.row_cells(line, &mut a);
         copy.row_cells(line, &mut b);
+        unmark(&mut a);
         if a != b {
             let col = (0..a.len()).find(|&c| a.get(c) != b.get(c)).unwrap_or(0);
             let tail = &payload[payload.len().saturating_sub(48)..];

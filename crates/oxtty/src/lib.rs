@@ -79,6 +79,9 @@ pub mod attr {
     pub const UNDERLINE_COLOR: u32 = 1 << 15;
     /// The cell is part of an OSC 8 hyperlink; see [`crate::Engine::row_extras`].
     pub const HYPERLINK: u32 = 1 << 16;
+    /// The blank last cell of a wrapped row whose wide character did not fit and moved to the next row (xterm.js
+    /// leaves the same blank); it is not text, unlike a space the program wrote.
+    pub const LEADING_WIDE_SPACER: u32 = 1 << 17;
 }
 
 /// Terminal mode bits returned by [`Engine::modes`]. Stable across versions.
@@ -358,6 +361,8 @@ pub struct Engine {
     scrolled_seen: u64,
     // The view moved, so the next damage is full.
     view_moved: bool,
+    // Full resets the host has been told about.
+    resets_seen: u64,
     // Lines that left the top of the primary screen's scrollback, and what the count was taken from.
     trimmed: u64,
     entered_seen: u64,
@@ -433,6 +438,7 @@ impl Engine {
             scrollback,
             offset: 0,
             scrolled_seen: 0,
+            resets_seen: 0,
             trimmed: 0,
             entered_seen: 0,
             history_seen: 0,
@@ -929,6 +935,15 @@ impl Engine {
         }
     }
 
+    /// Full resets (RIS, `ESC c`) the program sent since the last call, so the host can drop what it keeps about the
+    /// screen (selection).
+    pub fn take_resets(&mut self) -> u32 {
+        let now = self.term.resets();
+        let n = now - self.resets_seen;
+        self.resets_seen = now;
+        n as u32
+    }
+
     /// Bells (`BEL`) received since the last call.
     pub fn take_bells(&mut self) -> u32 {
         std::mem::take(&mut self.inbox.inbox().bells)
@@ -1027,6 +1042,7 @@ fn flatten(cell: &AlacCell) -> Cell {
         (Flags::BLINK, attr::BLINK),
         (Flags::WIDE_CHAR, attr::WIDE),
         (Flags::WIDE_CHAR_SPACER, attr::WIDE_SPACER),
+        (Flags::LEADING_WIDE_CHAR_SPACER, attr::LEADING_WIDE_SPACER),
     ];
     let mut attrs = pairs
         .iter()

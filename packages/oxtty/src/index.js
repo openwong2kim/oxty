@@ -1,7 +1,7 @@
 // oxtty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 7;
+const ABI = 8;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 // Input buffer: smallest allocation, and the largest one kept between writes.
@@ -113,7 +113,7 @@ export const Attr = Object.freeze({
   BOLD: 1 << 0, DIM: 1 << 1, ITALIC: 1 << 2, UNDERLINE: 1 << 3,
   DOUBLE_UNDERLINE: 1 << 4, CURLY_UNDERLINE: 1 << 5, DOTTED_UNDERLINE: 1 << 6, DASHED_UNDERLINE: 1 << 7,
   INVERSE: 1 << 8, HIDDEN: 1 << 9, STRIKEOUT: 1 << 10, BLINK: 1 << 11,
-  WIDE: 1 << 12, WIDE_SPACER: 1 << 13, COMBINING: 1 << 14, UNDERLINE_COLOR: 1 << 15, HYPERLINK: 1 << 16,
+  WIDE: 1 << 12, WIDE_SPACER: 1 << 13, COMBINING: 1 << 14, UNDERLINE_COLOR: 1 << 15, HYPERLINK: 1 << 16, LEADING_WIDE_SPACER: 1 << 17,
 });
 
 /** Terminal mode bits (`modes()`). */
@@ -415,6 +415,11 @@ export class Terminal {
 
   takeBells() {
     return wasm.oxtty_take_bells(this.#handle());
+  }
+
+  /** Full resets (RIS) the program sent since the last call. */
+  takeResets() {
+    return wasm.oxtty_take_resets(this.#handle());
   }
 
   /** Lets the program read and/or write the host clipboards with OSC 52 (both off by default). */
