@@ -96,7 +96,7 @@ test('loadAddon absorbs @xterm/addon-unicode11 and throws for any other addon', 
     return out;
   });
   assert.equal(r.unicode11, null);
-  assert.match(r.search, /unsupported addon SearchAddon; only the built-in FitAddon and @xterm\/addon-unicode11/);
+  assert.match(r.search, /unsupported addon SearchAddon; only the built-in FitAddon and SearchAddon and @xterm\/addon-unicode11/);
   assert.match(r.webgl, /unsupported addon/);
   assert.match(r.plain, /unsupported addon/);
 });

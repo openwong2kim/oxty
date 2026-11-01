@@ -226,8 +226,8 @@ fn is_unicode11_addon(addon: &JsValue) -> bool {
 
 #[wasm_bindgen]
 impl Terminal {
-    /// Accepts the built-in `FitAddon` (refitted by itself when the cell size changes) and absorbs
-    /// `@xterm/addon-unicode11`, whose widths the engine already uses. Any other addon throws.
+    /// Accepts the built-in `FitAddon` (refitted by itself when the cell size changes) and `SearchAddon`, and
+    /// absorbs `@xterm/addon-unicode11`, whose widths the engine already uses. Any other addon throws.
     #[wasm_bindgen(js_name = loadAddon)]
     pub fn load_addon(
         &self,
@@ -245,14 +245,14 @@ impl Terminal {
                 return Ok(());
             }
         }
-        if is_unicode11_addon(&addon) {
+        if crate::search::load(self, &addon) || is_unicode11_addon(&addon) {
             return Ok(());
         }
         let name = get(&get(&addon, "constructor"), "name")
             .as_string()
             .unwrap_or_default();
         Err(js_sys::Error::new(&format!(
-            "oxtty/xterm: unsupported addon {name}; only the built-in FitAddon and @xterm/addon-unicode11 can be loaded"
+            "oxtty/xterm: unsupported addon {name}; only the built-in FitAddon and SearchAddon and @xterm/addon-unicode11 can be loaded"
         ))
         .into())
     }

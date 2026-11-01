@@ -12,7 +12,7 @@ use crate::vt::vte::ansi::{Color, Hyperlink as VteHyperlink, NamedColor};
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct Flags: u16 {
+    pub struct Flags: u32 {
         const INVERSE                   = 0b0000_0000_0000_0001;
         const BOLD                      = 0b0000_0000_0000_0010;
         const ITALIC                    = 0b0000_0000_0000_0100;
@@ -32,6 +32,9 @@ bitflags! {
         const DASHED_UNDERLINE          = 0b0100_0000_0000_0000;
         // wmux replay: retain SGR blink without increasing the cell size.
         const BLINK                    = 0b1000_0000_0000_0000;
+        // oxtty: a space the program printed, which is text, unlike a blank that was erased or never written
+        // (xterm.js keeps the two apart). The flags are 32 bits for it; the cell stays 24 bytes.
+        const TYPED_SPACE              = 1 << 16;
         const ALL_UNDERLINES            = Self::UNDERLINE.bits() | Self::DOUBLE_UNDERLINE.bits()
                                         | Self::UNDERCURL.bits() | Self::DOTTED_UNDERLINE.bits()
                                         | Self::DASHED_UNDERLINE.bits();

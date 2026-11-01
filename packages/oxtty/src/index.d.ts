@@ -81,6 +81,47 @@ export interface Hook {
   data: Uint8Array;
 }
 
+/** How `searchNext` and friends compare text. */
+export interface SearchOptions {
+  /** Off: matched with the RegExp `i` flag. */
+  caseSensitive?: boolean;
+  /** A match needs a non-word character (`@xterm/addon-search`'s set, so not `_`) or a line end on both sides. */
+  wholeWord?: boolean;
+  /** `query` is a JavaScript regular expression (flag `g`); otherwise it is matched as plain text. Either way the
+   * matching runs in JS over each logical line's text (`searchLine`). */
+  regex?: boolean;
+}
+
+/** A match in cells: lines as in `rowText`, end exclusive and on `endLine` (`endCol` is 1…cols). */
+export interface SearchMatch {
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  endCol: number;
+}
+
+/** A logical line as search reads it: rows joined across soft wraps, blanks as spaces, empty cells at the end dropped. */
+export interface SearchLine {
+  /** Its first row. */
+  first: number;
+  rows: number;
+  text: string;
+  /** The cell of each UTF-16 unit of `text`: `row * cols + col` from `first`, bit 31 set for a wide character. */
+  cells: Uint32Array;
+}
+
+/** What `ansiSnapshot` leaves out, like `@xterm/addon-serialize`'s `serialize` options. */
+export interface AnsiSnapshotOptions {
+  /** Keep only the newest this many history lines (0: the screen alone). All of them by default. */
+  scrollback?: number;
+  /**
+   * Leave out the modes (cursor keys, keypad, mouse, focus reports, bracketed paste, insert, origin, autowrap off,
+   * cursor visibility) and what continues the output (the unfinished sequence at the end, a synchronized update in
+   * progress), so the bytes only paint the screen. Scroll margins are then not refused.
+   */
+  excludeModes?: boolean;
+}
+
 export class Terminal {
   constructor(options?: TerminalOptions);
   /** Feeds program output. Strings are encoded as UTF-8. */
@@ -169,8 +210,36 @@ export class Terminal {
    * the row above when that row ends in a non-blank cell.
    */
   setWindowsPty(pty: { backend?: 'conpty' | 'winpty'; buildNumber?: number } | null | undefined): void;
-  /** Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes. */
-  ansiSnapshot(): AnsiSnapshot;
+  /**
+   * The first match of `query` starting at or after cell (`line`, `col`), down to the bottom of the screen (no
+   * wrap-around). Defaults to the top of the history. Matches never span logical lines (rows joined by soft wraps).
+   */
+  searchNext(query: string, options?: SearchOptions, line?: number, col?: number): SearchMatch | null;
+  /** The last match ending at or before cell (`line`, `col`), up to the top of the history. Defaults to the end of the screen. */
+  searchPrevious(query: string, options?: SearchOptions, line?: number, col?: number): SearchMatch | null;
+  /** Every match in the logical lines rows `first`…`last` belong to (each search goes on from the end of the previous match), keeping those that touch the rows. */
+  searchRows(query: string, options: SearchOptions | undefined, first: number, last: number): SearchMatch[];
+  /** The logical line row `line` belongs to, as search reads it, for matching the text yourself; null outside the buffer. */
+  searchLine(line: number): SearchLine | null;
+  /**
+   * Puts a marker on buffer line `line` of the primary screen (0 is the oldest history line, `historyLength` the top
+   * screen row) and returns its id; 0 outside the buffer or while the alternate screen is up. The marker follows its
+   * line as output scrolls it into the history and as scroll regions, IL and DL move it; it is dropped when its line
+   * leaves the scrollback or is cleared whole (ED, a line IL or DL pushed out, RIS). A resize keeps it on its logical
+   * line.
+   */
+  addMarker(line: number): number;
+  /** The marker's buffer line on the primary screen, -1 once it is gone. */
+  markerLine(id: number): number;
+  /** Drops a marker; it is not reported by `takeDisposedMarkers`. */
+  removeMarker(id: number): void;
+  /** Markers the engine dropped since the last call. */
+  takeDisposedMarkers(): number[];
+  /**
+   * Does not change the terminal, so it is safe while a renderer draws it; two calls give the same bytes.
+   * `{ scrollback: 0, excludeModes: true }` paints just the screen it shows (a cold frame).
+   */
+  ansiSnapshot(options?: AnsiSnapshotOptions): AnsiSnapshot;
   dispose(): void;
 }
 
@@ -183,6 +252,8 @@ export declare const Attr: Readonly<{
   WIDE: number; WIDE_SPACER: number; COMBINING: number; UNDERLINE_COLOR: number; HYPERLINK: number;
   /** Blank end of a wrapped row whose wide character moved to the next row; not text. */
   LEADING_WIDE_SPACER: number;
+  /** A space the program printed. Other blanks were erased or never written (xterm.js empty cells). */
+  TYPED_SPACE: number;
 }>;
 
 export declare const Mode: Readonly<{

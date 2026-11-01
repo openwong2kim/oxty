@@ -268,7 +268,7 @@ M2 runs on key input code borrowed from xterm.js. M3 moves encoding to Rust.
 | Unicode | Character widths use the same table as the xterm.js Unicode 11 provider |
 | Determinism | No clock, threads or randomness in the engine. Same input → same screen |
 | Stability | 0 panics in wasm (verified by fuzzing); invalid input is ignored and processing continues |
-| Size | Engine wasm 300KB or less (266KB on 2026-11-01); front-end wasm (`oxtty/xterm`) 600KB or less, checked by `scripts/build-web.sh` |
+| Size | Engine wasm 340KB or less (302KB on 2026-11-01, with search, markers and the vte fork; raised from 300KB because one instance serves every pane on a page, so the code is paid once, not per terminal); front-end wasm (`oxtty/xterm`) 600KB or less, checked by `scripts/build-web.sh`; both also by `test/web/size.test.mjs` |
 | Performance | `write`→frame end-to-end throughput at or above xterm.js on the same corpus. The target value is set after the M1 baseline measurement |
 | Memory | Publish the scrollback memory caused by the cell size (24B) in the README; consider compressed storage before 1.0 (D6) |
 | Platforms | Native on Windows, macOS and Linux, modern browsers, Node 18 or later |

@@ -53,6 +53,17 @@ impl fmt::Display for SnapshotRefusal {
 
 impl std::error::Error for SnapshotRefusal {}
 
+/// What [`crate::Engine::ansi_snapshot_with`] leaves out, like `@xterm/addon-serialize` options.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SnapshotOptions {
+    /// Keep only the newest this many history lines (`Some(0)`: the screen alone); `None` keeps them all.
+    pub scrollback: Option<usize>,
+    /// Leave out the modes (cursor keys, keypad, mouse, focus reports, bracketed paste, insert, origin, autowrap
+    /// off, cursor visibility) and what continues the output (the unfinished sequence at the end, a synchronized
+    /// update in progress), so the bytes only paint the screen. Scroll margins are then not refused.
+    pub exclude_modes: bool,
+}
+
 /// Maximum length of an incomplete sequence to carry over (wmux `MAX_PENDING_TAIL_CHARS`).
 const MAX_PENDING_TAIL: usize = 4096;
 
@@ -178,24 +189,27 @@ fn incomplete_utf8_suffix_len(buf: &[u8]) -> usize {
         .unwrap_or(0)
 }
 
-/// The body of [`crate::Engine::ansi_snapshot`]. The rejection order is the same as wmux: margins → tail overflow → wide edge.
+/// The body of [`crate::Engine::ansi_snapshot_with`]. The rejection order is the same as wmux: margins → tail overflow → wide edge.
 pub(crate) fn ansi<T: EventListener>(
     term: &Term<T>,
     held_sync: Option<&[u8]>,
     tail: &RawTail,
     older: Option<&History>,
+    options: SnapshotOptions,
 ) -> Result<Vec<u8>, SnapshotRefusal> {
     let region = term.scroll_region();
-    if region.start.0 != 0 || region.end.0 != term.screen_lines() as i32 {
+    if !options.exclude_modes && (region.start.0 != 0 || region.end.0 != term.screen_lines() as i32)
+    {
         return Err(SnapshotRefusal::Margins);
     }
     // During sync, all raw bytes after BSU are the tail (the parser is in ground right after BSU) — no overflow check needed.
     let tail = match held_sync {
+        _ if options.exclude_modes => &[][..],
         Some(held) => held,
         None => tail.pending()?,
     };
-    let mut out = serialize(term, older)?;
-    if held_sync.is_some() {
+    let mut out = serialize(term, older, options)?;
+    if held_sync.is_some() && !options.exclude_modes {
         out.push_str("\x1b[?2026h");
     }
     let mut bytes = out.into_bytes();
@@ -329,41 +343,152 @@ fn cursor(out: &mut String, grid: &Grid<Cell>) {
     }
 }
 
-/// `older` is the compressed history older than this grid (primary screen only).
-fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>) {
-    let mut previous_style = String::new();
-    let mut previous_link: Option<Hyperlink> = None;
-    let mut row = |out: &mut String, line: &Row<Cell>, last: bool| {
+/// A blank that was erased or never written, with at most a background: xterm.js holds nothing there, so it is not
+/// printed (a printed space would be text). A blank with more attributes is printed, as an erase keeps only the
+/// background.
+fn erased(cell: &Cell) -> bool {
+    cell.c == ' '
+        && cell.fg == Color::Named(NamedColor::Foreground)
+        && (cell.flags - Flags::WRAPLINE - Flags::LEADING_WIDE_CHAR_SPACER).is_empty()
+        && cell.extra.is_none()
+}
+
+/// Writes rows one after another, keeping the pen and link between them.
+struct Rows {
+    previous_style: String,
+    previous_link: Option<Hyperlink>,
+    columns: usize,
+}
+
+impl Rows {
+    fn pen(&mut self, out: &mut String, cell: &Cell) {
+        let next_style = style(cell);
+        if next_style != self.previous_style {
+            out.push_str(&next_style);
+            self.previous_style = next_style;
+        }
+    }
+
+    /// The blank pen of background `bg`, which an erase (ECH) fills cells with.
+    fn blank_pen(&mut self, out: &mut String, bg: Color) {
+        let blank = Cell {
+            bg,
+            ..Cell::default()
+        };
+        self.pen(out, &blank);
+    }
+
+    /// Moves over `n` erased cells of background `bg` without printing them, erasing them when coloured.
+    fn skip(&mut self, out: &mut String, n: usize, bg: Color) {
+        if bg != Color::Named(NamedColor::Background) {
+            self.blank_pen(out, bg);
+            let _ = write!(out, "\x1b[{n}X");
+        }
+        let _ = write!(out, "\x1b[{n}C");
+    }
+
+    /// `next` is the first cell of the row below, which a wrapped row runs on into.
+    fn row(&mut self, out: &mut String, line: &Row<Cell>, next: Option<&Cell>, last: bool) {
+        // Erased cells not written yet, all with the same background
+        let (mut gap, mut gap_bg) = (0, Color::Named(NamedColor::Background));
+        let mut used = 0;
         for cell in &line[..] {
             if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                used += 1;
                 continue;
             }
-            let next_style = style(cell);
-            if next_style != previous_style {
-                out.push_str(&next_style);
-                previous_style = next_style;
+            if erased(cell) {
+                if gap > 0 && cell.bg != gap_bg {
+                    self.skip(out, gap, gap_bg);
+                    used += gap;
+                    gap = 0;
+                }
+                gap += 1;
+                gap_bg = cell.bg;
+                continue;
             }
+            if gap > 0 {
+                self.skip(out, gap, gap_bg);
+                used += gap;
+                gap = 0;
+            }
+            self.pen(out, cell);
             let next_link = cell.hyperlink();
-            if next_link != previous_link {
+            if next_link != self.previous_link {
                 link(out, next_link.as_ref());
-                previous_link = next_link;
+                self.previous_link = next_link;
             }
             glyph(out, cell);
+            used += 1;
         }
-        if !last && !line[grid.last_column()].flags.contains(Flags::WRAPLINE) {
-            // Clear attributes before scrolling. Otherwise a colored blank template
-            // paints cells outside the serialized content.
-            out.push_str("\x1b[0m\r\n");
-            previous_style.clear();
+        let wrapped = line[Column(self.columns - 1)]
+            .flags
+            .contains(Flags::WRAPLINE);
+        if last || !wrapped {
+            // Erased cells at the end are only written for their colour
+            if gap > 0 && gap_bg != Color::Named(NamedColor::Background) {
+                self.blank_pen(out, gap_bg);
+                let _ = write!(out, "\x1b[{gap}X");
+            }
+            if !last {
+                // Clear attributes before scrolling. Otherwise a colored blank template
+                // paints cells outside the serialized content.
+                out.push_str("\x1b[0m\r\n");
+                self.previous_style.clear();
+            }
+            return;
         }
+        if gap == 0 && !next.is_some_and(erased) {
+            // The next row's first character wraps on its own
+            return;
+        }
+        // Only printing past the last column wraps, so print over the erased end and one more cell, then erase
+        // what was printed (xterm.js SerializeAddon `_rowEnd` does the same)
+        if self.previous_link.is_some() {
+            link(out, None);
+            self.previous_link = None;
+        }
+        self.pen(out, &Cell::default());
+        out.push_str(&"-".repeat(gap + 1));
+        out.push_str("\x1b[D");
+        let next_bg = next.map_or(Color::Named(NamedColor::Background), |c| c.bg);
+        self.blank_pen(out, next_bg);
+        out.push_str("\x1b[X");
+        if gap > 0 {
+            let _ = write!(out, "\x1b[A\x1b[{}G", used + 1);
+            self.blank_pen(out, gap_bg);
+            let _ = write!(out, "\x1b[{gap}X\x1b[B\r");
+        }
+    }
+}
+
+/// `older` is the compressed history older than this grid (primary screen only); the oldest `skip` history rows
+/// are left out.
+fn screen(out: &mut String, grid: &Grid<Cell>, older: Option<&History>, skip: usize) {
+    let mut rows = Rows {
+        previous_style: String::new(),
+        previous_link: None,
+        columns: grid.columns(),
     };
-    for i in 0..older.map_or(0, History::len) {
-        row(out, &older.expect("len is 0 without history").row(i), false);
+    let older_len = older.map_or(0, History::len);
+    let total = older_len + grid.history_size() + grid.screen_lines();
+    let fetch = |i: usize| match older {
+        Some(older) if i < older_len => older.row(i),
+        _ => grid[Line((i - older_len) as i32 - grid.history_size() as i32)].clone(),
+    };
+    // One row ahead: a wrapped row looks at how the next one starts
+    let mut next = (skip < total).then(|| fetch(skip));
+    for i in skip..total {
+        let Some(line) = next.take() else { break };
+        next = (i + 1 < total).then(|| fetch(i + 1));
+        rows.row(
+            out,
+            &line,
+            next.as_ref().map(|r| &r[Column(0)]),
+            i + 1 == total,
+        );
     }
-    for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
-        row(out, &grid[Line(y)], y == grid.screen_lines() as i32 - 1);
-    }
-    if previous_link.is_some() {
+    if rows.previous_link.is_some() {
         link(out, None);
     }
 }
@@ -383,6 +508,7 @@ fn split_wide(row: &Row<Cell>) -> bool {
 fn serialize<T: EventListener>(
     term: &Term<T>,
     older: Option<&History>,
+    options: SnapshotOptions,
 ) -> Result<String, SnapshotRefusal> {
     // When cutting the cursor paragraph, xterm can leave half of a wide character. Printing that character
     // wraps the line, so reject instead of corrupting it. The inactive grid is serialized only when on the
@@ -391,15 +517,31 @@ fn serialize<T: EventListener>(
     // ICH in the middle of a wide char leaves a right half alone (xterm.js `insertCells`); no
     // printed text rebuilds either.
     let alt = term.mode().contains(TermMode::ALT_SCREEN);
+    // History rows of the primary screen left out (`scrollback`), oldest first: compressed ones, then the grid's
+    let primary = if alt {
+        term.inactive_grid()
+    } else {
+        term.grid()
+    };
+    let older_len = older.map_or(0, History::len);
+    let history = older_len + primary.history_size();
+    let skip = options
+        .scrollback
+        .map_or(0, |keep| history.saturating_sub(keep));
     for grid in std::iter::once(term.grid()).chain(alt.then(|| term.inactive_grid())) {
-        for y in -(grid.history_size() as i32)..grid.screen_lines() as i32 {
+        let skipped = if std::ptr::eq(grid, primary) {
+            skip.saturating_sub(older_len)
+        } else {
+            0
+        };
+        for y in -(grid.history_size() as i32) + skipped as i32..grid.screen_lines() as i32 {
             if split_wide(&grid[Line(y)]) {
                 return Err(SnapshotRefusal::WideEdge);
             }
         }
     }
     if let Some(older) = older {
-        if (0..older.len()).any(|i| split_wide(&older.row(i))) {
+        if (skip.min(older_len)..older_len).any(|i| split_wide(&older.row(i))) {
             return Err(SnapshotRefusal::WideEdge);
         }
     }
@@ -407,15 +549,28 @@ fn serialize<T: EventListener>(
     let modes = term.mode();
     let alt = modes.contains(TermMode::ALT_SCREEN);
     if alt {
-        screen(&mut out, term.inactive_grid(), older);
+        screen(&mut out, term.inactive_grid(), older, skip);
         cursor(&mut out, term.inactive_grid());
         out.push_str("\x1b[?1049h\x1b[0m\x1b[H");
+        // Entering clears the alternate screen with the primary pen's background; erased cells are not printed
+        // over, so clear it again with the default one.
+        if term.inactive_grid().cursor.template.bg != Color::Named(NamedColor::Background) {
+            out.push_str("\x1b[2J");
+        }
         // SGR 0 leaves an OSC 8 link open; the primary pen's link is saved with 1049 and must not spill.
         if term.inactive_grid().cursor.template.hyperlink().is_some() {
             link(&mut out, None);
         }
     }
-    screen(&mut out, term.grid(), if alt { None } else { older });
+    if alt {
+        screen(&mut out, term.grid(), None, 0);
+    } else {
+        screen(&mut out, term.grid(), older, skip);
+    }
+    if options.exclude_modes {
+        cursor(&mut out, term.grid());
+        return Ok(out);
+    }
     // Turning on DECOM sends the cursor home, so emit it before CUP (margins are rejected, so CUP is relative to the whole screen).
     if modes.contains(TermMode::ORIGIN) {
         out.push_str("\x1b[?6h");

@@ -146,3 +146,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
+
+---
+
+## xterm.js @xterm/addon-search 0.17.0-beta.330
+
+The built-in `SearchAddon` of `dist/xterm_web_bg.wasm` (`crates/oxtty-web/src/search.rs`
+in https://github.com/openwong2kim/oxtty) is a Rust port of `@xterm/addon-search`
+0.17.0-beta.330 (xterm.js commit 08829c7eb6279dda2a9e86df901353a1a89858ca):
+`addons/addon-search/src/SearchAddon.ts`, `SearchEngine.ts`, `SearchState.ts` and
+`SearchResultTracker.ts`, Copyright (c) 2017 The xterm.js authors, under the MIT
+license reproduced in the input encoding section above.
+Source: https://github.com/xtermjs/xterm.js

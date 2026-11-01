@@ -1331,7 +1331,10 @@ impl<T> Term<T> {
         cursor_cell.c = c;
         cursor_cell.fg = fg;
         cursor_cell.bg = bg;
-        cursor_cell.flags = flags;
+        // oxtty: a printed space is text, unlike the blanks around a wide char (the pen never carries
+        // TYPED_SPACE).
+        let spacer = flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER);
+        cursor_cell.flags = if c == ' ' && !spacer { flags | Flags::TYPED_SPACE } else { flags };
         cursor_cell.extra = extra;
     }
 
@@ -1732,6 +1735,8 @@ impl<T: EventListener> Handler for Term<T> {
             let cell = self.grid.cursor_cell();
             if store && cell.c == ' ' {
                 cell.c = c;
+                // oxtty: only a space is a typed space.
+                cell.flags.remove(Flags::TYPED_SPACE);
             }
 
             loop {

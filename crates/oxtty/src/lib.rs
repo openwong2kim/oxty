@@ -31,9 +31,12 @@ pub mod vt;
 
 mod history;
 pub mod input;
+mod markers;
+mod search;
 mod snapshot;
 pub use history::TermHistory;
-pub use snapshot::SnapshotRefusal;
+pub use search::{SearchLine, SearchMatch, SearchOptions};
+pub use snapshot::{SnapshotOptions, SnapshotRefusal};
 
 use crate::history::History;
 use crate::vt::event::{Event, EventListener};
@@ -85,6 +88,9 @@ pub mod attr {
     /// The blank last cell of a wrapped row whose wide character did not fit and moved to the next row (xterm.js
     /// leaves the same blank); it is not text, unlike a space the program wrote.
     pub const LEADING_WIDE_SPACER: u32 = 1 << 17;
+    /// A space the program printed. Other blank cells were erased or never written: xterm.js reads them as empty,
+    /// so trimming the end of a line drops them but keeps typed spaces.
+    pub const TYPED_SPACE: u32 = 1 << 18;
 }
 
 /// Terminal mode bits returned by [`Engine::modes`]. Stable across versions.
@@ -410,6 +416,7 @@ pub struct Engine {
     colors: Option<Box<[u32; COLOR_SLOTS]>>,
     // Recently decoded history rows by their History::id, newest last.
     row_cache: RefCell<VecDeque<(u64, Row<AlacCell>)>>,
+    markers: markers::Markers,
 }
 
 impl Engine {
@@ -483,6 +490,7 @@ impl Engine {
             decstr_owed: false,
             colors: None,
             row_cache: RefCell::new(VecDeque::with_capacity(ROW_CACHE)),
+            markers: Default::default(),
         }
     }
 
@@ -683,6 +691,7 @@ impl Engine {
         self.answer_color_queries();
         self.follow_scroll();
         self.count_trimmed();
+        self.follow_markers();
     }
 
     /// The soft reset of a parsed DECSTR, once no hook holds it back. As in xterm.js, DECSTR also ends a
@@ -728,6 +737,8 @@ impl Engine {
 
     /// Changes the screen size. Damage becomes [`Damage::Full`].
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        let reflow = size(cols, rows).cols != self.term.columns();
+        let anchors = self.anchor_markers(reflow);
         match &self.history {
             Some(history) => {
                 self.offset = history.reflow(&mut self.term, size(cols, rows), self.offset);
@@ -738,6 +749,7 @@ impl Engine {
         // Reflow renumbers the history; it is not trimming.
         self.entered_seen = self.primary().history_entered();
         self.history_seen = self.primary_history_len();
+        self.place_markers(anchors, reflow);
     }
 
     /// Lines that have left the top of the primary screen's scrollback so far (a full history dropping its oldest
@@ -776,6 +788,31 @@ impl Engine {
                 }
             }
             text.truncate(text.trim_end().len());
+            text
+        })
+    }
+
+    /// Text of one row as xterm.js `translateToString` gives it: wide characters once, combining marks kept, empty
+    /// cells (erased or never written) as spaces. With `trim_right` the empty cells at the end are dropped and typed
+    /// spaces ([`attr::TYPED_SPACE`]) stay. `None` if `line` is out of range.
+    pub fn row_string(&self, line: i32, trim_right: bool) -> Option<String> {
+        self.with_row(line, |row| {
+            let mut text = String::with_capacity(row.len());
+            let mut content = 0;
+            for cell in &row[..] {
+                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    continue;
+                }
+                text.push(if cell.c == '\t' { ' ' } else { cell.c });
+                let marks = cell.zerowidth().unwrap_or_default();
+                text.extend(marks);
+                if cell.c != ' ' || cell.flags.contains(Flags::TYPED_SPACE) || !marks.is_empty() {
+                    content = text.len();
+                }
+            }
+            if trim_right {
+                text.truncate(content);
+            }
             text
         })
     }
@@ -1142,9 +1179,15 @@ impl Engine {
     /// On a [`SnapshotRefusal`] these bytes could not reproduce the screen;
     /// replay the raw output instead.
     pub fn ansi_snapshot(&self) -> Result<Vec<u8>, SnapshotRefusal> {
+        self.ansi_snapshot_with(SnapshotOptions::default())
+    }
+
+    /// [`Engine::ansi_snapshot`] with less history or without the modes, as `@xterm/addon-serialize` offers
+    /// (`{ scrollback: 0, excludeModes: true }` paints just the screen the terminal shows).
+    pub fn ansi_snapshot_with(&self, options: SnapshotOptions) -> Result<Vec<u8>, SnapshotRefusal> {
         let held = self.sync_pending().then_some(self.parser.sync_bytes());
         let history = self.history.as_ref().map(TermHistory::lock);
-        snapshot::ansi(&self.term, held, &self.tail, history.as_deref())
+        snapshot::ansi(&self.term, held, &self.tail, history.as_deref(), options)
     }
 }
 
@@ -1202,6 +1245,7 @@ fn flatten(cell: &AlacCell) -> Cell {
         (Flags::WIDE_CHAR, attr::WIDE),
         (Flags::WIDE_CHAR_SPACER, attr::WIDE_SPACER),
         (Flags::LEADING_WIDE_CHAR_SPACER, attr::LEADING_WIDE_SPACER),
+        (Flags::TYPED_SPACE, attr::TYPED_SPACE),
     ];
     let mut attrs = pairs
         .iter()

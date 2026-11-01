@@ -7,7 +7,7 @@ import { gzipSync } from 'node:zlib';
 const KiB = 1024;
 // Raw limits are the PRD's; gzip limits keep the ratio both modules have today (about 0.36) with room to grow.
 const LIMITS = {
-  'oxtty.wasm': { bytes: 300 * KiB, gzip: 110 * KiB },
+  'oxtty.wasm': { bytes: 340 * KiB, gzip: 125 * KiB },
   'xterm_web_bg.wasm': { bytes: 600 * KiB, gzip: 220 * KiB },
 };
 

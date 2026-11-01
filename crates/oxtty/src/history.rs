@@ -747,13 +747,14 @@ fn encode(row: &Row<Cell>, out: &mut Vec<u8>, extras: &mut Vec<(u16, Arc<CellExt
     while start < used {
         let pair = is_pair(cells, start);
         let first = &cells[start];
+        // A typed space keeps its run: it is written as ' ', an erased blank inside a run as '\0'.
         let key = (
             first.fg,
             first.bg,
             if pair {
-                first.flags - Flags::WIDE_CHAR
+                first.flags - Flags::WIDE_CHAR - Flags::TYPED_SPACE
             } else {
-                first.flags
+                first.flags - Flags::TYPED_SPACE
             },
         );
         // Write the header first and the characters right after it, then fill
@@ -770,19 +771,25 @@ fn encode(row: &Row<Cell>, out: &mut Vec<u8>, extras: &mut Vec<(u16, Arc<CellExt
             if cell.fg != key.0 || cell.bg != key.1 {
                 break;
             }
-            if cell.flags == key.2 {
+            let typed = cell.flags.contains(Flags::TYPED_SPACE);
+            if cell.flags - Flags::TYPED_SPACE == key.2 {
                 // A narrow cell. A wide run only takes narrow spaces with the
                 // same attributes (so it does not break between words).
                 if pair && cell.c != ' ' {
                     break;
                 }
-                put_char(out, cell.c);
+                let c = if cell.c == ' ' && !typed {
+                    '\0'
+                } else {
+                    cell.c
+                };
+                put_char(out, c);
                 if let Some(extra) = &cell.extra {
                     extras.push((at as u16, extra.clone()));
                 }
                 at += 1;
                 units += 1;
-                if cell.c != ' ' {
+                if cell.c != ' ' || typed {
                     (text_end, text_units) = (at, units);
                 }
             } else if pair && cell.flags == key.2 | Flags::WIDE_CHAR && is_pair(cells, at) {
@@ -854,7 +861,9 @@ fn put_head(
         put_color(out, key.1);
     }
     if tag & FLAGS != 0 {
-        out.extend_from_slice(&key.2.bits().to_le_bytes());
+        // Every flag but TYPED_SPACE, which runs leave out, fits in 16 bits.
+        debug_assert!(key.2.bits() >> 16 == 0);
+        out.extend_from_slice(&(key.2.bits() as u16).to_le_bytes());
     }
     *prev = key;
     head
@@ -905,7 +914,7 @@ fn decode_cells(mut bytes: &[u8], cols: usize, extras: Option<&Extras>) -> Optio
         }
         if tag & FLAGS != 0 {
             let b = take(&mut bytes, 2)?;
-            flags = Flags::from_bits_retain(u16::from_le_bytes([b[0], b[1]]));
+            flags = Flags::from_bits_retain(u16::from_le_bytes([b[0], b[1]]) as u32);
         }
         let cell = |c, flags| Cell {
             c,
@@ -917,7 +926,8 @@ fn decode_cells(mut bytes: &[u8], cols: usize, extras: Option<&Extras>) -> Optio
         for _ in 0..n {
             if tag & PAIRS != 0 {
                 match take_char(&mut bytes)? {
-                    ' ' => cells.push(cell(' ', flags)),
+                    '\0' => cells.push(cell(' ', flags)),
+                    ' ' => cells.push(cell(' ', flags | Flags::TYPED_SPACE)),
                     c => {
                         cells.push(cell(c, flags | Flags::WIDE_CHAR));
                         cells.push(cell(' ', flags | Flags::WIDE_CHAR_SPACER));
@@ -926,7 +936,11 @@ fn decode_cells(mut bytes: &[u8], cols: usize, extras: Option<&Extras>) -> Optio
             } else if tag & BLANK != 0 {
                 cells.push(cell(' ', flags));
             } else {
-                cells.push(cell(take_char(&mut bytes)?, flags));
+                cells.push(match take_char(&mut bytes)? {
+                    '\0' => cell(' ', flags),
+                    ' ' => cell(' ', flags | Flags::TYPED_SPACE),
+                    c => cell(c, flags),
+                });
             }
         }
         if cells.len() > cols {

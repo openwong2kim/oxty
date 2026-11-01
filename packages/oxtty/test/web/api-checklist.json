@@ -216,16 +216,17 @@
       "reason": "Links step."
     },
     "Terminal.registerMarker": {
-      "status": "later",
-      "reason": "Markers need line tracking through scrollback trimming."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/markers.rs on the engine's markers (addMarker/markerLine/takeDisposedMarkers). Unlike xterm.js it returns undefined on the alternate screen and for a line outside the buffer, and ids count per terminal."
     },
     "Terminal.markers": {
-      "status": "later",
-      "reason": "With registerMarker."
+      "status": "supported",
+      "reason": "The live markers, oldest first, [] on the alternate screen; new IMarker objects per read (xterm.js hands out the same ones)."
     },
     "IMarker.id/line/dispose/onDispose": {
-      "status": "later",
-      "reason": "With registerMarker."
+      "status": "supported",
+      "reason": "line and isDisposed ask the engine; onDispose fires after the write that dropped the marker is parsed (before its callback), on dispose(), reset, an engine crash and terminal dispose, like xterm.js.",
+      "exercisedBy": "onDispose"
     },
     "Terminal.onData": {
       "status": "supported",
@@ -309,7 +310,7 @@
     },
     "IBufferLine.translateToString": {
       "status": "supported",
-      "reason": "Matches xterm.js except that trimRight also drops trailing typed spaces (the engine does not tell them from erased cells) and out-of-range columns are clamped (xterm.js pads them with spaces)."
+      "reason": "Matches xterm.js (typed spaces are text, erased cells are trimmed: the engine marks typed spaces with Attr.TYPED_SPACE) except that out-of-range columns are clamped (xterm.js pads them with spaces)."
     },
     "IBufferLine.isWrapped": {
       "status": "supported",
@@ -325,7 +326,7 @@
     },
     "IBufferCell.getChars": {
       "status": "supported",
-      "reason": "As xterm.js, combining marks included, except that an erased cell reads ' ' (xterm.js '')."
+      "reason": "As xterm.js, combining marks included; an erased cell reads '' and a typed space ' ' (Attr.TYPED_SPACE)."
     },
     "IBufferCell.getWidth": {
       "status": "supported",
@@ -372,8 +373,9 @@
       "reason": "Absorbed: activate() is run against a stand-in that only has unicode.register and must register version 11."
     },
     "SearchAddon.findNext/findPrevious/clearDecorations": {
-      "status": "later",
-      "reason": "Search moves into the engine; loadAddon throws until then."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/search.rs, a port of @xterm/addon-search 0.17.0-beta.330 over the engine's searchLine (JS string methods and RegExp, no matcher in the wasm): same matches, selection and scrolling, quirks included; decorations go to the renderer's \"search\" highlight layer (no overview ruler). Loaded with activate() until loadAddon accepts it; the selected match is kept by the addon until the selection module exists.",
+      "exercisedBy": "findPrevious"
     },
     "SerializeAddon.serialize": {
       "status": "unsupported",
