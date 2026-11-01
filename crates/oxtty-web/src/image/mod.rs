@@ -6,8 +6,9 @@
 //! and AVIF by the browser (`createImageBitmap`), so no image codec is in the wasm. The engine keeps which tile of
 //! which image covers each cell ([`crate::engine::CellExtra::image`]), so tiles scroll, reflow and leave with their
 //! lines and text over a cell removes its tile; [`store`] keeps the pixels within the storage limit, and the
-//! renderer draws the visible tiles from GPU textures it creates only while they are on screen. A terminal that
-//! never loaded the addon has no state here.
+//! renderer draws the visible tiles from GPU textures it creates only while they are on screen. The sequences
+//! reach it as Rust handlers on [`crate::parser`], so they keep their order among the host's handlers. A terminal
+//! that never loaded the addon has no state here and no handlers, so its parser keeps its path without hooks.
 //!
 //! The handlers, the storage options, the DA1 and XTSMGRAPHICS answers and the cursor rules follow
 //! `@xterm/addon-image` 0.10.0-beta.331 (xterm.js commit 08829c7eb6279dda2a9e86df901353a1a89858ca, MIT):
@@ -18,14 +19,15 @@ mod store;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use js_sys::{Array, Function, Map, Object, Reflect, Uint32Array, Uint8Array};
+use js_sys::{Array, Function, Map, Object, Promise, Reflect, Uint32Array, Uint8Array};
 use oxtty::graphics::iip::{self, Base64, HeaderParser, Kind, Parsed};
 use oxtty::graphics::sixel::{self, Decoder, Sink};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::emitter::Emitter;
+use crate::emitter::{Disposable, Emitter};
 use crate::engine::{get, mode, Engine};
+use crate::parser;
 use crate::render::color::ColorSet;
 use crate::terminal::{Shared, Terminal};
 
@@ -343,10 +345,15 @@ pub(crate) struct State {
     sixel: RefCell<Option<Box<Decoder>>>,
     decoded: RefCell<Option<Decoded>>,
     iip: RefCell<Iip>,
+    /// The addon's parser handlers, removed with the state.
+    parser: Vec<Disposable>,
 }
 
 impl Drop for State {
     fn drop(&mut self) {
+        for handler in &self.parser {
+            handler.dispose();
+        }
         store::leave(self.key);
     }
 }
@@ -570,6 +577,7 @@ fn load_core(shared: &Rc<Shared>, core: Rc<AddonCore>) {
     let handlers = Handlers::new(shared);
     handlers.register(&core.handlers, &opts);
     *core.terminal.borrow_mut() = Rc::downgrade(shared);
+    let parser = register_handlers(shared, &opts);
     let state = Rc::new(State {
         key: store::join(Rc::downgrade(shared), limit),
         addon: core,
@@ -578,6 +586,7 @@ fn load_core(shared: &Rc<Shared>, core: Rc<AddonCore>) {
         sixel: RefCell::new(None),
         decoded: RefCell::new(None),
         iip: RefCell::default(),
+        parser,
     });
     *shared.images.borrow_mut() = Some(state);
     if opts.enable_size_reports {
@@ -600,6 +609,53 @@ fn load_core(shared: &Rc<Shared>, core: Rc<AddonCore>) {
         .map(|proxy| Reflect::set(&proxy, &"windowOptions".into(), &window_options));
     }
     apply_placeholder(shared);
+}
+
+/// The engine's id of a CSI or DCS sequence: private marker, intermediates and final byte (see [`parser`]).
+fn sequence_id(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(0, |id, &b| id << 8 | b as u32)
+}
+
+/// The addon's sequence handlers (`activate`). Only terminals with the addon register them, so the others keep
+/// the parser's path without hooks.
+fn register_handlers(shared: &Rc<Shared>, opts: &Options) -> Vec<Disposable> {
+    use parser::Kind::{Csi, Dcs, Osc};
+    type Handler = fn(&Rc<Shared>, &Uint8Array, &[u32]) -> JsValue;
+    let weak = Rc::downgrade(shared);
+    let on = |kind, id, f: Handler| {
+        let weak = weak.clone();
+        parser::register_rust(shared, kind, id, move |data, params| match weak.upgrade() {
+            Some(shared) => f(&shared, data, params),
+            None => JsValue::FALSE,
+        })
+    };
+    let mut handlers = vec![
+        on(Csi, sequence_id(b"?h"), |s, _, p| decset(s, p, true).into()),
+        on(Csi, sequence_id(b"?l"), |s, _, p| {
+            decset(s, p, false).into()
+        }),
+        on(Csi, sequence_id(b"c"), |s, _, p| {
+            primary_device_attributes(s, p).into()
+        }),
+        on(Csi, sequence_id(b"?S"), |s, _, p| {
+            graphics_attributes(s, p).into()
+        }),
+        // DECSTR; RIS comes as the engine's `resets` ([`full_reset`])
+        on(Csi, sequence_id(b"!p"), |s, _, _| {
+            reset(s);
+            JsValue::FALSE
+        }),
+        on(Csi, sequence_id(b"t"), |s, _, p| {
+            window_options(s, p).into()
+        }),
+    ];
+    if opts.sixel_support {
+        handlers.push(on(Dcs, sequence_id(b"q"), |s, d, p| sixel(s, p, d).into()));
+    }
+    if opts.iip_support {
+        handlers.push(on(Osc, 1337, |s, d, _| iip(s, d)));
+    }
+    handlers
 }
 
 /// Removes the addon from `shared`: its images go, placeholders are no longer drawn.
@@ -669,8 +725,8 @@ pub(crate) fn full_reset(shared: &Rc<Shared>) {
     }
 }
 
-/// Hook: the active buffer switched (`wipeAlternate`): the alternate screen's images go.
-pub(crate) fn buffer_changed(shared: &Rc<Shared>) {
+/// The active buffer switches (`wipeAlternate`): the alternate screen's images go.
+fn buffer_changed(shared: &Rc<Shared>) {
     if let Some(state) = shared.images.borrow().clone() {
         store::delete(state.key, |i| i.alternate);
         shared.schedule_frame();
@@ -701,17 +757,26 @@ fn reset_handlers(state: &State) {
     *state.iip.borrow_mut() = Iip::default();
 }
 
-/// `DECSET` (`CSI ? Pm h`): 80 turns sixel scrolling off. The default action runs too.
-pub(crate) fn decset(shared: &Rc<Shared>, params: &[u32], set: bool) {
-    if let Some(state) = shared.images.borrow().as_ref() {
-        if params.contains(&80) {
-            state.addon.opts.borrow_mut().sixel_scrolling = !set;
+/// `DECSET`/`DECRST` (`CSI ? Pm h`/`l`): 80 turns sixel scrolling off/on, and a switch to or from the alternate
+/// screen (47, 1047, 1049) drops its images, as `onBufferChange` does. The default action runs too (false).
+fn decset(shared: &Rc<Shared>, params: &[u32], set: bool) -> bool {
+    let Some(state) = shared.images.borrow().clone() else {
+        return false;
+    };
+    if params.contains(&80) {
+        state.addon.opts.borrow_mut().sixel_scrolling = !set;
+    }
+    if params.iter().any(|p| matches!(p, 47 | 1047 | 1049)) {
+        let modes = shared.core.borrow().view.engine().modes().unwrap_or(0);
+        if (modes & mode::ALT_SCREEN != 0) != set {
+            buffer_changed(shared);
         }
     }
+    false
 }
 
 /// DA1 (`CSI c`) with sixel on reports sixel support; true when it answered (the engine's answer is skipped).
-pub(crate) fn primary_device_attributes(shared: &Rc<Shared>, params: &[u32]) -> bool {
+fn primary_device_attributes(shared: &Rc<Shared>, params: &[u32]) -> bool {
     if params.first().is_some_and(|&p| p != 0) {
         return true;
     }
@@ -727,7 +792,7 @@ pub(crate) fn primary_device_attributes(shared: &Rc<Shared>, params: &[u32]) -> 
 }
 
 /// XTSMGRAPHICS (`CSI ? Pi ; Pa ; Pv S`): colour registers and the sixel geometry; true when handled.
-pub(crate) fn graphics_attributes(shared: &Rc<Shared>, params: &[u32]) -> bool {
+fn graphics_attributes(shared: &Rc<Shared>, params: &[u32]) -> bool {
     let Some(state) = shared.images.borrow().clone() else {
         return false;
     };
@@ -777,9 +842,10 @@ pub(crate) fn graphics_attributes(shared: &Rc<Shared>, params: &[u32]) -> bool {
     true
 }
 
-/// Window operations (`CSI Ps ; Ps ; Ps t`) as xterm.js answers them for `windowOptions`: 14 (text area in
-/// pixels), 16 (cell in pixels), 18 (text area in cells); others and those not allowed get no answer.
-pub(crate) fn window_options(shared: &Rc<Shared>, params: &[u32]) {
+/// Window operations (`CSI Ps ; Ps ; Ps t`) 14 (text area in pixels), 16 (cell in pixels) and 18 (text area in
+/// cells) as xterm.js answers them for `windowOptions`: not at all when not allowed. True for those three (the
+/// engine's own answer is skipped); the others go to the engine.
+fn window_options(shared: &Rc<Shared>, params: &[u32]) -> bool {
     let allowed = |key: &str| {
         let core = shared.core.borrow();
         get(&get(&core.options, "windowOptions"), key).is_truthy()
@@ -798,9 +864,11 @@ pub(crate) fn window_options(shared: &Rc<Shared>, params: &[u32]) {
             let (cols, rows) = shared.core.borrow().size();
             [8, rows as u64, cols as u64]
         }
-        _ => return,
+        Some(14 | 16 | 18) => return true,
+        _ => return false,
     };
     reply(shared, &sequence("\x1b[", &values, "t"));
+    true
 }
 
 /// `toFixed(0)` of a non-negative size.
@@ -931,7 +999,7 @@ fn pieces(data: &Uint8Array, mut f: impl FnMut(&[u8]) -> bool) {
 }
 
 /// A sixel sequence (`DCS params q data ST`); false when the addon does not take it (the default action runs).
-pub(crate) fn sixel(shared: &Rc<Shared>, params: &[u32], data: &Uint8Array) -> bool {
+fn sixel(shared: &Rc<Shared>, params: &[u32], data: &Uint8Array) -> bool {
     let Some(state) = shared.images.borrow().clone() else {
         return false;
     };
@@ -1037,14 +1105,15 @@ fn place_sixel(shared: &Rc<Shared>, success: bool) {
     );
 }
 
-/// An iTerm2 sequence (`OSC 1337 ; data ST`); false when the addon does not take it.
-pub(crate) fn iip(shared: &Rc<Shared>, data: &Uint8Array) -> bool {
+/// An iTerm2 sequence (`OSC 1337 ; data ST`): false when the addon does not take it, a Promise while an image
+/// decodes.
+fn iip(shared: &Rc<Shared>, data: &Uint8Array) -> JsValue {
     let Some(state) = shared.images.borrow().clone() else {
-        return false;
+        return JsValue::FALSE;
     };
     let opts = state.addon.opts.borrow().clone();
     if !opts.iip_support {
-        return false;
+        return JsValue::FALSE;
     }
     let limit = (opts.iip_size_limit * 4.0 / 3.0).ceil();
     let limit = if limit.is_finite() && limit > 0.0 {
@@ -1061,10 +1130,10 @@ pub(crate) fn iip(shared: &Rc<Shared>, data: &Uint8Array) -> bool {
             !aborted
         });
     }
-    if !aborted {
-        end_iip(shared, &state, &mut parser, opts.pixel_limit());
+    if aborted {
+        return JsValue::TRUE;
     }
-    true
+    end_iip(shared, &state, &mut parser, opts.pixel_limit())
 }
 
 /// `IIPHandler.put`.
@@ -1119,49 +1188,55 @@ fn put_iip(
     }
 }
 
-/// `IIPHandler.end`: a finished file is placed at once (its size is known from its header) and decoded by the
-/// browser; the pixels arrive when that is done.
-fn end_iip(shared: &Rc<Shared>, state: &State, parser: &mut HeaderParser, pixel_limit: usize) {
+/// `IIPHandler.end`: a finished file is decoded by the browser and placed when that is done.
+fn end_iip(
+    shared: &Rc<Shared>,
+    state: &State,
+    parser: &mut HeaderParser,
+    pixel_limit: usize,
+) -> JsValue {
     if !parser.ended() && !parser.end() {
-        return;
+        return JsValue::TRUE;
     }
     let payload = {
         let mut iip = state.iip.borrow_mut();
         match parser.header.kind {
-            Kind::FilePart | Kind::Invalid => return,
+            Kind::FilePart | Kind::Invalid => return JsValue::TRUE,
             Kind::ReportCellSize => {
                 drop(iip);
                 report_cell_size(shared);
-                return;
+                return JsValue::TRUE;
             }
             Kind::MultipartFile => {
                 iip.header = parser.header.clone();
                 iip.multipart = true;
                 iip.abort_multi = false;
                 iip.decoder = Some(Payload::default());
-                return;
+                return JsValue::TRUE;
             }
             Kind::FileEnd => {
                 if !iip.multipart {
-                    return;
+                    return JsValue::TRUE;
                 }
                 iip.multipart = false;
                 if iip.abort_multi || iip.header.kind != Kind::MultipartFile {
-                    return;
+                    return JsValue::TRUE;
                 }
             }
             Kind::File => {}
         }
         iip.decoder.take()
     };
-    let Some(mut payload) = payload else { return };
+    let Some(mut payload) = payload else {
+        return JsValue::TRUE;
+    };
     if !payload.end() {
         web_sys::console::warn_1(&"IIP: error during BASE64 decoding".into());
-        return;
+        return JsValue::TRUE;
     }
     let Some(metrics) = iip::image_type(payload.len, |i| payload.at(i)) else {
         web_sys::console::warn_1(&"IIP: unsupported image type".into());
-        return;
+        return JsValue::TRUE;
     };
     let fits = |w: f64, h: f64| w > 0.0 && h > 0.0 && w * h < pixel_limit as f64;
     let (w, h) = (metrics.width as f64, metrics.height as f64);
@@ -1173,7 +1248,7 @@ fn end_iip(shared: &Rc<Shared>, state: &State, parser: &mut HeaderParser, pixel_
             )
             .into(),
         );
-        return;
+        return JsValue::TRUE;
     }
     let header = state.iip.borrow().header.clone();
     let ((cw, ch), (canvas_w, canvas_h)) = metrics_or_default(shared);
@@ -1185,18 +1260,16 @@ fn end_iip(shared: &Rc<Shared>, state: &State, parser: &mut HeaderParser, pixel_
     };
     let (w, h) = iip::fit(w, h, &header, area);
     if !fits(w, h) {
-        return;
+        return JsValue::TRUE;
     }
     let (w, h) = (w as u32, h as u32);
     let parts: Array = payload.pieces.iter().collect();
     let bag = web_sys::BlobPropertyBag::new();
     bag.set_type(metrics.mime);
     let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &bag) else {
-        return;
+        return JsValue::TRUE;
     };
-    decode_later(shared, w, h, |window, options| {
-        window.create_image_bitmap_with_blob_and_image_bitmap_options(&blob, options)
-    });
+    decode(shared, w, h, &blob)
 }
 
 /// The cell and canvas size the iTerm2 handler sizes images by (`_resize`), with the addon's fallbacks.
@@ -1210,40 +1283,35 @@ fn metrics_or_default(shared: &Shared) -> ((f64, f64), (f64, f64)) {
     ((cw, ch), (w, h))
 }
 
-/// Places a `width` × `height` image now and fills in its pixels when `decode` (a `createImageBitmap` call that
-/// resizes to that size) resolves.
-fn decode_later(
-    shared: &Rc<Shared>,
-    width: u32,
-    height: u32,
-    decode: impl FnOnce(
-        &web_sys::Window,
-        &web_sys::ImageBitmapOptions,
-    ) -> Result<js_sys::Promise, JsValue>,
-) {
+/// Decodes `blob` (`createImageBitmap`, resized to `width` × `height`) and places the image when that is done;
+/// the parser waits on the returned Promise, as on the addon's. A decoding error rejects it (the parser reports
+/// it on a later task and the sequence falls through).
+fn decode(shared: &Rc<Shared>, width: u32, height: u32, blob: &web_sys::Blob) -> JsValue {
     let Some(window) = web_sys::window() else {
-        return;
+        return JsValue::TRUE;
     };
     let options = web_sys::ImageBitmapOptions::new();
     options.set_resize_width(width);
     options.set_resize_height(height);
-    let Ok(promise) = decode(&window, &options) else {
-        return;
-    };
-    let Some(id) = add_image(shared, width, height, Pixels::Pending, true, true) else {
-        return;
-    };
-    wasm_bindgen_futures::spawn_local(async move {
-        let result = wasm_bindgen_futures::JsFuture::from(promise).await;
-        let pixels = match result.and_then(|b| b.dyn_into::<web_sys::ImageBitmap>()) {
-            Ok(bitmap) => Pixels::Bitmap(bitmap),
-            Err(error) => {
-                web_sys::console::warn_2(&"IIP: decoding error".into(), &error);
-                Pixels::Failed
-            }
+    let promise =
+        match window.create_image_bitmap_with_blob_and_image_bitmap_options(blob, &options) {
+            Ok(promise) => promise,
+            Err(error) => return Promise::reject(&error).into(),
         };
-        store::set_pixels(id, pixels);
-    });
+    let weak = Rc::downgrade(shared);
+    wasm_bindgen_futures::future_to_promise(async move {
+        let bitmap: web_sys::ImageBitmap = wasm_bindgen_futures::JsFuture::from(promise)
+            .await?
+            .dyn_into()?;
+        match weak.upgrade() {
+            Some(shared) => {
+                add_image(&shared, width, height, Pixels::Bitmap(bitmap), true, true);
+            }
+            None => bitmap.close(),
+        }
+        Ok(JsValue::TRUE)
+    })
+    .into()
 }
 
 /// `OSC 1337 ; ReportCellSize ST`: the cell height, width and devicePixelRatio.
@@ -1273,8 +1341,7 @@ fn report_cell_size(shared: &Rc<Shared>) {
     );
 }
 
-/// `ImageStorage.addImage`: makes room, covers cells from the cursor with the image's tiles and stores it; returns
-/// its id.
+/// `ImageStorage.addImage`: makes room, covers cells from the cursor with the image's tiles and stores it.
 fn add_image(
     shared: &Rc<Shared>,
     width: u32,
@@ -1282,34 +1349,40 @@ fn add_image(
     pixels: Pixels,
     scrolling: bool,
     iip_cursor: bool,
-) -> Option<u32> {
-    let state = shared.images.borrow().clone()?;
+) {
+    let Some(state) = shared.images.borrow().clone() else {
+        return discard(pixels);
+    };
     let key = state.key;
     store::evict(key, width as usize * height as usize);
     let cell = cell_size(shared);
     let cols = (width as f64 / cell.0).ceil() as u32;
     let rows = (height as f64 / cell.1).ceil() as u32;
     let id = store::reserve_id();
-    let (placed, marker, alternate, counts) = {
+    let placed = {
         let core = shared.core.borrow();
-        if core.disposed {
-            return None;
-        }
         let engine = core.view.engine();
-        let placed = place(engine, id, cols, rows, scrolling, iip_cursor)?;
-        let alternate = engine.modes().unwrap_or(0) & mode::ALT_SCREEN != 0;
-        let line = engine.history_length() as i32 + core.view.cursor().line;
-        let marker = if alternate {
-            0
-        } else {
-            engine.add_marker(line).unwrap_or(0)
-        };
-        let counts = if alternate {
-            screen_tiles(engine, engine.rows())
-        } else {
-            Vec::new()
-        };
-        (placed, marker, alternate, counts)
+        let placed = (!core.disposed)
+            .then(|| place(engine, id, cols, rows, scrolling, iip_cursor))
+            .flatten();
+        placed.map(|placed| {
+            let alternate = engine.modes().unwrap_or(0) & mode::ALT_SCREEN != 0;
+            let line = engine.history_length() as i32 + core.view.cursor().line;
+            let marker = if alternate {
+                0
+            } else {
+                engine.add_marker(line).unwrap_or(0)
+            };
+            let counts = if alternate {
+                screen_tiles(engine, engine.rows())
+            } else {
+                Vec::new()
+            };
+            (placed, marker, alternate, counts)
+        })
+    };
+    let Some((placed, marker, alternate, counts)) = placed else {
+        return discard(pixels);
     };
     let (tiles, covered) = placed;
     store::covered(&covered);
@@ -1333,7 +1406,13 @@ fn add_image(
     drop(state);
     emitter.fire(&[]);
     shared.schedule_frame();
-    Some(id)
+}
+
+/// Frees pixels that were not stored.
+fn discard(pixels: Pixels) {
+    if let Pixels::Bitmap(bitmap) = pixels {
+        bitmap.close();
+    }
 }
 
 /// `Engine.placeImage`: the tiles written and the image ids of the tiles covered.
@@ -1410,32 +1489,5 @@ impl Terminal {
         set("pagePixels", pixels.into());
         set("textures", crate::render::image_textures().into());
         info.into()
-    }
-
-    /// Test path until the parser hooks land: runs the handler of a sequence as the parser will (`"sixel"` with the
-    /// DCS params, `"iip"`, `"decset"`/`"decrst"`, `"da1"`, `"xtsmgraphics"`, `"winops"` with the CSI params), then
-    /// applies what it did. True when the default action would be skipped.
-    #[wasm_bindgen(js_name = _imageSequence, skip_typescript)]
-    pub fn image_sequence(&self, kind: &str, params: Vec<u32>, data: Option<Uint8Array>) -> bool {
-        let data = data.unwrap_or_else(|| Uint8Array::new_with_length(0));
-        let shared = &self.shared;
-        let handled = match kind {
-            "sixel" => sixel(shared, &params, &data),
-            "iip" => iip(shared, &data),
-            "decset" | "decrst" => {
-                decset(shared, &params, kind == "decset");
-                false
-            }
-            "da1" => primary_device_attributes(shared, &params),
-            "xtsmgraphics" => graphics_attributes(shared, &params),
-            "winops" => {
-                window_options(shared, &params);
-                true
-            }
-            _ => false,
-        };
-        self.shared.handle_events();
-        self.shared.after_change();
-        handled
     }
 }

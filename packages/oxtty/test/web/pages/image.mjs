@@ -1,6 +1,5 @@
 // Page for image.test.mjs: an oxtty/xterm Terminal with an image addon and a real xterm.js 6.1 Terminal with
-// @xterm/addon-webgl and @xterm/addon-image, side by side with the same options. Until the parser hooks land, the
-// image sequence reaches oxtty through `_imageSequence` (what its DCS/OSC handler will run) while xterm.js parses it.
+// @xterm/addon-webgl and @xterm/addon-image, side by side with the same options and written the same bytes.
 import { init, Terminal, ImageAddon } from 'oxtty/xterm';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -12,7 +11,6 @@ const frames = (n = 2) => new Promise((resolve) => {
   step();
 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const encoder = new TextEncoder();
 
 /**
  * A sixel with raster attributes for a `width` × `height` image; `color(x, y)` gives `[r, g, b]` in percent, or
@@ -101,29 +99,19 @@ window.api = {
     await Promise.all([new Promise((r) => ox.write(text, r)), new Promise((r) => xt.write(text, r))]);
     await frames(3);
   },
-  /** `prefix`, the image sequence, `suffix` to both; `kind` is `'sixel'` (`body` the DCS payload) or `'iip'`. */
-  async image(kind, body, { prefix = '', suffix = '', params = '' } = {}) {
-    const { ox, xt } = pair;
-    const sequence = kind === 'sixel' ? `\x1bP${params}q${body}\x1b\\` : `\x1b]1337;${body}\x07`;
-    const xtDone = new Promise((r) => xt.write(prefix + sequence + suffix, r));
-    await new Promise((r) => ox.write(prefix, r));
-    const dcsParams = params ? params.split(';').map(Number) : [];
-    const handled = ox._imageSequence(kind, dcsParams, encoder.encode(body));
-    await new Promise((r) => ox.write(suffix, r));
-    await xtDone;
-    // Decoding PNGs is asynchronous on both sides
-    await sleep(kind === 'iip' ? 150 : 0);
-    await frames(3);
-    return handled;
+  /** The image sequence: `kind` is `'sixel'` (`body` the DCS payload) or `'iip'` (`body` after `1337;`). */
+  sequence(kind, body, params = '') {
+    return kind === 'sixel' ? `\x1bP${params}q${body}\x1b\\` : `\x1b]1337;${body}\x07`;
   },
-  /** Runs a CSI handler the addon registers on both (`kind` as `_imageSequence` takes it). */
-  async csi(kind, sequence, params) {
-    const { ox, xt } = pair;
+  /** `prefix`, the image sequence and `suffix` to both in one write (PNGs decode while the parsers wait). */
+  async image(kind, body, { prefix = '', suffix = '', params = '' } = {}) {
+    await this.writeBoth(prefix + this.sequence(kind, body, params) + suffix);
+  },
+  /** What both answer to `sequence`. */
+  async csi(sequence) {
     pair.data.ox.length = 0;
     pair.data.xt.length = 0;
-    const handled = ox._imageSequence(kind, params);
-    if (!handled) await new Promise((r) => ox.write(sequence, r));
-    await new Promise((r) => xt.write(sequence, r));
+    await this.writeBoth(sequence);
     return { ox: pair.data.ox.join(''), xt: pair.data.xt.join('') };
   },
   /** Cursors, the image tiles by viewport cell (`row:col` → tile, images numbered by first appearance) and storage. */

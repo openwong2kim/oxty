@@ -102,6 +102,31 @@ test('text and images over tiles, erasing and scrolling remove and move tiles li
   assert.equal(r.gone.debug.textures, 0);
 });
 
+test('the alternate screen, DECSTR and RIS in the same write as an image drop it in stream order like the addon', async () => {
+  const r = await inPage(async () => {
+    await api.setup();
+    const image = api.sequence('sixel', api.sixel(20, 20, () => [100, 0, 0]));
+    const usage = {};
+    const step = async (label, data) => {
+      await api.writeBoth(data);
+      const state = api.state();
+      usage[label] = { ...state.usage, pixels: state.debug.pixels };
+    };
+    await step('placed on the alternate screen, which is left', `\x1b[?1049h${image}\x1b[?1049l`);
+    await step('placed after entering it', `\x1b[?1049h\x1b[H${image}`);
+    await step('left again', '\x1b[?1049l');
+    await step('placed, then DECSTR', `${image}\x1b[!p`);
+    await step('placed, then RIS', `${image}\x1bc`);
+    await step('RIS, then placed', `\x1bc${image}`);
+    return { usage, state: api.state() };
+  });
+  for (const [label, u] of Object.entries(r.usage)) assert.equal(u.ox, u.xt, label);
+  assert.equal(r.usage['placed after entering it'].pixels, 400);
+  assert.equal(r.usage['left again'].pixels, 0);
+  assert.equal(r.usage['RIS, then placed'].pixels, 400);
+  assert.deepEqual(r.state.tiles.ox, r.state.tiles.xt);
+});
+
 test('storage limit evicts the oldest image first; its tiles show the placeholder like the addon', async () => {
   const r = await inPage(async () => {
     await api.setup({ cols: 60, rows: 30 }, { storageLimit: 0.5 });
@@ -134,17 +159,17 @@ test('DA1, XTSMGRAPHICS, the size reports and ReportCellSize answer like the add
   const r = await inPage(async () => {
     await api.setup({}, { pixelLimit: 1000000 });
     const out = {
-      da1: await api.csi('da1', '\x1b[c', [0]),
-      colors: await api.csi('xtsmgraphics', '\x1b[?1;1S', [1, 1]),
-      setColors: await api.csi('xtsmgraphics', '\x1b[?1;3;256S', [1, 3, 256]),
-      tooMany: await api.csi('xtsmgraphics', '\x1b[?1;3;5000S', [1, 3, 5000]),
-      maxColors: await api.csi('xtsmgraphics', '\x1b[?1;4S', [1, 4]),
-      geometry: await api.csi('xtsmgraphics', '\x1b[?2;1S', [2, 1]),
-      maxGeometry: await api.csi('xtsmgraphics', '\x1b[?2;4S', [2, 4]),
-      regis: await api.csi('xtsmgraphics', '\x1b[?3;1S', [3, 1]),
-      winPixels: await api.csi('winops', '\x1b[14t', [14]),
-      cellPixels: await api.csi('winops', '\x1b[16t', [16]),
-      winChars: await api.csi('winops', '\x1b[18t', [18]),
+      da1: await api.csi('\x1b[c'),
+      colors: await api.csi('\x1b[?1;1S'),
+      setColors: await api.csi('\x1b[?1;3;256S'),
+      tooMany: await api.csi('\x1b[?1;3;5000S'),
+      maxColors: await api.csi('\x1b[?1;4S'),
+      geometry: await api.csi('\x1b[?2;1S'),
+      maxGeometry: await api.csi('\x1b[?2;4S'),
+      regis: await api.csi('\x1b[?3;1S'),
+      winPixels: await api.csi('\x1b[14t'),
+      cellPixels: await api.csi('\x1b[16t'),
+      winChars: await api.csi('\x1b[18t'),
       windowOptions: [api.pair.ox.options.windowOptions, api.pair.xt.options.windowOptions],
     };
     const replies = { ox: [], xt: [] };
@@ -186,9 +211,9 @@ test('an @xterm/addon-image instance is absorbed, and wmux reaches its sixel han
     const capped = capSixelImageSize(oxAddon, 200);
     const keys = [...oxAddon._handlers.keys()];
     const before = ox._imageDebug().pageImages;
-    ox._imageSequence('sixel', [], new TextEncoder().encode(api.sixel(30, 30, () => [100, 0, 0])));
+    await new Promise((r) => ox.write(api.sequence('sixel', api.sixel(30, 30, () => [100, 0, 0])), r));
     const tooLarge = ox._imageDebug().pageImages;
-    ox._imageSequence('sixel', [], new TextEncoder().encode(api.sixel(10, 10, () => [100, 0, 0])));
+    await new Promise((r) => ox.write(api.sequence('sixel', api.sixel(10, 10, () => [100, 0, 0])), r));
     const small = ox._imageDebug().pageImages;
     const limit = oxAddon.storageLimit;
     let threw = false;
@@ -199,7 +224,7 @@ test('an @xterm/addon-image instance is absorbed, and wmux reaches its sixel han
     }
     const added = [];
     oxAddon.onImageAdded(() => added.push(1));
-    ox._imageSequence('sixel', [], new TextEncoder().encode(api.sixel(8, 8, () => [0, 0, 100])));
+    await new Promise((r) => ox.write(api.sequence('sixel', api.sixel(8, 8, () => [0, 0, 100])), r));
     const windowOptions = ox.options.windowOptions;
     oxAddon.dispose();
     return {
@@ -248,9 +273,8 @@ test('memory: 17 terminals, images in three; the others hold no image state, pix
     });
     const base = await memory();
     const placed = await page.evaluate(async () => {
-      const encoder = new TextEncoder();
-      const body = encoder.encode(api.sixel(1000, 1000, (x, y) => [((x >> 5) % 2) * 100, ((y >> 5) % 2) * 100, 50]));
-      for (const term of window.terms.filter((_, i) => i % 6 === 0)) term._imageSequence('sixel', [], body);
+      const body = api.sequence('sixel', api.sixel(1000, 1000, (x, y) => [((x >> 5) % 2) * 100, ((y >> 5) % 2) * 100, 50]));
+      for (const term of window.terms.filter((_, i) => i % 6 === 0)) await new Promise((resolve) => term.write(body, resolve));
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       return window.terms.map((t) => t._imageDebug());
     });

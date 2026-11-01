@@ -684,9 +684,6 @@ impl Shared {
         let (old, new) = (self.state.get(), self.read_state());
         self.state.set(new);
         crate::markers::sync(self);
-        if new.alternate != old.alternate {
-            crate::image::buffer_changed(self);
-        }
         if new.alternate != old.alternate && self.events.buffer_change.has_listeners() {
             let buffer = crate::buffer::active(self);
             self.events.buffer_change.fire(&[&buffer.into()]);

@@ -173,13 +173,10 @@ impl ImageProgram {
     }
 }
 
-/// Uploads an image's pixels to a new texture; `None` while they are not decoded or too large for the context.
+/// Uploads an image's pixels to a new texture; `None` if it is too large for the context.
 pub fn upload(gl: &Gl, id: u32, max_size: f64) -> Option<WebGlTexture> {
     image::with_image(id, |image| {
         if image.width as f64 > max_size || image.height as f64 > max_size {
-            return None;
-        }
-        if !matches!(image.pixels, Pixels::Rgba(_) | Pixels::Bitmap(_)) {
             return None;
         }
         let texture = gl.create_texture()?;
@@ -213,7 +210,6 @@ pub fn upload(gl: &Gl, id: u32, max_size: f64) -> Option<WebGlTexture> {
                 Gl::UNSIGNED_BYTE,
                 bitmap,
             ),
-            _ => Ok(()),
         };
         Some(texture)
     })

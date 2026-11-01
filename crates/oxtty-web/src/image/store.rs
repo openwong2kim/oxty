@@ -19,13 +19,9 @@ use crate::terminal::Shared;
 
 /// Where an image's pixels are.
 pub(crate) enum Pixels {
-    /// The browser is still decoding it.
-    Pending,
     /// RGBA bytes.
     Rgba(Uint8Array),
     Bitmap(ImageBitmap),
-    /// The browser could not decode it: drawn as nothing.
-    Failed,
 }
 
 pub(crate) struct Image {
@@ -226,24 +222,6 @@ pub(crate) fn recount_alternate(key: u32, counts: &[(u32, i64)]) {
         }
     });
     delete(key, |i| i.alternate && i.tiles == 0);
-}
-
-/// Sets the pixels of image `id` once decoded; false (and the bitmap is closed) if the image is gone.
-pub(crate) fn set_pixels(id: u32, pixels: Pixels) -> bool {
-    let (found, owner) = with(|s| match s.images.iter_mut().find(|i| i.id == id) {
-        Some(image) => {
-            image.pixels = pixels;
-            (None, Some(image.owner))
-        }
-        None => (Some(pixels), None),
-    });
-    if let Some(Pixels::Bitmap(bitmap)) = found {
-        bitmap.close();
-    }
-    if let Some(owner) = owner {
-        redraw(owner);
-    }
-    owner.is_some()
 }
 
 /// Runs `f` on image `id`.

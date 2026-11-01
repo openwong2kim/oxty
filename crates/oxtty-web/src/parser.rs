@@ -41,7 +41,7 @@ export type IParams = (number | number[])[];
 "#;
 
 #[derive(Clone, Copy, PartialEq)]
-enum Kind {
+pub(crate) enum Kind {
     Csi,
     Osc,
     Dcs,
@@ -57,12 +57,23 @@ impl Kind {
     }
 }
 
+/// A handler from JS, or one in Rust (the image addon's) that takes the raw payload (the hook's own copy, so a
+/// large one stays out of wasm memory) and each parameter's first value (xterm.js `Params.params`), and returns
+/// what a JS handler would.
+#[derive(Clone)]
+enum Callback {
+    Js(Function),
+    Rust(Rc<RustHandler>),
+}
+
+type RustHandler = dyn Fn(&Uint8Array, &[u32]) -> JsValue;
+
 /// A registered handler of sequence `(kind, id)`; `serial` tells it apart for its disposable.
 struct Handler {
     kind: Kind,
     id: u32,
     serial: u32,
-    callback: Function,
+    callback: Callback,
 }
 
 /// The terminal's parser state (a member of [`Shared`]).
@@ -88,7 +99,7 @@ impl ParserState {
     }
 
     /// The handlers of `(kind, id)`, oldest first.
-    fn handlers(&self, kind: Kind, id: u32) -> Vec<Function> {
+    fn handlers(&self, kind: Kind, id: u32) -> Vec<Callback> {
         self.handlers
             .borrow()
             .iter()
@@ -196,9 +207,13 @@ enum Outcome {
 
 /// Calls the first `n` handlers, newest first, each with its own arguments, until one returns true or a Promise.
 /// A throwing handler counts as false; its error is thrown again on a later task.
-fn run(handlers: &[Function], kind: Kind, hook: &JsValue, n: usize) -> Outcome {
+fn run(handlers: &[Callback], kind: Kind, hook: &JsValue, n: usize) -> Outcome {
     for (i, handler) in handlers.iter().enumerate().take(n).rev() {
-        match handler.apply(&JsValue::UNDEFINED, &arguments(kind, hook)) {
+        let result = match handler {
+            Callback::Js(f) => f.apply(&JsValue::UNDEFINED, &arguments(kind, hook)),
+            Callback::Rust(f) => Ok(rust_call(f.as_ref(), hook)),
+        };
+        match result {
             Ok(result) if result.as_bool() == Some(true) => return Outcome::Handled(true),
             Ok(result) => {
                 if let Ok(promise) = result.dyn_into::<Promise>() {
@@ -214,7 +229,7 @@ fn run(handlers: &[Function], kind: Kind, hook: &JsValue, n: usize) -> Outcome {
 /// Holds the write queue until the handlers settle, then finishes the hook and lets the queue go on.
 fn pause(
     shared: &Rc<Shared>,
-    handlers: Vec<Function>,
+    handlers: Vec<Callback>,
     kind: Kind,
     hook: JsValue,
     promise: Promise,
@@ -233,7 +248,7 @@ fn pause(
 
 /// Waits for `promise`; on false (or a rejection, thrown again later) the older handlers run, as in xterm.js.
 async fn settle(
-    handlers: &[Function],
+    handlers: &[Callback],
     kind: Kind,
     hook: &JsValue,
     mut promise: Promise,
@@ -306,6 +321,18 @@ fn arguments(kind: Kind, hook: &JsValue) -> Array {
     }
 }
 
+/// Calls a Rust handler with the hook's payload bytes and parameters.
+fn rust_call(f: &RustHandler, hook: &JsValue) -> JsValue {
+    let data = get(hook, "data")
+        .dyn_into::<Uint8Array>()
+        .unwrap_or_else(|_| Uint8Array::new_with_length(0));
+    let params: Vec<u32> = Array::from(&get(hook, "params"))
+        .iter()
+        .map(|p| Array::from(&p).get(0).as_f64().unwrap_or(0.0) as u32)
+        .collect();
+    f(&data, &params)
+}
+
 /// Throws `error` from a task of its own, so it is reported without stopping the parsing.
 fn throw_later(error: JsValue) {
     timer::queue(move || wasm_bindgen::throw_val(error));
@@ -363,7 +390,7 @@ fn set_hook(shared: &Shared, kind: Kind, id: u32, on: bool) {
 }
 
 /// Adds `callback` for the sequence; the engine stops there while it has at least one handler.
-fn register(weak: &Weak<Shared>, kind: Kind, id: u32, callback: Function) -> Disposable {
+fn register(weak: &Weak<Shared>, kind: Kind, id: u32, callback: Callback) -> Disposable {
     let Some(shared) = weak.upgrade() else {
         return Disposable::new(|| {});
     };
@@ -397,6 +424,16 @@ fn register(weak: &Weak<Shared>, kind: Kind, id: u32, callback: Function) -> Dis
     })
 }
 
+/// Adds a Rust handler (see [`Callback`]); it should hold the terminal weakly.
+pub(crate) fn register_rust(
+    shared: &Rc<Shared>,
+    kind: Kind,
+    id: u32,
+    f: impl Fn(&Uint8Array, &[u32]) -> JsValue + 'static,
+) -> Disposable {
+    register(&Rc::downgrade(shared), kind, id, Callback::Rust(Rc::new(f)))
+}
+
 /// xterm.js `IParser`: CSI, DCS and OSC handlers. `true` from a handler skips the older handlers and the default
 /// action; `false` falls through to them; a `Promise<boolean>` holds the write queue until it settles. `write()`
 /// from inside a handler is parsed after the data being parsed. A throwing or rejecting handler counts as false
@@ -419,7 +456,7 @@ impl Parser {
             &self.shared,
             Kind::Csi,
             identifier(&id)?,
-            callback,
+            Callback::Js(callback),
         ))
     }
 
@@ -436,7 +473,7 @@ impl Parser {
             &self.shared,
             Kind::Dcs,
             identifier(&id)?,
-            callback,
+            Callback::Js(callback),
         ))
     }
 
@@ -451,7 +488,12 @@ impl Parser {
         if !(0.0..=u32::MAX as f64).contains(&ident) || ident.fract() != 0.0 {
             return Err(js_sys::Error::new("invalid OSC identifier").into());
         }
-        Ok(register(&self.shared, Kind::Osc, ident as u32, callback))
+        Ok(register(
+            &self.shared,
+            Kind::Osc,
+            ident as u32,
+            Callback::Js(callback),
+        ))
     }
 }
 

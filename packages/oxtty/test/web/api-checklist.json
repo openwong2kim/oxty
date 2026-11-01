@@ -104,8 +104,8 @@
       "reason": "Always false (wmux passes false); omit it."
     },
     "options.windowOptions": {
-      "status": "unsupported",
-      "reason": "Kept as an option and set by the image addon (enableSizeReports); the CSI 14/16/18 t answers it allows come with the parser hooks."
+      "status": "supported",
+      "reason": "Kept as an option. On a terminal with an ImageAddon (which sets it with enableSizeReports), CSI 14/16/18 t are answered as it allows, and not at all when it does not, by the addon's Rust parser hook (crates/oxtty-web/src/image); without an addon no hook is set and the engine answers 18 t only."
     },
     "Terminal.open": {
       "status": "supported",
@@ -393,8 +393,9 @@
       "exercisedBy": "new WebLinksAddon\\("
     },
     "ImageAddon": {
-      "status": "later",
-      "reason": "Rust (crates/oxtty-web/src/image): loadAddon takes the built-in ImageAddon or absorbs @xterm/addon-image; sixel decoded in Rust, PNG/JPEG/GIF by createImageBitmap, tiles in engine cells, page-wide storage limit, WebGL image layer. Supported once the parser hooks route DCS q, OSC 1337 and the addon's CSI handlers to it."
+      "status": "supported",
+      "reason": "Rust (crates/oxtty-web/src/image): loadAddon takes the built-in ImageAddon or absorbs @xterm/addon-image 0.10.0-beta.331. Its handlers are Rust handlers on terminal.parser (DCS q, OSC 1337, CSI ?h ?l c ?S !p t), registered only while it is loaded; sixel is decoded in Rust, PNG/JPEG/GIF/WebP/AVIF by createImageBitmap while the parser waits, tiles live in engine cells, storage is page-wide, drawn by the WebGL image layer. image.test.mjs compares cells, cursor and pixels with the real addon. RIS resets it after the write is parsed; kitty graphics and getImageAtBufferCell are not supported.",
+      "exercisedBy": "new ImageAddon\\("
     },
     "_core._renderService.dimensions": {
       "status": "unsupported",
@@ -431,8 +432,9 @@
       "reason": "Atlas health checks belong inside the renderer (atlasGuard goes away)."
     },
     "ImageAddon._handlers": {
-      "status": "later",
-      "reason": "A Map with 'sixel' and 'iip' stand-ins; a decoded sixel goes through handlers.get('sixel').unhook with _dec.width/height and _aborted, so wmux's sixel cap wraps it. Supported with ImageAddon."
+      "status": "supported",
+      "reason": "A Map with 'sixel' and 'iip' stand-ins (Rust, crates/oxtty-web/src/image); a decoded sixel goes through handlers.get('sixel').unhook with _dec.width/height and _aborted, so wmux's sixel cap wraps it (image.test.mjs runs that cap).",
+      "exercisedBy": "_handlers\\?\\.get\\('sixel'\\)"
     },
     "DOM .xterm": {
       "status": "supported",
