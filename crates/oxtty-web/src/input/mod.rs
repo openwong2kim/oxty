@@ -159,7 +159,8 @@ struct Dom {
     /// The element's document when opened, where the document listeners go.
     document: Document,
     window: Option<Window>,
-    listener: Closure<dyn FnMut(Event)>,
+    /// `Fn`, not `FnMut`: handlers dispatch events into it again (`focus()` on mousedown fires `focus` at once).
+    listener: Closure<dyn Fn(Event)>,
     /// [`dynamic`] listeners that are on.
     dynamic: u8,
     /// The viewport cursor the textarea was last placed at.
@@ -382,7 +383,7 @@ pub(crate) fn open(
     composition_view.class_list().add_1("composition-view")?;
     helpers.append_child(&composition_view)?;
     let weak = Rc::downgrade(shared);
-    let listener = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+    let listener = Closure::<dyn Fn(Event)>::new(move |event: Event| {
         if let Some(shared) = weak.upgrade() {
             handle_event(&shared, event);
         }

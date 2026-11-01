@@ -56,6 +56,20 @@ test('input matches xterm.js', async (t) => {
       assert.equal(placed.top, `${placed.height}px`);
     });
 
+    await t.test('a mousedown on the terminal focuses the textarea like xterm.js', async () => {
+      await setup(page);
+      const focused = await page.evaluate(() => ['ox', 'xt'].map((name) => {
+        const terminal = window.api.terminal(name);
+        const screen = terminal.element.querySelector('.xterm-screen');
+        terminal.blur();
+        for (const type of ['mousedown', 'mouseup']) screen.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+        const result = document.activeElement === terminal.textarea && terminal.element.classList.contains('focus');
+        terminal.blur();
+        return result;
+      }));
+      assert.deepEqual(focused, [true, true]);
+    });
+
     await t.test('paste() and the paste event send what xterm.js sends', async () => {
       const texts = ['plain', 'a\r\nb\nc\rd', 'x\x1b[201~y'];
       for (const bracketed of [false, true]) {
