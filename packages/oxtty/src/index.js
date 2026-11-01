@@ -1,7 +1,7 @@
 // oxtty — terminal emulator engine (Rust → WebAssembly).
 // Works in browsers, bundlers (Vite/webpack resolve the .wasm URL) and Node ≥ 18.
 
-const ABI = 10;
+const ABI = 11;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 // Input buffer: smallest allocation, and the largest one kept between writes.
@@ -542,6 +542,21 @@ export class Terminal {
   takeReplies() {
     const n = wasm.oxtty_take_replies(this.#handle());
     return n === 0 ? new Uint8Array(0) : bytesOut(n);
+  }
+
+  /** The same replies one by one, in order (xterm.js fires one `onData` per reply). */
+  takeReplyList() {
+    const n = wasm.oxtty_take_reply_list(this.#handle());
+    if (n === 0) return [];
+    const lens = wordsOut(n);
+    const bytes = bytesOut(wasm.oxtty_out_len());
+    const replies = [];
+    let at = 0;
+    for (const len of lens) {
+      replies.push(bytes.subarray(at, at + len));
+      at += len;
+    }
+    return replies;
   }
 
   /** @returns {string | null} new title, or null if unchanged */

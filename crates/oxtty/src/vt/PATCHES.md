@@ -34,6 +34,11 @@ single crate.
   bottom lines, moves the last cursor point along, and counts the rows in
   `Term::damage_scrolled()`. Region scrolls, a scrolled-back view, or scrolling
   a full screen height still give full damage. `oxtty::Engine` turns it on.
+- `Term::damage` damages the cursor only when it moved, and no longer damages
+  the whole screen on every call in insert mode: `input` damages the cells it
+  writes (a combining mark's cell, the rest of the line when inserting). So a
+  frame without output reports no lines; upstream damages the cursor every
+  time because its renderer draws the cursor from the damage.
 - RIS keeping the cursor hidden is an option:
   `term::Config::ris_keeps_cursor_visibility` (default `false`, upstream: RIS
   shows the cursor again). When on, `reset_state` restores DECTCEM

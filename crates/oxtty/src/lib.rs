@@ -275,6 +275,8 @@ type ColorFormatter = Arc<dyn Fn(Rgb) -> String + Sync + Send>;
 #[derive(Default)]
 struct Inbox {
     replies: Vec<u8>,
+    // Where each reply in `replies` ends, for hosts that pass them on one by one as xterm.js does.
+    reply_ends: Vec<usize>,
     title: Option<String>,
     bells: u32,
     clipboard_read: bool,
@@ -310,7 +312,22 @@ impl Inbox {
     fn reply(&mut self, bytes: &[u8]) {
         if self.replies.len() + bytes.len() <= MAX_REPLIES {
             self.replies.extend_from_slice(bytes);
+            self.reply_ends.push(self.replies.len());
         }
+    }
+
+    // A reply that goes in at `at`, the end of an earlier reply (or 0).
+    fn insert_reply(&mut self, at: usize, bytes: Vec<u8>) {
+        if self.replies.len() + bytes.len() > MAX_REPLIES || at > self.replies.len() {
+            return;
+        }
+        let len = bytes.len();
+        self.replies.splice(at..at, bytes);
+        let k = self.reply_ends.partition_point(|&end| end <= at);
+        for end in &mut self.reply_ends[k..] {
+            *end += len;
+        }
+        self.reply_ends.insert(k, at + len);
     }
 }
 
@@ -848,24 +865,23 @@ impl Engine {
     }
 
     /// Cells of one row that carry combining marks, an underline colour or a
-    /// hyperlink, appended to `out` (cleared first). Wide-character spacers
-    /// are skipped. Returns `false` if `line` is out of range.
+    /// hyperlink, appended to `out` (cleared first). A wide character's right
+    /// half lists only its hyperlink (the link covers both halves, as in
+    /// xterm.js). Returns `false` if `line` is out of range.
     pub fn row_extras(&self, line: i32, out: &mut Vec<CellExtra>) -> bool {
         out.clear();
         self.with_row(line, |row| {
             for (col, cell) in row[..].iter().enumerate() {
-                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                    continue;
-                }
+                let spacer = cell.flags.contains(Flags::WIDE_CHAR_SPACER);
                 let text = cell
                     .zerowidth()
-                    .filter(|marks| !marks.is_empty())
+                    .filter(|marks| !spacer && !marks.is_empty())
                     .map(|marks| {
                         std::iter::once(cell.c)
                             .chain(marks.iter().copied())
                             .collect()
                     });
-                let underline_color = cell.underline_color().map(pack_color);
+                let underline_color = cell.underline_color().filter(|_| !spacer).map(pack_color);
                 let hyperlink = cell.hyperlink().map(|link| Hyperlink {
                     id: link.id().to_owned(),
                     uri: link.uri().to_owned(),
@@ -1010,7 +1026,25 @@ impl Engine {
     /// Bytes the terminal wants written back to the program (device status
     /// and attribute reports, …). Send them to the PTY.
     pub fn take_replies(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.inbox.inbox().replies)
+        let mut inbox = self.inbox.inbox();
+        inbox.reply_ends.clear();
+        std::mem::take(&mut inbox.replies)
+    }
+
+    /// [`Engine::take_replies`] one reply at a time, in order: xterm.js fires one `onData` per reply, and hosts
+    /// that filter replies compare whole ones.
+    pub fn take_reply_list(&mut self) -> Vec<Vec<u8>> {
+        let mut inbox = self.inbox.inbox();
+        let replies = std::mem::take(&mut inbox.replies);
+        let mut start = 0;
+        std::mem::take(&mut inbox.reply_ends)
+            .into_iter()
+            .map(|end| {
+                let reply = replies.get(start..end).unwrap_or_default().to_vec();
+                start = end;
+                reply
+            })
+            .collect()
     }
 
     /// The new window title if it changed since the last call (`""` = reset).
@@ -1126,9 +1160,7 @@ impl Engine {
             if let Some(body) = reply.strip_suffix('\x07') {
                 reply = format!("{body}\x1b\\");
             }
-            if inbox.replies.len() + reply.len() <= MAX_REPLIES {
-                inbox.replies.splice(at..at, reply.into_bytes());
-            }
+            inbox.insert_reply(at, reply.into_bytes());
         }
     }
 

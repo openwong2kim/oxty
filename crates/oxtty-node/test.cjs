@@ -114,6 +114,10 @@ test('native setFocus answers CSI ? 1004 h', () => {
   t.setFocus(null);
   t.write('\x1b[?1004h');
   assert.equal(t.takeReplies().toString(), '\x1b[I');
+  t.setFocus(false);
+  t.write('\x1b[6n\x1b[?1004h');
+  assert.deepEqual(t.takeReplyList().map(String), ['\x1b[1;1R', '\x1b[O']);
+  assert.deepEqual(t.takeReplyList(), []);
 });
 
 test('native windowsPty', () => {

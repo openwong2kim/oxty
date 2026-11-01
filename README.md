@@ -218,7 +218,8 @@ change or a screen switch.
 <details>
 <summary><b>Things for the host to act on</b></summary>
 
-`takeReplies()` (bytes to send back to the program), `takeTitle()`,
+`takeReplies()` (bytes to send back to the program; `takeReplyList()` gives
+them one reply at a time, as xterm.js fires `onData`), `takeTitle()`,
 `takeBells()`, `modes()` (cursor visibility, bracketed paste, mouse reporting,
 alternate screen, …).
 

@@ -160,10 +160,9 @@ fn snapshot_leaves_the_live_engine_untouched() {
     t.feed(b"before\x1b[?2026h\x1b[2Hframe");
     t.take_damage();
     let first = snapshot(&mut t);
-    // vt always reports the cursor line (0) as damaged.
     let none = Damage::Lines {
         scroll: 0,
-        lines: vec![0],
+        lines: vec![],
     };
     assert_eq!(
         (t.take_damage(), t.row_text(1).unwrap(), t.sync_pending()),

@@ -308,6 +308,16 @@ impl Terminal {
         self.inner.take_replies().into()
     }
 
+    /// The same replies one by one, in order (xterm.js fires one `onData` per reply).
+    #[napi]
+    pub fn take_reply_list(&mut self) -> Vec<Buffer> {
+        self.inner
+            .take_reply_list()
+            .into_iter()
+            .map(Buffer::from)
+            .collect()
+    }
+
     #[napi]
     pub fn take_title(&mut self) -> Option<String> {
         self.inner.take_title()

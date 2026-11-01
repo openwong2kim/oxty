@@ -570,12 +570,6 @@ impl<T> Term<T> {
     /// [`reset_damage`]: Self::reset_damage
     #[must_use]
     pub fn damage(&mut self) -> TermDamage<'_> {
-        // Ensure the entire terminal is damaged after entering insert mode.
-        // Leaving is handled in the ansi handler.
-        if self.mode.contains(TermMode::INSERT) {
-            self.mark_fully_damaged();
-        }
-
         let previous_cursor = mem::replace(&mut self.damage.last_cursor, self.grid.cursor.point);
 
         if self.damage.full {
@@ -584,14 +578,14 @@ impl<T> Term<T> {
 
         // Add information about old cursor position and new one if they are not the same, so we
         // cover everything that was produced by `Term::input`.
+        // oxtty: upstream also damages the current cursor every time, and the whole screen in insert mode; here
+        // `input` damages the cells it writes, so a frame without output reports no lines.
         if self.damage.last_cursor != previous_cursor {
             // Cursor coordinates are always inside viewport even if you have `display_offset`.
             let point = Point::new(previous_cursor.line.0 as usize, previous_cursor.column);
             self.damage.damage_point(point);
+            self.damage_cursor();
         }
-
-        // Always damage current cursor.
-        self.damage_cursor();
 
         // NOTE: damage which changes all the content when the display offset is non-zero (e.g.
         // scrolling) is handled via full damage.
@@ -1402,6 +1396,8 @@ impl<T: EventListener> Handler for Term<T> {
             }
 
             self.grid[line][column].push_zerowidth(c);
+            // oxtty: the cell may be left of a cursor that does not move.
+            self.damage.damage_point(Point::new(line.0 as usize, column));
             return;
         }
 
@@ -1410,11 +1406,19 @@ impl<T: EventListener> Handler for Term<T> {
             self.wrapline();
         }
 
+        // oxtty: the cells written here (and a wide char's left half they may blank), which the cursor may not
+        // leave (last column).
+        let point = self.grid.cursor.point;
+        let right = cmp::min(point.column.0 + width - 1, self.last_column().0);
+        self.damage.damage_line(point.line.0 as usize, point.column.0.saturating_sub(1), right);
+
         // If in insert mode, first shift cells to the right.
         let columns = self.columns();
         if self.mode.contains(TermMode::INSERT) && self.grid.cursor.point.column + width < columns {
             let line = self.grid.cursor.point.line;
             let col = self.grid.cursor.point.column;
+            // oxtty: the cells moved right, instead of upstream's full damage on every frame in insert mode.
+            self.damage.damage_line(line.0 as usize, col.0.saturating_sub(1), columns - 1);
             // oxtty: xterm.js `insertCells` with the pen's blank. A wide char at the cursor or
             // pushed into the last column loses its other half, so it is blanked whole.
             let blank = self.config.xterm_wide_leader.then(|| self.pen_blank());
@@ -3746,10 +3750,10 @@ mod tests {
         term.set_color(NamedColor::Cursor as usize, Rgb::default());
         assert!(!term.damage.full);
 
-        // However requesting terminal damage should mark terminal as fully damaged in `Insert`
-        // mode.
+        // oxtty: requesting terminal damage in `Insert` mode no longer marks it fully damaged
+        // (`input` damages the shifted cells instead).
         let _ = term.damage();
-        assert!(term.damage.full);
+        assert!(!term.damage.full);
         term.reset_damage();
 
         term.unset_mode(NamedMode::Insert.into());
