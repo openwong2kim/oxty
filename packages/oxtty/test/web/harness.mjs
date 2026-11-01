@@ -1,6 +1,7 @@
 // Browser tests for oxtty/xterm: serves the package directory, opens a page module in headless system Chrome
 // (SwiftShader WebGL2) and hands the page to the test. Page modules import 'oxtty/xterm' (the built dist) and
-// real xterm.js as '@xterm/xterm' / '@xterm/addon-webgl' through an import map, so both run side by side.
+// real xterm.js as '@xterm/xterm' / '@xterm/addon-webgl' / '@xterm/addon-unicode11' through an import map, so both
+// run side by side; 'oxtty' is the engine (index.js) for its crash trigger.
 import { chromium } from 'playwright-core';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -10,9 +11,11 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css', '.json': 'application/json' };
 const IMPORTS = {
+  oxtty: '/dist/index.js',
   'oxtty/xterm': '/dist/xterm.js',
   '@xterm/xterm': '/node_modules/@xterm/xterm/lib/xterm.mjs',
   '@xterm/addon-webgl': '/node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs',
+  '@xterm/addon-unicode11': '/node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs',
 };
 
 /**
@@ -51,3 +54,6 @@ export async function withPage(page, fn, { viewport = { width: 1000, height: 700
     server.close();
   }
 }
+
+/** A Chrome DevTools Protocol session on `page`, for input (Input.*), heap and DOM-listener domains. */
+export const cdp = (page) => page.context().newCDPSession(page);

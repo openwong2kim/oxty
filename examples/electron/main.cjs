@@ -13,8 +13,8 @@ app.whenReady().then(() => {
   term.onExit(() => win.isDestroyed() || win.close());
   ipcMain.on('pty:input', (_, data) => term.write(data));
   ipcMain.on('pty:resize', (_, cols, rows) => term.resize(cols, rows));
-  // The renderer cannot fetch file:// URLs, so it gets the engine's bytes over IPC and passes them to init().
-  ipcMain.handle('oxtty:wasm', () => readFileSync(join(dirname(require.resolve('oxtty')), 'oxtty.wasm')));
+  // The renderer cannot fetch file:// URLs, so it gets both modules' bytes over IPC and passes them to init().
+  ipcMain.handle('oxtty:wasm', () => ['oxtty.wasm', 'xterm_web_bg.wasm'].map(file => readFileSync(join(dirname(require.resolve('oxtty')), file))));
   win.on('closed', () => term.kill());
   win.loadFile('index.html');
 });

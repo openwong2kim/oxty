@@ -1,5 +1,5 @@
 {
-  "about": "Every xterm.js member wmux uses (non-test src/renderer at the wt-wmux-base checkout, @xterm/xterm 6.1.0-beta.336 and its addons) and its status in the Rust front end (crates/oxtty-web). Restored from 0510a7d, where the TypeScript front end reached the old statuses; reasons still describe that front end until each member is redone.",
+  "about": "Every xterm.js member wmux uses (non-test src/renderer at the wt-wmux-base checkout, @xterm/xterm 6.1.0-beta.336 and its addons) and its status in the Rust front end (crates/oxtty-web). Restored from 0510a7d, where the TypeScript front end reached the old statuses; reasons still describe that front end until each member is redone. An entry whose name is not an API member (DOM, internals, prose) carries `exercisedBy`, a regular expression some test must match, before it may be `supported` (api-checklist.test.mjs).",
   "statuses": {
     "todo": "Supported by the TypeScript front end at 0510a7d; not yet in the Rust front end.",
     "supported": "Implemented in crates/oxtty-web (in the generated .d.ts).",
