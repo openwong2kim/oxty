@@ -1,11 +1,11 @@
-// oxty 차용: xterm.js src/common/Types.ts @ f447274f430fd22513f6adbf9862d19524471c04 (태그 6.0.0), MIT 라이선스 — vendor-xterm/LICENSE
-// 발췌(원문 줄만 잘라 옴, 아래 oxty 주석 참고)
+// oxtty 차용: xterm.js src/common/Types.ts @ f447274f430fd22513f6adbf9862d19524471c04 (태그 6.0.0), MIT 라이선스 — vendor-xterm/LICENSE
+// 발췌(원문 줄만 잘라 옴, 아래 oxtty 주석 참고)
 /**
  * Copyright (c) 2018 The xterm.js authors. All rights reserved.
  * @license MIT
  */
 
-// oxty 발췌: 렌더러 부품이 쓰는 타입만 원문 그대로 잘라 왔다(줄 27-29, 39-41, 104-120, 136-220).
+// oxtty 발췌: 렌더러 부품이 쓰는 타입만 원문 그대로 잘라 왔다(줄 27-29, 39-41, 104-120, 136-220).
 import { UnderlineStyle } from 'common/buffer/Constants';
 
 export interface IDisposable {

@@ -1,7 +1,7 @@
-// 렌더러 벤치: 같은 바이트를 xterm.js(+WebGL 애드온) 또는 oxty(+차용 WebGL 렌더러) 패널 N개에 rAF마다 나눠 넣는다.
+// 렌더러 벤치: 같은 바이트를 xterm.js(+WebGL 애드온) 또는 oxtty(+차용 WebGL 렌더러) 패널 N개에 rAF마다 나눠 넣는다.
 // 끝나면 총 시간, 프레임 간격, 긴 작업, 화면 해시를 window.__bench에 남긴다. 메모리는 run.mjs가 잰다.
-import { init, Terminal as Oxty } from '../../../packages/oxty/dist/index.js';
-import { OxtyWebglRenderer } from '../src/OxtyWebglRenderer';
+import { init, Terminal as Oxtty } from '../../../packages/oxtty/dist/index.js';
+import { OxttyWebglRenderer } from '../src/OxttyWebglRenderer';
 import { WriteQueue } from '../src/WriteQueue';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -54,9 +54,9 @@ function xtermPane(el: HTMLElement): Pane {
     text: () => { const b = t.buffer.active; return Array.from({ length: ROWS }, (_, y) => b.getLine(b.baseY + y)!.translateToString(true)).join('\n'); },
   };
 }
-function oxtyPane(el: HTMLElement): Pane {
-  const o = new Oxty({ cols: COLS, rows: ROWS, scrollback: SCROLLBACK });
-  const r = new OxtyWebglRenderer(o as any, el);
+function oxttyPane(el: HTMLElement): Pane {
+  const o = new Oxtty({ cols: COLS, rows: ROWS, scrollback: SCROLLBACK });
+  const r = new OxttyWebglRenderer(o as any, el);
   let dirty = false;
   // xterm.js와 같이 쓰기를 12ms씩 나눠 넣는다
   const q = new WriteQueue(o as any, () => { dirty = true; });
@@ -68,13 +68,13 @@ function oxtyPane(el: HTMLElement): Pane {
 }
 
 async function main() {
-  if (backend === 'oxty') await init(new URL('./oxty.wasm', location.href));
+  if (backend === 'oxtty') await init(new URL('./oxtty.wasm', location.href));
   const stream = makeStream();
   const root = document.getElementById('panes')!;
   const panes: Pane[] = [];
   for (let i = 0; i < PANES; i++) {
     const el = document.createElement('div'); el.className = 'pane'; root.appendChild(el);
-    panes.push(backend === 'xterm' ? xtermPane(el) : oxtyPane(el));
+    panes.push(backend === 'xterm' ? xtermPane(el) : oxttyPane(el));
   }
   const gl = document.createElement('canvas').getContext('webgl2')!;
   const ext = gl.getExtension('WEBGL_debug_renderer_info');

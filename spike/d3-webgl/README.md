@@ -1,6 +1,6 @@
-# D3 검증 스파이크: xterm.js WebGL 부품으로 oxty 행 그리기
+# D3 검증 스파이크: xterm.js WebGL 부품으로 oxtty 행 그리기
 
-PRD §5 D3("얇은 자체 프런트 + xterm.js 부품 차용")가 실제로 되는지 판정하는 스파이크다. xterm.js의 WebGL 렌더러 부품(글리프 텍스처 아틀라스, 글리프·사각형 렌더러, 렌더 모델, 셀 색 해석기)을 떼어 와서, oxty wasm 엔진의 `rowCells(y)` 출력으로 캔버스에 화면을 그린다.
+PRD §5 D3("얇은 자체 프런트 + xterm.js 부품 차용")가 실제로 되는지 판정하는 스파이크다. xterm.js의 WebGL 렌더러 부품(글리프 텍스처 아틀라스, 글리프·사각형 렌더러, 렌더 모델, 셀 색 해석기)을 떼어 와서, oxtty wasm 엔진의 `rowCells(y)` 출력으로 캔버스에 화면을 그린다.
 
 ## 판정: **D3 확정**
 
@@ -14,7 +14,7 @@ PRD §5 D3("얇은 자체 프런트 + xterm.js 부품 차용")가 실제로 되�
 ```sh
 cd spike/d3-webgl
 npm install
-npm run build        # tsc --noEmit → esbuild 번들 → dist/ (oxty.wasm이 없으면 scripts/build-wasm.sh 실행)
+npm run build        # tsc --noEmit → esbuild 번들 → dist/ (oxtty.wasm이 없으면 scripts/build-wasm.sh 실행)
 npm run screenshot   # 로컬 서버 + 시스템 Chrome(headless) → screenshot.png, 콘솔 에러가 있으면 exit 1
 ```
 
@@ -25,11 +25,11 @@ npm run screenshot   # 로컬 서버 + 시스템 Chrome(headless) → screenshot
 - bold, italic, underline(한글 2칸 폭 포함), inverse, dim, strike, curly 밑줄이 정상이다. bold+파랑은 `drawBoldTextInBrightColors`에 따라 밝은 파랑으로 그려진다.
 - 😀🎉👍는 2칸에 그려지고 앞뒤 칸 경계가 깨지지 않는다. 결합 문자(é ä ñ)와 박스·블록 문자(CustomGlyphs)도 정상이다.
 - 커서는 블록으로 그려진다. 2차 write 뒤 마지막 줄로 옮겨졌고, 이전 커서 칸은 지워졌다.
-- 예상한 차이: curly 밑줄을 빨강(SGR 58)으로 지정했지만 전경색으로 그려진다. oxty 셀 형식에 밑줄 색이 없기 때문이다(아래 "엔진 API에 부족했던 점" 1).
+- 예상한 차이: curly 밑줄을 빨강(SGR 58)으로 지정했지만 전경색으로 그려진다. oxtty 셀 형식에 밑줄 색이 없기 때문이다(아래 "엔진 API에 부족했던 점" 1).
 
 ## 렌더러 벤치
 
-같은 바이트를 xterm.js 6.1(WebGL 애드온)과 oxty(이 렌더러 + `src/WriteQueue.ts`) 패널 N개에 rAF마다 나눠 넣는다. 표본마다 Chrome을 새로 띄우고, 메인 스레드 CPU(CDP `TaskDuration`), 프레임 간격, 렌더러·GPU 프로세스 RSS를 잰다. 두 쪽의 화면 해시가 같아야 한다.
+같은 바이트를 xterm.js 6.1(WebGL 애드온)과 oxtty(이 렌더러 + `src/WriteQueue.ts`) 패널 N개에 rAF마다 나눠 넣는다. 표본마다 Chrome을 새로 띄우고, 메인 스레드 CPU(CDP `TaskDuration`), 프레임 간격, 렌더러·GPU 프로세스 RSS를 잰다. 두 쪽의 화면 해시가 같아야 한다.
 
 ```sh
 cd spike/d3-webgl/bench && npm install && cd ..
@@ -74,7 +74,7 @@ node bench/check.mjs                   # 증분 렌더와 처음부터 그린 �
 | `src/browser/Types.ts` | 95 (원본 226) | 발췌 | `IColorSet`·`DEFAULT_ANSI_COLORS`, `ITerminal` 스텁 포함 |
 | `src/browser/renderer/shared/Types.ts` | 53 (원본 84) | 발췌 | `IRenderDimensions`·`ISelectionRenderModel` |
 
-가져오지 않은 것: `WebglRenderer`·`WebglAddon`(oxty 오케스트레이터로 대체), `CharAtlasCache`(터미널 간 아틀라스 공유), `CursorBlinkStateManager`, `DevicePixelObserver`, `renderLayer/LinkRenderLayer`, `common/buffer/CellData`·`BufferLine`, 서비스 구현 전부.
+가져오지 않은 것: `WebglRenderer`·`WebglAddon`(oxtty 오케스트레이터로 대체), `CharAtlasCache`(터미널 간 아틀라스 공유), `CursorBlinkStateManager`, `DevicePixelObserver`, `renderLayer/LinkRenderLayer`, `common/buffer/CellData`·`BufferLine`, 서비스 구현 전부.
 
 ## 스텁 목록 (인터페이스별 구현한 멤버 수)
 
@@ -83,11 +83,11 @@ node bench/check.mjs                   # 증분 렌더와 처음부터 그린 �
 | 스텁 | 원본 | 남긴 멤버 | 구현 |
 |---|---|---|---|
 | `IOptionsService` | `common/services/Services.ts` (396줄, 서비스 22개) | 1: `rawOptions`(`rescaleOverlappingGlyphs`, `fontSize`) | 상수 객체 |
-| `IUnicodeService` | 〃 | 2: `wcwidth`, `getStringCellWidth` | oxty `WIDE` 비트로 채운 집합 조회(유니코드 폭 표를 가져오지 않음) |
+| `IUnicodeService` | 〃 | 2: `wcwidth`, `getStringCellWidth` | oxtty `WIDE` 비트로 채운 집합 조회(유니코드 폭 표를 가져오지 않음) |
 | `IDecorationService` | 〃 | 1: `forEachDecorationAtCell` | 빈 함수 |
 | `IThemeService` | `browser/services/Services.ts` (158줄, 서비스 9개) | 2: `colors`, `onChangeColors` | `DEFAULT_ANSI_COLORS`로 만든 색 집합 |
 | `ICoreBrowserService` | 〃 | 2: `dpr`, `isFocused` | 상수 |
-| `@xterm/xterm` `Terminal` | `typings/xterm.d.ts` (1957줄) | 4: `cols`, `rows`, `element`, `buffer.active.viewportY` | oxty `Terminal`을 감싼 객체 |
+| `@xterm/xterm` `Terminal` | `typings/xterm.d.ts` (1957줄) | 4: `cols`, `rows`, `element`, `buffer.active.viewportY` | oxtty `Terminal`을 감싼 객체 |
 | `@xterm/xterm` `ITerminalOptions` | 〃 | 10개 필드(타입만) | `terminalOptions` |
 | `browser/Types` `ITerminal` | `browser/Types.ts` | 2: `rows`, `buffers.active.ydisp` | 타입만. 선택 갱신(`SelectionRenderModel.update`)에서만 쓰고, 이 스파이크는 부르지 않음 |
 | `vs/base/common/lifecycle` | 801줄 (VS Code 유래) | `Disposable`(`_register`, `dispose`), `toDisposable` | 23줄 |
@@ -95,11 +95,11 @@ node bench/check.mjs                   # 증분 렌더와 처음부터 그린 �
 
 `ICharSizeService`는 스텁하지 않았다. 대신 렌더러 안에서 xterm.js `TextMetricsMeasureStrategy`와 같은 방식으로 글자 크기를 잰다(10줄).
 
-## oxty 셀 → xterm 렌더 모델 변환 (`src/convert.ts`, `src/OxtyWebglRenderer.ts`)
+## oxtty 셀 → xterm 렌더 모델 변환 (`src/convert.ts`, `src/OxttyWebglRenderer.ts`)
 
-xterm.js는 `BufferLine.loadCell(x, CellData)`로 셀을 읽고, `CellColorResolver.resolve()`로 색을 확정해 렌더 모델(`Uint32Array`, 셀당 `[code, bg, fg, ext]`)에 넣는다. 스파이크는 `loadCell` 자리에 `OxtyCellData.load()`를 넣고, 나머지(`CellColorResolver` → `RenderModel` → `GlyphRenderer.updateCell` → `RectangleRenderer.updateBackgrounds`)는 원본을 그대로 탄다.
+xterm.js는 `BufferLine.loadCell(x, CellData)`로 셀을 읽고, `CellColorResolver.resolve()`로 색을 확정해 렌더 모델(`Uint32Array`, 셀당 `[code, bg, fg, ext]`)에 넣는다. 스파이크는 `loadCell` 자리에 `OxttyCellData.load()`를 넣고, 나머지(`CellColorResolver` → `RenderModel` → `GlyphRenderer.updateCell` → `RectangleRenderer.updateBackgrounds`)는 원본을 그대로 탄다.
 
-- **색**: oxty 상위 바이트 종류 → xterm `Attributes.CM_*`
+- **색**: oxtty 상위 바이트 종류 → xterm `Attributes.CM_*`
   - RGB → `CM_RGB | 0xRRGGBB`
   - INDEXED n → n < 16이면 `CM_P16 | n`, 아니면 `CM_P256 | n`
   - NAMED 0~15 → `CM_P16 | n`, Dim 계열(259~266) → `CM_P16 | (n-259)`, 256·257·258·267·268(기본 전경·배경·커서 등) → `CM_DEFAULT`
@@ -109,14 +109,14 @@ xterm.js는 `BufferLine.loadCell(x, CellData)`로 셀을 읽고, `CellColorResol
 - **커서**: `cursor()`의 line·col·visible로 블록 커서 칸 색을 덮어쓴다(`WebglRenderer._updateModel`과 같은 방식).
 - **갱신**: `takeDamage()`가 `full`이면 전체를, 아니면 `lines`만 모델에 반영한다. 모델에 이미 같은 값이 있는 칸은 건너뛴다(원본 로직 그대로).
 
-## oxty 엔진 API에 부족했던 점
+## oxtty 엔진 API에 부족했던 점
 
 > 1~4는 모두 반영했다(엔진 API 공백 메우기 커밋). 밑줄 색·결합 문자는 `rowExtras()`, 커서 모양은 `cursor().shape/blink`, 번들은 `external` 없이 빌드된다. 스크린샷에서 curly 밑줄이 빨강, 커서가 막대로 그려진다. 스크롤 이동(`takeDamage().scroll`)이 오면 xterm.js처럼 모든 줄을 다시 보되, 지우지 않으므로 렌더 모델과 같은 칸은 건너뛴다. 글리프 정점에 칸 위치가 들어 있어서 줄을 통째로 옮기지는 않는다.
 
 1. **밑줄 색(SGR 58) 없음**: 셀 4워드에 자리가 없어 curly 밑줄이 전경색으로 그려진다. PRD D2의 행별 확장 테이블이 필요하다. xterm 쪽은 `ext` 하위 26비트(`underlineColor`)에 바로 넣으면 된다.
 2. **결합 문자 문자열을 칸마다 따로 가져와야 함**: `rowCells`에는 `COMBINING` 플래그만 있고, 문자열은 `cellText(y, x)`를 칸마다 불러야 한다. 결합 문자가 많은 줄(데바나가리·한글 자모 조합 등)에서는 wasm 경계 호출이 칸 수만큼 늘어난다. 행 단위로 받는 API(예: 열 → 문자열 확장 테이블)가 있으면 좋다. D2 확장 테이블에 함께 넣는 것을 권한다.
 3. **커서 모양 없음**: `cursor()`는 line·col·visible만 준다. DECSCUSR(블록·밑줄·막대, 깜빡임)를 그리려면 모양과 깜빡임 여부가 필요하다. 지금은 블록으로 고정했다.
-4. **패키징**: `packages/oxty/src/index.js`의 `await import('node:fs/promises')` 분기 때문에 esbuild로 브라우저 번들을 만들 때 `external: ['node:*']`를 지정해야 했다. 다른 번들러도 경고나 오류를 낼 수 있다.
+4. **패키징**: `packages/oxtty/src/index.js`의 `await import('node:fs/promises')` 분기 때문에 esbuild로 브라우저 번들을 만들 때 `external: ['node:*']`를 지정해야 했다. 다른 번들러도 경고나 오류를 낼 수 있다.
 
 넓은 글자 폭은 `WIDE`·`WIDE_SPACER` 비트로 충분했다. 아틀라스가 쓰던 xterm.js 유니코드 폭 판정을 엔진 결과로 바꿀 수 있었다.
 

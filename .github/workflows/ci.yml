@@ -16,9 +16,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - run: cargo fmt -p oxty -p oxty-wasm -p oxty-node --check  # src/vt는 #[rustfmt::skip]
+      - run: cargo fmt -p oxtty -p oxtty-wasm -p oxtty-node --check  # src/vt는 #[rustfmt::skip]
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test -p oxty
+      - run: cargo test -p oxtty
 
   wasm:
     runs-on: ubuntu-latest
@@ -32,9 +32,9 @@ jobs:
           node-version: 22
       - run: bash scripts/build-wasm.sh
       - run: npm ci
-        working-directory: packages/oxty
+        working-directory: packages/oxtty
       - run: npm test
-        working-directory: packages/oxty
+        working-directory: packages/oxtty
 
   node-binding:
     strategy:
@@ -49,4 +49,4 @@ jobs:
           node-version: 22
       - run: bash scripts/build-node.sh
         shell: bash
-      - run: node --test crates/oxty-node/test.cjs
+      - run: node --test crates/oxtty-node/test.cjs

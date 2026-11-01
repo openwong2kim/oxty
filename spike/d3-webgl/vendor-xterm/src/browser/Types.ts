@@ -1,16 +1,16 @@
-// oxty 차용: xterm.js src/browser/Types.ts @ f447274f430fd22513f6adbf9862d19524471c04 (태그 6.0.0), MIT 라이선스 — vendor-xterm/LICENSE
-// 발췌(원문 줄만 잘라 옴, 아래 oxty 주석 참고)
+// oxtty 차용: xterm.js src/browser/Types.ts @ f447274f430fd22513f6adbf9862d19524471c04 (태그 6.0.0), MIT 라이선스 — vendor-xterm/LICENSE
+// 발췌(원문 줄만 잘라 옴, 아래 oxtty 주석 참고)
 /**
  * Copyright (c) 2017 The xterm.js authors. All rights reserved.
  * @license MIT
  */
 
-// oxty 발췌: IColorSet·ReadonlyColorSet·IColorContrastCache·DEFAULT_ANSI_COLORS만 원문 그대로 잘라 왔다(줄 58-88, 180-226).
+// oxtty 발췌: IColorSet·ReadonlyColorSet·IColorContrastCache·DEFAULT_ANSI_COLORS만 원문 그대로 잘라 왔다(줄 58-88, 180-226).
 // ITerminal은 xterm.js 내부 터미널(수십 개 멤버) 대신 SelectionRenderModel이 쓰는 멤버만 둔 스텁이다.
 import { IColor } from 'common/Types';
 import { channels, css } from 'common/Color';
 
-// [oxty 스텁] 원본은 InternalPassthroughApis & ICoreTerminal을 확장한다.
+// [oxtty 스텁] 원본은 InternalPassthroughApis & ICoreTerminal을 확장한다.
 export interface ITerminal {
   rows: number;
   buffers: { active: { ydisp: number } };

@@ -1,6 +1,6 @@
 // 증분 렌더(청크마다 render) 결과와 같은 바이트를 한 번에 넣고 처음 그린 결과의 픽셀을 비교한다.
-import { init, Terminal as Oxty } from '../../../packages/oxty/dist/index.js';
-import { OxtyWebglRenderer } from '../src/OxtyWebglRenderer';
+import { init, Terminal as Oxtty } from '../../../packages/oxtty/dist/index.js';
+import { OxttyWebglRenderer } from '../src/OxttyWebglRenderer';
 const enc = new TextEncoder();
 function stream(): Uint8Array {
   const parts: string[] = [];
@@ -16,23 +16,23 @@ function pixels(c: HTMLCanvasElement): Uint8ClampedArray {
   const g = x.getContext('2d')!; g.drawImage(c, 0, 0); return g.getImageData(0, 0, c.width, c.height).data;
 }
 async function main() {
-  await init(new URL('./oxty.wasm', location.href));
+  await init(new URL('./oxtty.wasm', location.href));
   const s = stream();
   const results: Record<string, number> = {};
   for (const chunk of [7, 333, 4096, 32768]) {
-    const a = new Oxty({ cols: 120, rows: 40, scrollback: 1000 });
-    const ra = new OxtyWebglRenderer(a as any, document.body, true);
+    const a = new Oxtty({ cols: 120, rows: 40, scrollback: 1000 });
+    const ra = new OxttyWebglRenderer(a as any, document.body, true);
     for (let o = 0; o < s.length; o += chunk) { a.write(s.subarray(o, o + chunk)); ra.render(); }
-    const b = new Oxty({ cols: 120, rows: 40, scrollback: 1000 });
-    const rb = new OxtyWebglRenderer(b as any, document.body, true);
+    const b = new Oxtty({ cols: 120, rows: 40, scrollback: 1000 });
+    const rb = new OxttyWebglRenderer(b as any, document.body, true);
     b.write(s); rb.render();
     const pa = pixels(ra.canvas), pb = pixels(rb.canvas);
     let diff = 0; for (let i = 0; i < pa.length; i++) if (pa[i] !== pb[i]) diff++;
     results[`chunk${chunk}`] = diff;
   }
   // 감도 확인: 한 글자만 달라도 차이가 잡혀야 한다
-  const c = new Oxty({ cols: 120, rows: 40, scrollback: 1000 }), rc = new OxtyWebglRenderer(c as any, document.body, true);
-  const d = new Oxty({ cols: 120, rows: 40, scrollback: 1000 }), rd = new OxtyWebglRenderer(d as any, document.body, true);
+  const c = new Oxtty({ cols: 120, rows: 40, scrollback: 1000 }), rc = new OxttyWebglRenderer(c as any, document.body, true);
+  const d = new Oxtty({ cols: 120, rows: 40, scrollback: 1000 }), rd = new OxttyWebglRenderer(d as any, document.body, true);
   c.write(s); rc.render(); d.write(s); d.write('X'); rd.render();
   const pc = pixels(rc.canvas), pd = pixels(rd.canvas);
   let diff = 0; for (let i = 0; i < pc.length; i++) if (pc[i] !== pd[i]) diff++;

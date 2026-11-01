@@ -1,12 +1,12 @@
 <div align="center">
 
-# oxty — a Rust terminal engine for wasm, Node and native apps
+# oxtty — a Rust terminal engine for wasm, Node and native apps
 
 **Diffed cell by cell against xterm.js. Scrollback at about 100 bytes a line.**
 
 Feed it PTY bytes. It keeps the screen and tells your renderer which rows changed.
 
-[![ci](https://github.com/openwong2kim/oxty/actions/workflows/ci.yml/badge.svg)](https://github.com/openwong2kim/oxty/actions/workflows/ci.yml)
+[![ci](https://github.com/openwong2kim/oxtty/actions/workflows/ci.yml/badge.svg)](https://github.com/openwong2kim/oxtty/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE-APACHE)
 ![rust](https://img.shields.io/badge/rust-1.85%2B-orange)
 ![wasm](https://img.shields.io/badge/wasm-230%20KB%20%C2%B7%2081%20KB%20gzip-654ff0)
@@ -18,7 +18,7 @@ Feed it PTY bytes. It keeps the screen and tells your renderer which rows change
 
 ---
 
-oxty (**ox**ide + **tty**) parses the bytes a program writes to its PTY and
+oxtty (**ox**ide + **tty**) parses the bytes a program writes to its PTY and
 holds everything a terminal knows: characters, colours, cursor, modes and
 scrollback. It does not draw anything. Your renderer asks which rows changed
 and redraws only those.
@@ -31,7 +31,7 @@ and the screen in your browser cannot disagree about what a byte stream means.
 ```mermaid
 flowchart LR
   pty["PTY output"] --> engine
-  subgraph engine["oxty engine"]
+  subgraph engine["oxtty engine"]
     direction TB
     parser["VT parser"] --> screen["screen + scrollback"]
   end
@@ -55,35 +55,35 @@ flowchart LR
   about 100 bytes instead of 1440 in xterm.js. Rows decode on read.
 - **Built for TUIs.** Synchronized output (`CSI ? 2026 h`), used heavily by
   coding agents, is held until the program ends the update.
-- **Checked against xterm.js.** Every fixture is fed to oxty and to
+- **Checked against xterm.js.** Every fixture is fed to oxtty and to
   `@xterm/headless`, and the test fails on any difference that is not listed
   with a reason.
 
 | Where | Package | Notes |
 | --- | --- | --- |
-| Rust | crate [`oxty`](crates/oxty) | the engine |
-| Browser, Electron renderer, Node | npm [`oxty`](packages/oxty) | WebAssembly, no dependencies |
-| Node / Electron main, daemons | [`crates/oxty-node`](crates/oxty-node) | N-API binding, same API |
+| Rust | crate [`oxtty`](crates/oxtty) | the engine |
+| Browser, Electron renderer, Node | npm [`oxtty`](packages/oxtty) | WebAssembly, no dependencies |
+| Node / Electron main, daemons | [`crates/oxtty-node`](crates/oxtty-node) | N-API binding, same API |
 
 ## Measurements
 
 Compared with xterm.js 6.1 betas. Lower is better.
 
 **Browser renderer** — Chrome on an Apple M4, 8 panes of 120×40 with 10,000 lines of
-scrollback, 2 MiB of output per pane fed in chunks per frame; oxty drawn with
+scrollback, 2 MiB of output per pane fed in chunks per frame; oxtty drawn with
 the WebGL spike in [`spike/d3-webgl`](spike/d3-webgl), xterm.js with its WebGL
 addon. Both must end on the same screen hash.
 
-| Workload | oxty renderer RSS | xterm.js renderer RSS |
+| Workload | oxtty renderer RSS | xterm.js renderer RSS |
 | --- | ---: | ---: |
 | Log, 32 KiB chunks | 192 MiB | 350 MiB |
 | Log, 256 KiB chunks | 191 MiB | 356 MiB |
 | TUI (synchronized redraws) | 172 MiB | 183 MiB |
 
 **Buffer memory** — Node, 8 terminals of 120×40 with 10,000 lines of
-scrollback, oxty (wasm) against `@xterm/headless`.
+scrollback, oxtty (wasm) against `@xterm/headless`.
 
-| Output | oxty | xterm.js |
+| Output | oxtty | xterm.js |
 | --- | ---: | ---: |
 | Log lines | 24 MiB | 143 MiB |
 | Hangul lines | 32 MiB | 143 MiB |
@@ -107,9 +107,9 @@ Reproduce the browser numbers with `node bench/run.mjs out.json` in
 ### JavaScript
 
 ```js
-import { init, Terminal, Attr, decodeColor } from 'oxty';
+import { init, Terminal, Attr, decodeColor } from 'oxtty';
 
-await init();                                   // loads oxty.wasm once
+await init();                                   // loads oxtty.wasm once
 const term = new Terminal({ cols: 80, rows: 24, scrollback: 5000, onSyncFlush: draw });
 
 pty.onData((data) => {                          // string or Uint8Array
@@ -136,26 +136,26 @@ function draw() {
 ### Rust
 
 ```rust
-let mut term = oxty::Engine::new(80, 24, 5000);
+let mut term = oxtty::Engine::new(80, 24, 5000);
 term.feed("안녕 \x1b[1;31mworld\x1b[0m\r\n".as_bytes());
 assert_eq!(term.row_text(0).as_deref(), Some("안녕 world"));
 
 match term.take_damage() {
-    oxty::Damage::Full => { /* redraw all rows */ }
-    oxty::Damage::Lines { scroll, lines } => { /* move up `scroll` rows, redraw `lines` */ }
+    oxtty::Damage::Full => { /* redraw all rows */ }
+    oxtty::Damage::Lines { scroll, lines } => { /* move up `scroll` rows, redraw `lines` */ }
 }
 ```
 
 ### Compressed history for your own `Term`
 
-If you drive the built-in Alacritty `Term` yourself instead of `oxty::Engine`,
+If you drive the built-in Alacritty `Term` yourself instead of `oxtty::Engine`,
 `TermHistory` gives it the same compressed scrollback:
 
 ```rust
-use oxty::TermHistory;
-use oxty::vt::event::VoidListener;
-use oxty::vt::term::{test::TermSize, Config, Term};
-use oxty::vt::vte::ansi::{Processor, StdSyncHandler};
+use oxtty::TermHistory;
+use oxtty::vt::event::VoidListener;
+use oxtty::vt::term::{test::TermSize, Config, Term};
+use oxtty::vt::vte::ansi::{Processor, StdSyncHandler};
 
 let config = Config { scrolling_history: TermHistory::RECENT, ..Config::default() };
 let mut term = Term::new(config, &TermSize::new(120, 40), VoidListener);
@@ -171,10 +171,10 @@ live in `history`, above the grid's own history.
 
 ### Installing
 
-oxty is not on crates.io or npm yet. Until then, depend on it from git:
+oxtty is not on crates.io or npm yet. Until then, depend on it from git:
 
 ```toml
-oxty = { git = "https://github.com/openwong2kim/oxty", rev = "<commit>" }
+oxtty = { git = "https://github.com/openwong2kim/oxtty", rev = "<commit>" }
 ```
 
 ## The model
@@ -257,29 +257,29 @@ custom tab stops, cursor shape and OSC 8 links.
 ## xterm.js parity
 
 ```sh
-cd packages/oxty && npm ci && npm test
+cd packages/oxtty && npm ci && npm test
 ```
 
-This feeds [wmux](https://github.com/openwong2kim/wmux)'s 91 fixtures to oxty
+This feeds [wmux](https://github.com/openwong2kim/wmux)'s 91 fixtures to oxtty
 and to `@xterm/headless`, compares the screens cell by cell, and also restores
-each oxty snapshot into xterm.js and compares again. It fails on any
+each oxtty snapshot into xterm.js and compares again. It fails on any
 difference not listed, with a reason, in
-[`known-differences.json`](packages/oxty/test/xterm/known-differences.json).
-`OXTY_SWAP_GATE=1` also fails while an entry is marked `blocksSwap`.
+[`known-differences.json`](packages/oxtty/test/xterm/known-differences.json).
+`OXTTY_SWAP_GATE=1` also fails while an entry is marked `blocksSwap`.
 
 ## Building
 
 ```sh
-cargo test -p oxty                     # engine tests
-bash scripts/build-wasm.sh             # → packages/oxty/dist/oxty.wasm
-(cd packages/oxty && npm test)         # wasm package tests
-bash scripts/build-node.sh             # → crates/oxty-node/oxty.node
-node --test crates/oxty-node/test.cjs  # N-API tests
+cargo test -p oxtty                     # engine tests
+bash scripts/build-wasm.sh             # → packages/oxtty/dist/oxtty.wasm
+(cd packages/oxtty && npm test)         # wasm package tests
+bash scripts/build-node.sh             # → crates/oxtty-node/oxtty.node
+node --test crates/oxtty-node/test.cjs  # N-API tests
 ```
 
 Requires Rust ≥ 1.85 and Node ≥ 18. Format with
-`cargo fmt -p oxty -p oxty-wasm -p oxty-node`. The built-in Alacritty fork
-(`crates/oxty/src/vt`) is `#[rustfmt::skip]` so it stays close to upstream.
+`cargo fmt -p oxtty -p oxtty-wasm -p oxtty-node`. The built-in Alacritty fork
+(`crates/oxtty/src/vt`) is `#[rustfmt::skip]` so it stays close to upstream.
 
 ## Roadmap
 
@@ -287,9 +287,9 @@ Requires Rust ≥ 1.85 and Node ≥ 18. Format with
       synchronized output, ANSI snapshots, wasm and N-API bindings.
 - [x] **Differential tests against xterm.js** — 91 fixtures, two proofs.
 - [ ] **Publish to crates.io and npm.** The patched Alacritty fork is built
-      into the `oxty` crate as `oxty::vt`, so `oxty` publishes as a single crate.
+      into the `oxtty` crate as `oxtty::vt`, so `oxtty` publishes as a single crate.
 - [ ] **xterm.js-compatible facade** — `new Terminal(options)`, `open(element)`,
-      `onData`, `write`, `buffer` over the oxty engine, keeping xterm.js's
+      `onData`, `write`, `buffer` over the oxtty engine, keeping xterm.js's
       WebGL/DOM renderers and addons.
 - [ ] **Input in Rust** — keyboard (including the kitty protocol), mouse and
       paste encoding shared by every host.
@@ -302,10 +302,10 @@ Requires Rust ≥ 1.85 and Node ≥ 18. Format with
 
 The parser and screen model are
 [`alacritty_terminal`](https://github.com/alacritty/alacritty) 0.26, built in
-as `oxty::vt` with small compatibility patches (xterm Unicode 11 widths, resize
+as `oxtty::vt` with small compatibility patches (xterm Unicode 11 widths, resize
 behaviour, blink, and no PTY/event loop so it builds for wasm32) described in
-[`crates/oxty/src/vt/PATCHES.md`](crates/oxty/src/vt/PATCHES.md).
-oxty grew out of the terminal engine in [wmux](https://github.com/openwong2kim/wmux).
+[`crates/oxtty/src/vt/PATCHES.md`](crates/oxtty/src/vt/PATCHES.md).
+oxtty grew out of the terminal engine in [wmux](https://github.com/openwong2kim/wmux).
 See [NOTICE.md](NOTICE.md).
 
 ## License

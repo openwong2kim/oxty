@@ -251,7 +251,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
-name = "oxty"
+name = "oxtty"
 version = "0.0.1"
 dependencies = [
  "base64",
@@ -264,21 +264,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxty-node"
+name = "oxtty-node"
 version = "0.0.1"
 dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "oxty",
+ "oxtty",
 ]
 
 [[package]]
-name = "oxty-wasm"
+name = "oxtty-wasm"
 version = "0.0.1"
 dependencies = [
  "dlmalloc",
- "oxty",
+ "oxtty",
 ]
 
 [[package]]

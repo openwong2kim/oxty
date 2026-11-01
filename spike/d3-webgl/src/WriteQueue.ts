@@ -1,7 +1,7 @@
 // xterm.js WriteBuffer처럼 쓰기를 시간으로 나눈다: 한 작업에 TIME_BUDGET_MS까지만 엔진에 넣고
 // 나머지는 다음 작업(setTimeout 0)으로 미뤄 큰 출력이 프레임을 막지 않게 한다.
 // 엔진은 잘린 UTF-8·이스케이프 시퀀스를 이어 받으므로 바이트 어디서 잘라도 된다.
-import type { Terminal as OxtyTerminal } from '../../../packages/oxty/dist/index.js';
+import type { Terminal as OxttyTerminal } from '../../../packages/oxtty/dist/index.js';
 
 const TIME_BUDGET_MS = 12;
 const SLICE_BYTES = 16 * 1024;
@@ -11,7 +11,7 @@ export class WriteQueue {
   private readonly _done: (() => void)[] = [];
   private _scheduled = false;
 
-  constructor(private readonly _term: OxtyTerminal, private readonly _onWritten: () => void) {}
+  constructor(private readonly _term: OxttyTerminal, private readonly _onWritten: () => void) {}
 
   /** 엔진에 다 들어가면 풀린다. */
   public write(data: Uint8Array): Promise<void> {

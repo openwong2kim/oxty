@@ -1,4 +1,4 @@
-// [oxty 스텁] xterm.js typings/xterm.d.ts(1957줄, 공개 API)를 대체한다.
+// [oxtty 스텁] xterm.js typings/xterm.d.ts(1957줄, 공개 API)를 대체한다.
 // 복사한 렌더러 부품이 타입으로 참조하는 멤버만 둔다. 런타임 코드는 없다.
 
 declare module '@xterm/xterm' {

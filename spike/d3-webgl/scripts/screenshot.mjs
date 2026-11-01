@@ -33,8 +33,8 @@ try {
   });
   page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
   await page.goto(url);
-  await page.waitForFunction(() => window.__oxty?.ready === true, null, { timeout: 15000 });
-  const state = await page.evaluate(() => window.__oxty);
+  await page.waitForFunction(() => window.__oxtty?.ready === true, null, { timeout: 15000 });
+  const state = await page.evaluate(() => window.__oxtty);
   if (state.error) errors.push(`main: ${state.error}`);
   console.log('cursor', JSON.stringify(state.cursor));
   for (const row of state.rows ?? []) console.log('|' + row);

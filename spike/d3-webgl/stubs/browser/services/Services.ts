@@ -1,4 +1,4 @@
-// [oxty 스텁] xterm.js src/browser/services/Services.ts(158줄, 서비스 9개)를 대체한다.
+// [oxtty 스텁] xterm.js src/browser/services/Services.ts(158줄, 서비스 9개)를 대체한다.
 // 복사한 렌더러 부품이 실제로 부르는 멤버만 남긴 인터페이스다. 구현은 src/services.ts.
 import { ReadonlyColorSet } from 'browser/Types';
 import type { Event } from 'vs/base/common/event';

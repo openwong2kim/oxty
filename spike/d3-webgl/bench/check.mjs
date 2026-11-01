@@ -11,7 +11,7 @@ const spike = join(here, '..');
 const dist = join(here, 'dist', 'check');
 await build({ entryPoints: [join(here, 'check.ts')], bundle: true, format: 'esm', target: 'es2022', outfile: join(dist, 'main.js'), tsconfig: join(spike, 'tsconfig.json'), logLevel: 'warning' });
 await writeFile(join(dist, 'index.html'), '<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><body style="margin:0;background:#111"><script type="module" src="./main.js"></script>');
-await copyFile(join(spike, '../../packages/oxty/dist/oxty.wasm'), join(dist, 'oxty.wasm'));
+await copyFile(join(spike, '../../packages/oxtty/dist/oxtty.wasm'), join(dist, 'oxtty.wasm'));
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm' };
 const server = createServer(async (rq, rs) => { const p = normalize(new URL(rq.url, 'http://x').pathname).replace(/^\/+/, '') || 'index.html';
   try { const b = await readFile(join(dist, p)); rs.writeHead(200, { 'content-type': types[extname(p)] ?? 'application/octet-stream' }); rs.end(b); } catch { rs.writeHead(404).end(); } });

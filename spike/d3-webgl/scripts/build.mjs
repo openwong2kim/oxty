@@ -1,4 +1,4 @@
-// 스파이크 빌드: 타입 검사 → esbuild 번들 → dist/에 index.html·oxty.wasm 복사
+// 스파이크 빌드: 타입 검사 → esbuild 번들 → dist/에 index.html·oxtty.wasm 복사
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repo = join(here, '..', '..');
-const oxtyDist = join(repo, 'packages', 'oxty', 'dist');
+const oxttyDist = join(repo, 'packages', 'oxtty', 'dist');
 const dist = join(here, 'dist');
 
-// oxty wasm이 아직 없으면 저장소 빌드 스크립트로 만든다
-if (!existsSync(join(oxtyDist, 'oxty.wasm'))) {
+// oxtty wasm이 아직 없으면 저장소 빌드 스크립트로 만든다
+if (!existsSync(join(oxttyDist, 'oxtty.wasm'))) {
   execFileSync('bash', [join(repo, 'scripts', 'build-wasm.sh')], { stdio: 'inherit' });
 }
 
@@ -29,4 +29,4 @@ await build({
   logLevel: 'info'
 });
 copyFileSync(join(here, 'index.html'), join(dist, 'index.html'));
-copyFileSync(join(oxtyDist, 'oxty.wasm'), join(dist, 'oxty.wasm'));
+copyFileSync(join(oxttyDist, 'oxtty.wasm'), join(dist, 'oxtty.wasm'));

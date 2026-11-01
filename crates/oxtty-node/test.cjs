@@ -1,0 +1,71 @@
+// Run after scripts/build-node.sh:  node --test crates/oxtty-node/test.cjs
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { Terminal } = require(path.join(__dirname, 'oxtty.node'));
+
+test('native binding mirrors the wasm API', () => {
+  const t = new Terminal(80, 24, 100);
+  t.write('안녕 \x1b[31mred\x1b[0m\r\n');
+  t.write(Buffer.from('\x1b[3;7H\x1b[6n\x1b]0;native\x07'));
+  assert.equal(t.rowText(0), '안녕 red');
+  assert.equal(t.cols, 80);
+  assert.equal(t.rows, 24);
+  assert.deepEqual(t.cursor(), { line: 2, col: 6, visible: true, shape: 'block', blink: false });
+  assert.equal(t.takeReplies().toString(), '\x1b[3;7R');
+  assert.equal(t.takeTitle(), 'native');
+  const cells = t.rowCells(0);
+  assert.ok(cells instanceof Uint32Array);
+  assert.equal(cells.length, 80 * 4);
+  assert.equal(String.fromCodePoint(cells[0]), '안');
+  assert.equal(t.rowCells(99), null);
+  assert.equal(t.takeDamage().full, true);
+  t.write('x');
+  const d = t.takeDamage();
+  assert.equal(d.full, false);
+  assert.ok(d.lines.includes(2));
+});
+
+test('native sync flush and scrollback', () => {
+  const t = new Terminal(20, 5);
+  t.write('\x1b[?2026hHELD');
+  assert.equal(t.syncPending(), true);
+  assert.equal(t.rowText(0), '');
+  t.flushSync();
+  assert.equal(t.rowText(0), 'HELD');
+  for (let i = 0; i < 10; i++) t.write(`\r\nline ${i}`);
+  assert.ok(t.historyLength > 0);
+  assert.equal(t.rowText(-t.historyLength), 'HELD');
+});
+
+test('native extras, cursor shape, view scroll', () => {
+  const t = new Terminal(20, 5, 100);
+  t.write('é\x1b[58;5;196mU\x1b[0m\x1b]8;;https://oxtty.dev\x1b\\L\x1b]8;;\x1b\\\x1b[3 q');
+  const extras = t.rowExtras(0);
+  assert.equal(extras[0].text, 'é');
+  assert.equal(extras[1].underlineColor, (2 << 24) | 196);
+  assert.equal(extras[2].hyperlink.uri, 'https://oxtty.dev');
+  assert.deepEqual([t.cursor().shape, t.cursor().blink], ['underline', true]);
+  for (let i = 0; i < 10; i++) t.write('\r\nline');
+  t.scrollDisplay(2);
+  assert.equal(t.displayOffset, 2);
+  t.scrollToBottom();
+  assert.equal(t.displayOffset, 0);
+  t.takeDamage();
+  t.write('\r\nx');
+  assert.deepEqual(t.takeDamage(), { full: false, scroll: 1, lines: [3, 4] });
+});
+
+test('native ansi snapshot', () => {
+  const t = new Terminal(20, 5);
+  t.write('\x1b[44mblue\x1b[0m\x1b[3');
+  const s = t.ansiSnapshot();
+  assert.equal(s.ok, true);
+  assert.ok(Buffer.isBuffer(s.payload));
+  assert.ok(s.payload.toString().endsWith('\x1b[?25h\x1b[3'));
+  const copy = new Terminal(20, 5);
+  copy.write(s.payload);
+  assert.deepEqual(copy.rowCells(0), t.rowCells(0));
+  t.write('m\x1b[2;3r');
+  assert.deepEqual(t.ansiSnapshot(), { ok: false, reason: 'margins' });
+});

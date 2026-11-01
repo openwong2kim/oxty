@@ -16,7 +16,7 @@ const dist = join(here, 'dist');
 await build({ entryPoints: [join(here, 'main.ts')], bundle: true, format: 'esm', target: 'es2022', outfile: join(dist, 'main.js'),
   tsconfig: join(spike, 'tsconfig.json'), minify: true, logLevel: 'warning' });
 await copyFile(join(here, 'index.html'), join(dist, 'index.html'));
-await copyFile(process.env.WASM ?? join(spike, '../../packages/oxty/dist/oxty.wasm'), join(dist, 'oxty.wasm'));
+await copyFile(process.env.WASM ?? join(spike, '../../packages/oxtty/dist/oxtty.wasm'), join(dist, 'oxtty.wasm'));
 await copyFile(join(nm, '@xterm/xterm/css/xterm.css'), join(dist, 'xterm.css'));
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css' };
 // measureUserAgentSpecificMemory는 cross-origin isolated 페이지에서만 동작한다
@@ -73,7 +73,7 @@ const plan = process.env.PLAN ? JSON.parse(process.env.PLAN) : process.argv.incl
 const samples = [];
 try {
   for (const [workload, panes, mib, chunk, repeats, align] of plan) for (let rep = 0; rep < repeats; rep++)
-    for (const backend of rep % 2 ? ['oxty', 'xterm'] : ['xterm', 'oxty']) {
+    for (const backend of rep % 2 ? ['oxtty', 'xterm'] : ['xterm', 'oxtty']) {
       const s = await sample(backend, workload, panes, mib, chunk, align);
       samples.push({ rep, ...s });
       console.error(`${backend} ${workload} ${panes}x${mib}MiB/${chunk}K ${s.elapsedMs.toFixed(0)}ms task ${s.taskMs.toFixed(0)} script ${s.scriptMs.toFixed(0)} p50 ${s.frameP50.toFixed(1)} p95 ${s.frameP95.toFixed(1)} max ${s.frameMax.toFixed(0)} long ${s.longTasks}/${s.longTaskMs.toFixed(0)}ms heap ${s.heapUsedMiB.toFixed(1)} store ${s.backingStoreMiB.toFixed(1)} uasm ${s.uasmMiB.toFixed(1)} rss ${s.rendererRssMiB.toFixed(0)}+gpu ${s.gpuRssMiB.toFixed(0)}MiB hash ${s.hash} err ${s.errors.length}`);

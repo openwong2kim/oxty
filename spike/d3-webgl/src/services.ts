@@ -27,7 +27,7 @@ export class OptionsServiceStub implements IOptionsService {
   public readonly rawOptions = terminalOptions;
 }
 
-// 테마는 렌더러가 정한다(oxty D2). 팔레트는 xterm.js DEFAULT_ANSI_COLORS를 그대로 쓴다.
+// 테마는 렌더러가 정한다(oxtty D2). 팔레트는 xterm.js DEFAULT_ANSI_COLORS를 그대로 쓴다.
 export function createColorSet(): IColorSet {
   const foreground = css.toColor('#d4d4d4');
   const background = css.toColor('#1e1e1e');
@@ -58,7 +58,7 @@ export class ThemeServiceStub implements IThemeService {
   constructor(public readonly colors: ReadonlyColorSet) {}
 }
 
-// 글자 폭은 oxty 엔진이 이미 판정했다(WIDE 비트). 렌더러가 행을 읽으며 넓은 글자를 기록하고,
+// 글자 폭은 oxtty 엔진이 이미 판정했다(WIDE 비트). 렌더러가 행을 읽으며 넓은 글자를 기록하고,
 // 아틀라스는 그 결과를 묻는다. xterm.js의 유니코드 폭 표(UnicodeV6/V11)는 가져오지 않는다.
 export class UnicodeServiceStub implements IUnicodeService {
   private readonly _wide = new Set<number>();

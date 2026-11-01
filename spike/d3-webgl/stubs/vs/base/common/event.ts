@@ -1,4 +1,4 @@
-// [oxty 스텁] xterm.js src/vs/base/common/event.ts(1778줄, VS Code 유래)를 대체한다.
+// [oxtty 스텁] xterm.js src/vs/base/common/event.ts(1778줄, VS Code 유래)를 대체한다.
 // 복사한 렌더러 부품이 쓰는 Emitter(event·fire·dispose)와 Event 타입만 둔다.
 import { IDisposable } from 'vs/base/common/lifecycle';
 

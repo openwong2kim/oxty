@@ -1,10 +1,10 @@
-// oxty 셀([codepoint, fg, bg, attrs]) → xterm.js 렌더 모델 형식(fg·bg·ext 패킹) 변환.
+// oxtty 셀([codepoint, fg, bg, attrs]) → xterm.js 렌더 모델 형식(fg·bg·ext 패킹) 변환.
 // xterm.js의 CellData/BufferLine.loadCell 자리를 대신한다.
 import { AttributeData } from 'common/buffer/AttributeData';
 import { Attributes, BgFlags, FgFlags, UnderlineStyle } from 'common/buffer/Constants';
 import { CharData, ICellData } from 'common/Types';
 
-// oxty 패키지의 Attr·ColorKind와 같은 값(packages/oxty/src/index.js)
+// oxtty 패키지의 Attr·ColorKind와 같은 값(packages/oxtty/src/index.js)
 const enum OxAttr {
   BOLD = 1 << 0, DIM = 1 << 1, ITALIC = 1 << 2, UNDERLINE = 1 << 3,
   DOUBLE_UNDERLINE = 1 << 4, CURLY_UNDERLINE = 1 << 5, DOTTED_UNDERLINE = 1 << 6, DASHED_UNDERLINE = 1 << 7,
@@ -38,8 +38,8 @@ function underlineStyle(attrs: number): UnderlineStyle {
   return UnderlineStyle.NONE;
 }
 
-// CellColorResolver·GlyphRenderer가 읽는 ICellData를 oxty 셀 하나로 채운다.
-export class OxtyCellData extends AttributeData implements ICellData {
+// CellColorResolver·GlyphRenderer가 읽는 ICellData를 oxtty 셀 하나로 채운다.
+export class OxttyCellData extends AttributeData implements ICellData {
   public content = 0;
   public combinedData = '';
   private _code = 0;
@@ -47,7 +47,7 @@ export class OxtyCellData extends AttributeData implements ICellData {
 
   /**
    * @param chars COMBINING 셀이면 엔진의 rowExtras()로 받은 전체 문자열, 아니면 빈 문자열
-   * @param underlineColor rowExtras()의 밑줄 색(oxty 패킹), 없으면 0
+   * @param underlineColor rowExtras()의 밑줄 색(oxtty 패킹), 없으면 0
    */
   public load(codepoint: number, oxFg: number, oxBg: number, attrs: number, chars: string, underlineColor = 0): void {
     if (attrs & OxAttr.WIDE_SPACER) {

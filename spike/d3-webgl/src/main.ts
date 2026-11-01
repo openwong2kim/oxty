@@ -1,14 +1,14 @@
-// D3 스파이크 데모: 하드코딩한 ANSI 문자열을 oxty 엔진에 넣고, 차용한 xterm.js WebGL 부품으로 그린다.
-import { init, Terminal } from '../../../packages/oxty/dist/index.js';
-import { OxtyWebglRenderer } from './OxtyWebglRenderer';
+// D3 스파이크 데모: 하드코딩한 ANSI 문자열을 oxtty 엔진에 넣고, 차용한 xterm.js WebGL 부품으로 그린다.
+import { init, Terminal } from '../../../packages/oxtty/dist/index.js';
+import { OxttyWebglRenderer } from './OxttyWebglRenderer';
 
 const ESC = '\x1b[';
 const reset = `${ESC}0m`;
 
 function demoText(cols: number): string {
   const lines: string[] = [];
-  lines.push(`${ESC}1;38;2;120;200;255moxty D3 spike${reset} — xterm.js 6.0.0 WebGL 부품 + oxty rowCells()`);
-  lines.push('한글: 안녕하세요, 터미널 엔진 oxty입니다. (가나다라마바사)');
+  lines.push(`${ESC}1;38;2;120;200;255moxtty D3 spike${reset} — xterm.js 6.0.0 WebGL 부품 + oxtty rowCells()`);
+  lines.push('한글: 안녕하세요, 터미널 엔진 oxtty입니다. (가나다라마바사)');
 
   // 16색 전경·배경
   let fg16 = '16색 fg: ';
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   term.write(' ');
 
   const container = document.getElementById('terminal')!;
-  const renderer = new OxtyWebglRenderer(term, container);
+  const renderer = new OxttyWebglRenderer(term, container);
   renderer.render();
 
   // 2차 write: takeDamage()의 바뀐 줄만 다시 그리는 경로를 확인한다(이전 커서 줄도 지워져야 한다)
@@ -65,10 +65,10 @@ async function main(): Promise<void> {
   renderer.render();
 
   const c = term.cursor();
-  (window as unknown as { __oxty: unknown }).__oxty = { ready: true, cursor: c, rows: Array.from({ length: term.rows }, (_, y) => term.rowText(y)) };
+  (window as unknown as { __oxtty: unknown }).__oxtty = { ready: true, cursor: c, rows: Array.from({ length: term.rows }, (_, y) => term.rowText(y)) };
 }
 
 main().catch(err => {
   console.error(err);
-  (window as unknown as { __oxty: unknown }).__oxty = { ready: true, error: String(err) };
+  (window as unknown as { __oxtty: unknown }).__oxtty = { ready: true, error: String(err) };
 });
