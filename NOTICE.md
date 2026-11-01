@@ -52,6 +52,14 @@ handling around those encoders) is a Rust port of parts of the same xterm.js
 xterm.js authors, MIT license (`crates/oxtty/LICENSE-XTERM`). Each file names
 its source lines.
 
+## xterm.js search addon
+
+`crates/oxtty-web/src/search.rs` is a Rust port of `@xterm/addon-search`
+0.17.0-beta.330 (xterm.js commit 08829c7eb6279dda2a9e86df901353a1a89858ca):
+`addons/addon-search/src/SearchAddon.ts`, `SearchEngine.ts`, `SearchState.ts`
+and `SearchResultTracker.ts`, Copyright (c) 2017 The xterm.js authors, MIT
+license (`crates/oxtty/LICENSE-XTERM`). The file names its source lines.
+
 ## wmux
 
 The engine integration started in
@@ -59,3 +67,14 @@ The engine integration started in
 `crates/oxtty/src/snapshot.rs` (ANSI snapshot) is ported from its
 `native_serialize.rs` and snapshot host code by the same author, relicensed
 Apache-2.0.
+
+## xterm.js
+
+The WebGL2 renderer in `crates/oxtty-web/src/render` is ported to Rust from
+xterm.js 6.0.0 (commit f447274f430fd22513f6adbf9862d19524471c04) and its WebGL
+addon (texture atlas, glyph and rectangle renderers, colour resolver, custom
+glyphs, cursor blink, colour helpers and theme defaults), and its fit
+(`crates/oxtty-web/src/fit.rs`) from `@xterm/addon-fit` 0.12.0-beta.332; each
+file names its source files and line ranges. MIT license, Copyright (c)
+2017-2019 The xterm.js authors (`packages/oxtty/THIRD_PARTY_NOTICES.md` has the
+full text).

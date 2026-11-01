@@ -90,7 +90,7 @@ test('re-entrancy: listeners write, resize and dispose an opened terminal from i
       assert.deepEqual(facts, ['a', 'b', 'c']);
     });
 
-    await t.test('inside onRender', { todo: 'Terminal.onRender (renderer)' }, async () => {
+    await t.test('inside onRender', async () => {
       const facts = await page.evaluate(async () => {
         const term = new window.ox.Terminal({ cols: 20, rows: 5 });
         term.open(document.body.appendChild(document.createElement('div')));

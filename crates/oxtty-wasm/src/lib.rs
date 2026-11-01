@@ -8,7 +8,8 @@
 use std::cell::RefCell;
 
 use oxtty::{
-    Clipboard, CursorShape, Damage, Engine, HookKind, WindowsPty, WindowsPtyBackend, COLOR_SLOTS,
+    Clipboard, CursorShape, Damage, Engine, HookKind, SnapshotOptions, WindowsPty,
+    WindowsPtyBackend, COLOR_SLOTS,
 };
 
 /// The same dlmalloc std uses on wasm, but growing linear memory in larger
@@ -109,7 +110,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    9
+    10
 }
 
 #[no_mangle]
@@ -490,10 +491,15 @@ pub extern "C" fn oxtty_flush_sync(h: u32) {
 
 /// ANSI snapshot bytes into OUT and their length; on refusal the reason
 /// (`SnapshotRefusal::as_str`) into OUT and minus its length. A payload is
-/// never empty, so 0 means a bad handle.
+/// never empty, so 0 means a bad handle. `scrollback` below 0 keeps all the
+/// history; `flags` bit 0 leaves out the modes (`SnapshotOptions`).
 #[no_mangle]
-pub extern "C" fn oxtty_ansi_snapshot(h: u32) -> i32 {
-    with(h, 0, |t| match t.ansi_snapshot() {
+pub extern "C" fn oxtty_ansi_snapshot(h: u32, scrollback: i32, flags: u32) -> i32 {
+    let options = SnapshotOptions {
+        scrollback: usize::try_from(scrollback).ok(),
+        exclude_modes: flags & 1 != 0,
+    };
+    with(h, 0, |t| match t.ansi_snapshot_with(options) {
         Ok(bytes) => set_out(bytes) as i32,
         Err(why) => -(set_out(why.as_str().as_bytes().to_vec()) as i32),
     })
@@ -576,4 +582,55 @@ pub extern "C" fn oxtty_set_windows_pty(h: u32, backend: u32, build: f64) {
             build_number,
         })
     });
+}
+
+// Search: the host matches over the engine's logical lines (`Engine::search_line`); the engine's own matching
+// stays out of the wasm to keep it small.
+
+/// `Engine::search_line`: the text's character count (-1 outside the buffer), the UTF-8 text in OUT and
+/// `[first row, rows, cell of each character…]` in OUT32.
+#[no_mangle]
+pub extern "C" fn oxtty_search_line(h: u32, line: i32) -> i32 {
+    with(h, -1, |t| {
+        let Some(found) = t.search_line(line) else {
+            return -1;
+        };
+        set_out(found.text.into_bytes());
+        OUT32.with_borrow_mut(|out| {
+            out.clear();
+            out.extend([found.first as u32, found.rows as u32]);
+            out.extend(&found.cells);
+        });
+        found.cells.len() as i32
+    })
+}
+
+// Markers (lines as xterm.js buffer lines: 0 is the oldest history line).
+
+/// `Engine::add_marker`: the marker id, or 0 when `line` is outside the buffer.
+#[no_mangle]
+pub extern "C" fn oxtty_add_marker(h: u32, line: i32) -> u32 {
+    with(h, 0, |t| t.add_marker(line as i64).unwrap_or(0))
+}
+
+/// `Engine::marker_line`, or -1 once the marker is gone.
+#[no_mangle]
+pub extern "C" fn oxtty_marker_line(h: u32, id: u32) -> i32 {
+    with(h, -1, |t| t.marker_line(id).map_or(-1, |line| line as i32))
+}
+
+#[no_mangle]
+pub extern "C" fn oxtty_remove_marker(h: u32, id: u32) {
+    with(h, (), |t| t.remove_marker(id));
+}
+
+/// `Engine::take_disposed_markers`: their count, the ids in OUT32.
+#[no_mangle]
+pub extern "C" fn oxtty_take_disposed_markers(h: u32) -> i32 {
+    with(h, 0, |t| {
+        let ids = t.take_disposed_markers();
+        let n = ids.len() as i32;
+        OUT32.with_borrow_mut(|out| *out = ids);
+        n
+    })
 }

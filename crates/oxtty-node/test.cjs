@@ -123,3 +123,39 @@ test('native windowsPty', () => {
   assert.equal(t.rowWrapped(0), true);
   assert.throws(() => t.setWindowsPty('pty', 1), /unknown backend/);
 });
+
+test('native search mirrors the wasm one (without regex)', () => {
+  const t = new Terminal(10, 3, 50);
+  t.write('foo one\r\n0123456789abcdef\r\n한글foo');
+  assert.deepEqual(t.searchNext('89ab', null, -2, 0), { startLine: 0, startCol: 8, endLine: 1, endCol: 2 });
+  assert.deepEqual(t.searchPrevious('FOO', { caseSensitive: false }, 2, 10), { startLine: 2, startCol: 4, endLine: 2, endCol: 7 });
+  assert.equal(t.searchNext('FOO', { caseSensitive: true }, -2, 0), null);
+  assert.equal(t.searchRows('foo', {}, -2, 2).length, 2);
+  const line = t.searchLine(2);
+  assert.equal(line.text, '한글foo');
+  assert.deepEqual(Array.from(line.cells.slice(0, 3)), [0x80000000, 0x80000002, 4]);
+});
+
+test('native markers', () => {
+  const t = new Terminal(10, 2, 3);
+  t.write('a\r\nb');
+  const id = t.addMarker(1);
+  assert.equal(t.addMarker(5), null);
+  t.write('\r\nc\r\nd');
+  assert.equal(t.markerLine(id), 1);
+  t.write('\r\ne\r\nf\r\ng');
+  assert.equal(t.markerLine(id), null);
+  assert.deepEqual(t.takeDisposedMarkers(), [id]);
+});
+
+test('native ansi snapshot options', () => {
+  const t = new Terminal(10, 2, 50);
+  for (let i = 0; i < 6; i++) t.write(`line ${i}\r\n`);
+  t.write('\x1b[?1h');
+  const cold = t.ansiSnapshot({ scrollback: 0, excludeModes: true });
+  const copy = new Terminal(10, 2, 50);
+  copy.write(cold.payload);
+  assert.equal(copy.historyLength, 0);
+  assert.equal(copy.modes() & 2, 0);
+  assert.ok(t.ansiSnapshot().payload.length > cold.payload.length);
+});

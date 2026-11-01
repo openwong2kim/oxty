@@ -1,4 +1,4 @@
-use oxtty::{Cell, Damage, Engine, SnapshotRefusal};
+use oxtty::{Cell, Damage, Engine, SnapshotOptions, SnapshotRefusal};
 
 fn snapshot(t: &mut Engine) -> Vec<u8> {
     t.ansi_snapshot().expect("snapshot")
@@ -310,4 +310,107 @@ fn leftover_alt_screen_does_not_refuse_after_exit() {
     assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::WideEdge));
     t.feed(b"\x1b[?1049lok");
     assert_round_trip(&mut t, 10);
+}
+
+#[test]
+fn erased_cells_stay_empty_and_typed_spaces_stay_text() {
+    let mut t = Engine::new(8, 4, 20);
+    // Typed trailing spaces, a gap a cursor move left, a coloured erase, and wrapped rows ending and starting with
+    // erased cells (the snapshot has to force those wraps)
+    t.feed(b"ab  \r\nx\x1b[3Cy\r\n\x1b[41mq\x1b[K\x1b[0m\r\n");
+    t.feed(b"12345678\x1b[3D\x1b[3X9z\x1b[1;3H\x1b[5;1H");
+    t.feed(b"abcdefgh\x1b[2X\x1b[1;2H\x1b[5;1H\r\n\x1b[48;5;3m\x1b[K\x1b[0m");
+    let copy = assert_round_trip(&mut t, 20);
+    let mut cells = Vec::new();
+    copy.row_cells(-(copy.history_len() as i32), &mut cells);
+    let typed: Vec<bool> = cells
+        .iter()
+        .map(|c| c.attrs & oxtty::attr::TYPED_SPACE != 0)
+        .collect();
+    assert_eq!(
+        typed,
+        [false, false, true, true, false, false, false, false]
+    );
+}
+
+#[test]
+fn the_blank_a_wide_char_left_comes_back_empty() {
+    let mut t = Engine::new(8, 3, 20);
+    t.feed("abcdefg가".as_bytes());
+    let mut copy = Engine::new(8, 3, 20);
+    copy.feed(&snapshot(&mut t));
+    let mut cells = Vec::new();
+    copy.row_cells(0, &mut cells);
+    // Not the LEADING_WIDE_SPACER mark (xterm.js has none either), but not a typed space
+    assert_eq!(cells[7].attrs, 0);
+    assert!(copy.row_wrapped(0));
+    assert_eq!(copy.row_text(1).unwrap(), "가");
+}
+
+#[test]
+fn alternate_screen_is_cleared_with_the_default_background() {
+    // Entering it clears it with the pen's background (the primary pen is blue here); its erased cells, back to the
+    // default background, are not printed over
+    let mut t = Engine::new(6, 3, 20);
+    t.feed(b"\x1b[44mblue\x1b[?1049h\x1b[0m\x1b[2J\x1b[Halt");
+    assert_round_trip(&mut t, 20);
+}
+
+#[test]
+fn scrollback_option_keeps_the_newest_history_lines() {
+    let mut t = Engine::new(10, 3, 100);
+    for i in 0..8 {
+        t.feed(format!("line {i}\r\n").as_bytes());
+    }
+    let keep = |n| SnapshotOptions {
+        scrollback: Some(n),
+        exclude_modes: false,
+    };
+    let mut copy = Engine::new(10, 3, 100);
+    copy.feed(&t.ansi_snapshot_with(keep(2)).unwrap());
+    assert_eq!(copy.history_len(), 2);
+    assert_eq!(copy.row_text(-2).unwrap(), "line 4");
+    assert_eq!(copy.cursor(), t.cursor());
+    let mut all = Engine::new(10, 3, 100);
+    all.feed(&t.ansi_snapshot_with(keep(1000)).unwrap());
+    assert_same_screen(&t, &all);
+}
+
+#[test]
+fn exclude_modes_paints_only_the_screen() {
+    let mut t = Engine::new(10, 3, 100);
+    for i in 0..5 {
+        t.feed(format!("line {i}\r\n").as_bytes());
+    }
+    // Modes, margins and an unfinished SGR at the end
+    t.feed(b"\x1b[?1h\x1b[?1000h\x1b[?2004h\x1b[?25l\x1b[2;3r\x1b[1;1Hx\x1b[31");
+    assert_eq!(t.ansi_snapshot(), Err(SnapshotRefusal::Margins));
+    let cold = t
+        .ansi_snapshot_with(SnapshotOptions {
+            scrollback: Some(0),
+            exclude_modes: true,
+        })
+        .unwrap();
+    assert!(!cold.ends_with(b"\x1b[31"), "no unfinished sequence");
+    let mut copy = Engine::new(10, 3, 100);
+    copy.feed(&cold);
+    assert_eq!(copy.history_len(), 0);
+    for line in 0..3 {
+        assert_eq!(copy.row_text(line), t.row_text(line));
+    }
+    assert_eq!(
+        copy.modes(),
+        Engine::new(10, 3, 100).modes(),
+        "default modes"
+    );
+    assert!(copy.cursor().visible);
+    // A synchronized update in progress is not carried: the screen from before it is what shows
+    t.feed(b"m\x1b[?2026hheld");
+    let cold = t
+        .ansi_snapshot_with(SnapshotOptions {
+            scrollback: None,
+            exclude_modes: true,
+        })
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&cold).contains("2026"));
 }

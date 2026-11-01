@@ -44,7 +44,7 @@ test('input matches xterm.js', async (t) => {
       assert.ok(shape[0].compositionView && shape[0].focused && shape[0].blurred && shape[0].refocused);
     });
 
-    await t.test('the textarea follows the cursor cell', { todo: 'Terminal.textarea, Terminal.dimensions' }, async () => {
+    await t.test('the textarea follows the cursor cell', async () => {
       await setup(page);
       await write(page, 'abc\r\n de');
       const placed = await page.evaluate(() => {

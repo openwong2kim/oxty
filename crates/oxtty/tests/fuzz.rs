@@ -174,6 +174,18 @@ fn check_bounds(t: &Engine) {
     }
 }
 
+/// A blank with more than a background is printed by a snapshot (an erase keeps only the background), so it comes
+/// back typed.
+fn snapshot_blank(a: &mut Cell, b: &mut Cell) {
+    use oxtty::attr;
+    let printed = a.ch == ' '
+        && a.attrs & (attr::TYPED_SPACE | attr::WIDE_SPACER) == 0
+        && (a.fg != oxtty::color::DEFAULT_FG || a.attrs & !attr::LEADING_WIDE_SPACER != 0);
+    if printed {
+        b.attrs &= !attr::TYPED_SPACE;
+    }
+}
+
 fn check_snapshot(t: &Engine, scrollback: usize) {
     let Ok(payload) = t.ansi_snapshot() else {
         return;
@@ -191,6 +203,9 @@ fn check_snapshot(t: &Engine, scrollback: usize) {
         t.row_cells(line, &mut a);
         copy.row_cells(line, &mut b);
         unmark(&mut a);
+        for (a, b) in a.iter_mut().zip(b.iter_mut()) {
+            snapshot_blank(a, b);
+        }
         if a != b {
             let col = (0..a.len()).find(|&c| a.get(c) != b.get(c)).unwrap_or(0);
             let tail = &payload[payload.len().saturating_sub(48)..];

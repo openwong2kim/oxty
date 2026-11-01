@@ -92,6 +92,10 @@ single crate.
   lines left the top of the scrollback.
 - `Term::resets` counts full resets (RIS), which vte hands to `reset_state`
   without telling the host.
+- `Grid::track_row_moves` / `take_row_moves` log how `scroll_up`,
+  `scroll_down` and `reset_region` moved or cleared screen rows (`RowMove`),
+  off until a host turns it on. `oxtty::Engine` turns it on while it has
+  markers, to keep them on their lines.
 - `Term::set_kitty_keyboard` switches the kitty keyboard protocol at runtime
   and drops its flag stacks, as `set_options` does, without re-sending the
   title or damaging the screen.
@@ -114,6 +118,10 @@ single crate.
 - `term/cell.rs` uses the remaining u16 flag bit for SGR blink; `term/mod.rs`
   retains SGR 5, ignores SGR 6 like xterm, and clears blink on SGR 25/reset.
   This keeps the 24-byte cell layout while allowing ANSI replay to preserve blink.
+- `Flags` is 32 bits (the cell is still 24 bytes) for `Flags::TYPED_SPACE`:
+  printing a space sets it, so a typed space can be told from an erased or
+  never written blank as xterm.js does. The blanks around a wide char and a
+  stored tab never carry it.
 - The PTY and event-loop modules (`tty`, `event_loop`, `sync`, `thread`) and
   their dependencies are removed: the engine only takes bytes, and they do not
   build for `wasm32-unknown-unknown`. `Term`, `Grid` and the parser are

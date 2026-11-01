@@ -263,9 +263,9 @@ impl BufferLine {
         (x >= 0.0 && x.fract() == 0.0 && x < self.len() as f64).then(|| self.cell(x as usize))
     }
 
-    /// Like xterm.js: blank cells are spaces, a wide character covers two columns, and a range that starts on its
-    /// right half gets a space there. Unlike xterm.js, `trimRight` also drops trailing typed spaces (the engine
-    /// does not tell them from erased cells), and columns outside the line are clamped (xterm.js pads them).
+    /// Like xterm.js: erased cells are spaces, `trimRight` drops trailing erased cells (not typed spaces), a wide
+    /// character covers two columns, and a range that starts on its right half gets a space there. Unlike
+    /// xterm.js, columns outside the line are clamped (xterm.js pads them).
     #[wasm_bindgen(js_name = translateToString)]
     pub fn translate_to_string(
         &self,
@@ -314,28 +314,35 @@ impl BufferCell {
         char::from_u32(self.code).filter(|&c| c != '\0')
     }
 
+    /// Erased or never written: an xterm.js empty cell. A space the program printed is text.
     fn is_blank(&self) -> bool {
-        self.text.is_none() && matches!(self.char(), None | Some(' '))
+        self.text.is_none()
+            && match self.char() {
+                None => true,
+                Some(' ') => self.attrs & attr::TYPED_SPACE == 0,
+                Some(_) => false,
+            }
     }
 }
 
 #[wasm_bindgen]
 impl BufferCell {
-    /// The cell text, `''` for the right half of a wide character. An erased cell reads `' '` (xterm.js `''`): the
-    /// engine does not tell it from a typed space.
+    /// The cell text; `''` for an erased cell and the right half of a wide character, like xterm.js.
     #[wasm_bindgen(js_name = getChars)]
     pub fn get_chars(&self) -> String {
         match &self.text {
             Some(text) => text.clone(),
+            None if self.is_blank() => String::new(),
             None => self.char().map(String::from).unwrap_or_default(),
         }
     }
 
-    /// The code point, or the last UTF-16 unit of a cell with combining marks, like xterm.js.
+    /// The code point (0 for an erased cell), or the last UTF-16 unit of a cell with combining marks, like xterm.js.
     #[wasm_bindgen(js_name = getCode)]
     pub fn get_code(&self) -> u32 {
         match &self.text {
             Some(text) => text.encode_utf16().last().map_or(0, u32::from),
+            None if self.is_blank() => 0,
             None => self.char().map_or(0, u32::from),
         }
     }

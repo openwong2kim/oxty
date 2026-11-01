@@ -1,6 +1,22 @@
 //! What the terminal needs from a renderer. The WebGL2 renderer implements it; the terminal owns the frame loop
 //! (`requestAnimationFrame`), the engine and the DOM element the canvas goes into.
+use wasm_bindgen::JsValue;
+
 use crate::engine::Viewport;
+
+mod api;
+mod atlas;
+mod blink;
+mod cell;
+pub mod color;
+mod custom_glyphs;
+mod gl;
+mod glyphs;
+mod gpu;
+mod model;
+pub mod options;
+mod rects;
+pub mod webgl;
 
 /// Colours as CSS strings, named like xterm.js `ITheme`. `None` keeps the default.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -109,6 +125,15 @@ pub struct Size {
     pub height: f64,
 }
 
+/// Where a glyph sits in its cell, in device pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CharSize {
+    pub width: f64,
+    pub height: f64,
+    pub left: f64,
+    pub top: f64,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Dimensions {
     /// CSS pixels of one cell and of the whole canvas.
@@ -117,6 +142,7 @@ pub struct Dimensions {
     /// Device pixels (CSS × devicePixelRatio).
     pub device_cell: Size,
     pub device_canvas: Size,
+    pub device_char: CharSize,
 }
 
 /// Rows a render pass must redraw besides those the engine changed.
@@ -153,4 +179,8 @@ pub trait Renderer {
     fn set_focused(&mut self, focused: bool);
     /// Requests since the last call; the terminal polls this when the renderer wakes it (see the crate docs).
     fn take_requests(&mut self) -> Vec<RendererRequest>;
+    /// Internal state for the tests (`term._rendererDebug()`).
+    fn debug(&self) -> JsValue {
+        JsValue::UNDEFINED
+    }
 }

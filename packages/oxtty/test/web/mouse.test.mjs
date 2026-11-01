@@ -67,13 +67,13 @@ function withTerminals(fn) {
   }, { viewport: { width: 2000, height: 820 } });
 }
 
-test('same cell size as xterm.js, so wheel pixels convert to the same lines', { todo: 'Terminal.dimensions (renderer)' }, async () => {
+test('same cell size as xterm.js, so wheel pixels convert to the same lines', async () => {
   const [oxtty, xterm] = await withTerminals(({ page }) => page.evaluate(() => window.cells()));
   assert.ok(oxtty.width > 0 && oxtty.height > 0);
   assert.equal(oxtty.width, xterm);
 });
 
-test('button reports match xterm.js across protocol × encoding × button × modifier × cell', { todo: 'mouse reports (renderer for cell size)', timeout: 300000 }, async () => {
+test('button reports match xterm.js across protocol × encoding × button × modifier × cell', { timeout: 300000 }, async () => {
   const { mismatches, total, reports } = await withTerminals(async ({ mouse, both, write, take }) => {
     const mismatches = [];
     let total = 0, reports = 0;
@@ -111,7 +111,7 @@ test('button reports match xterm.js across protocol × encoding × button × mod
   assert.deepEqual(mismatches.slice(0, 5), [], `${mismatches.length} of ${total} sequences differ`);
 });
 
-test('wheel reports, arrows and refused wheels match xterm.js', { todo: 'wheel, buffer.active.viewportY, attachCustomWheelEventHandler', timeout: 300000 }, async () => {
+test('wheel reports, arrows and refused wheels match xterm.js', { timeout: 300000 }, async () => {
   // A notch each way, a trackpad-like run that only adds up to a line, a fast flick
   const DELTAS = [-100, 100, -30, -30, 300];
   const CELLS3 = [[5, 5], [96, 99], [230, 40]];
@@ -167,7 +167,7 @@ test('wheel reports, arrows and refused wheels match xterm.js', { todo: 'wheel, 
   assert.deepEqual(mismatches.slice(0, 5), [], `${mismatches.length} of ${total} cases differ`);
 });
 
-test('wheel scrolls the view by the same rows as xterm.js', { todo: 'wheel scrolling, buffer.active.viewportY', timeout: 120000 }, async () => {
+test('wheel scrolls the view by the same rows as xterm.js', { timeout: 120000 }, async () => {
   const STEPS = [
     [-100, 0], [-100, 0], [-53, 0], [-10, 0], [-10, 0], [-10, 0], [-10, 0], [-10, 0], [-7, 0], [-100, ALT], [100, CTRL],
     [100, SHIFT], [-100, SHIFT], [120, 0], [-300, 0], [33, 0], [-1, 0], [5000, 0], [100, 0], [-20000, 0], [-100, 0], [250, ALT],
@@ -208,7 +208,7 @@ test('wheel scrolls the view by the same rows as xterm.js', { todo: 'wheel scrol
   assert.equal(result.synthetic[0], result.synthetic[1], 'line and page wheels');
 });
 
-test('Alt+click moves the cursor like xterm.js (altClickMovesCursor)', { todo: 'options.altClickMovesCursor' }, async () => {
+test('Alt+click moves the cursor like xterm.js (altClickMovesCursor)', async () => {
   const { cases, moved, mismatches } = await withTerminals(async ({ mouse, both, write, take, setOption }) => {
     const mismatches = [];
     let cases = 0, moved = 0;
@@ -246,7 +246,7 @@ test('Alt+click moves the cursor like xterm.js (altClickMovesCursor)', { todo: '
   assert.deepEqual(mismatches, []);
 });
 
-test('mouseEventsRequireAlt reports only Alt clicks, without the Alt bit, like xterm.js', { todo: 'mouse reports, mouseEventsRequireAlt' }, async () => {
+test('mouseEventsRequireAlt reports only Alt clicks, without the Alt bit, like xterm.js', async () => {
   const { mismatches, reports } = await withTerminals(async ({ mouse, wheel, both, write, take, setOption }) => {
     await setOption('mouseEventsRequireAlt', true);
     await write('\x1b[?1002;1006h');

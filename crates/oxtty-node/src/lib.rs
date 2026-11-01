@@ -47,6 +47,16 @@ pub struct CellExtra {
     pub hyperlink: Option<Hyperlink>,
 }
 
+/// What `ansiSnapshot` leaves out, like `@xterm/addon-serialize` options.
+#[napi(object)]
+#[derive(Default)]
+pub struct AnsiSnapshotOptions {
+    /// Keep only the newest this many history lines (0: the screen alone).
+    pub scrollback: Option<u32>,
+    /// Leave out the modes and what continues the output (unfinished sequence, synchronized update).
+    pub exclude_modes: Option<bool>,
+}
+
 /// `{ ok: true, payload }` or `{ ok: false, reason }`.
 #[napi(object)]
 pub struct AnsiSnapshot {
@@ -66,6 +76,49 @@ pub struct Hook {
     pub params: Vec<Vec<u32>>,
     /// OSC: everything after the first `;`. DCS: the payload.
     pub data: Buffer,
+}
+
+/// How the search methods compare text (no regex here: match `searchLine` text with your own).
+#[napi(object)]
+#[derive(Default)]
+pub struct SearchOptions {
+    pub case_sensitive: Option<bool>,
+    pub whole_word: Option<bool>,
+}
+
+/// A match in cells; the end is exclusive and on `endLine`.
+#[napi(object)]
+pub struct SearchMatch {
+    pub start_line: i32,
+    pub start_col: u32,
+    pub end_line: i32,
+    pub end_col: u32,
+}
+
+/// A logical line as search reads it; `cells[i]` is the cell of the i-th character (not UTF-16 unit) of `text`.
+#[napi(object)]
+pub struct SearchLine {
+    pub first: i32,
+    pub rows: u32,
+    pub text: String,
+    pub cells: Uint32Array,
+}
+
+fn search_options(options: Option<SearchOptions>) -> oxtty::SearchOptions {
+    let options = options.unwrap_or_default();
+    oxtty::SearchOptions {
+        case_sensitive: options.case_sensitive.unwrap_or(false),
+        whole_word: options.whole_word.unwrap_or(false),
+    }
+}
+
+fn search_match(m: oxtty::SearchMatch) -> SearchMatch {
+    SearchMatch {
+        start_line: m.start_line,
+        start_col: m.start_col as u32,
+        end_line: m.end_line,
+        end_col: m.end_col as u32,
+    }
 }
 
 #[napi]
@@ -402,10 +455,94 @@ impl Terminal {
         Ok(())
     }
 
+    /// First match starting at or after cell (`line`, `col`), down to the bottom of the screen.
+    #[napi]
+    pub fn search_next(
+        &self,
+        query: String,
+        options: Option<SearchOptions>,
+        line: i32,
+        col: u32,
+    ) -> Option<SearchMatch> {
+        let col = col.min(u16::MAX as u32) as u16;
+        self.inner
+            .search_next(&query, search_options(options), line, col)
+            .map(search_match)
+    }
+
+    /// Last match ending at or before cell (`line`, `col`), up to the top of the history.
+    #[napi]
+    pub fn search_previous(
+        &self,
+        query: String,
+        options: Option<SearchOptions>,
+        line: i32,
+        col: u32,
+    ) -> Option<SearchMatch> {
+        let col = col.min(u16::MAX as u32) as u16;
+        self.inner
+            .search_previous(&query, search_options(options), line, col)
+            .map(search_match)
+    }
+
+    /// Every match in the logical lines rows `first`…`last` belong to, keeping those that touch the rows.
+    #[napi]
+    pub fn search_rows(
+        &self,
+        query: String,
+        options: Option<SearchOptions>,
+        first: i32,
+        last: i32,
+    ) -> Vec<SearchMatch> {
+        let mut found = Vec::new();
+        self.inner
+            .search_rows(&query, search_options(options), first, last, &mut found);
+        found.into_iter().map(search_match).collect()
+    }
+
+    #[napi]
+    pub fn search_line(&self, line: i32) -> Option<SearchLine> {
+        self.inner.search_line(line).map(|l| SearchLine {
+            first: l.first,
+            rows: l.rows as u32,
+            text: l.text,
+            cells: l.cells.into(),
+        })
+    }
+
+    /// Puts a marker on buffer line `line` of the primary screen (0 is the oldest history line); null outside the buffer
+    /// or on the alternate screen.
+    #[napi]
+    pub fn add_marker(&mut self, line: i32) -> Option<u32> {
+        self.inner.add_marker(line as i64)
+    }
+
+    /// The marker's buffer line on the primary screen; null once it is gone.
+    #[napi]
+    pub fn marker_line(&self, id: u32) -> Option<i32> {
+        self.inner.marker_line(id).map(|line| line as i32)
+    }
+
+    #[napi]
+    pub fn remove_marker(&mut self, id: u32) {
+        self.inner.remove_marker(id);
+    }
+
+    /// Markers the engine dropped since the last call (trimmed, cleared, reset).
+    #[napi]
+    pub fn take_disposed_markers(&mut self) -> Vec<u32> {
+        self.inner.take_disposed_markers()
+    }
+
     /// Bytes that rebuild this screen in a fresh xterm.js, or why they cannot.
     #[napi]
-    pub fn ansi_snapshot(&self) -> AnsiSnapshot {
-        match self.inner.ansi_snapshot() {
+    pub fn ansi_snapshot(&self, options: Option<AnsiSnapshotOptions>) -> AnsiSnapshot {
+        let options = options.unwrap_or_default();
+        let options = oxtty::SnapshotOptions {
+            scrollback: options.scrollback.map(|n| n as usize),
+            exclude_modes: options.exclude_modes.unwrap_or(false),
+        };
+        match self.inner.ansi_snapshot_with(options) {
             Ok(bytes) => AnsiSnapshot {
                 ok: true,
                 payload: Some(bytes.into()),

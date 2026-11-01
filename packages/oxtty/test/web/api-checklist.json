@@ -28,32 +28,32 @@
       "reason": "Constructor only: the engine fixes it at creation, a runtime change throws (wmux only reads it)."
     },
     "options.cursorBlink": {
-      "status": "todo",
-      "reason": "Renderer option."
+      "status": "supported",
+      "reason": "Renderer option, get/set at runtime: the renderer times the blink itself while focused (xterm.js 6.0 CursorBlinkStateManager timings)."
     },
     "options.cursorStyle": {
-      "status": "todo",
-      "reason": "Renderer option."
+      "status": "supported",
+      "reason": "Renderer option, get/set at runtime: block, underline or bar (unless the program set one with DECSCUSR), drawn like @xterm/addon-webgl 6.0; cursorInactiveStyle while unfocused."
     },
     "options.fontSize": {
-      "status": "todo",
-      "reason": "Renderer option, get/set at runtime; fires onDimensionsChange when the cell changes."
+      "status": "supported",
+      "reason": "Renderer option, get/set at runtime: re-measures the cell, resizes the screen and fires onDimensionsChange."
     },
     "options.fontFamily": {
-      "status": "todo",
-      "reason": "Renderer option."
+      "status": "supported",
+      "reason": "Renderer option, get/set at runtime: re-measures the cell and rebuilds the glyph atlas; when fonts finish loading the cell is measured again and a loaded fit addon refits."
     },
     "options.theme": {
-      "status": "todo",
-      "reason": "Renderer option; also pushed to the engine (setColors) so OSC 4/10/11/12 queries answer the real colours."
+      "status": "supported",
+      "reason": "Renderer option, get/set at runtime; also pushed to the engine so OSC 4/10/11/12 queries answer the theme colours, also after a change."
     },
     "options.minimumContrastRatio": {
-      "status": "todo",
-      "reason": "Renderer option."
+      "status": "supported",
+      "reason": "Renderer option: foregrounds are adjusted like @xterm/addon-webgl 6.0 (contrast cache per atlas)."
     },
     "options.scrollbar": {
-      "status": "todo",
-      "reason": "Only the width the fit keeps free (xterm.js 14px default); no scrollbar is drawn yet."
+      "status": "supported",
+      "reason": "Only the width FitAddon keeps free (xterm.js 14px default; none without scrollback or with showScrollbar false); no scrollbar is drawn yet."
     },
     "options.allowProposedApi": {
       "status": "supported",
@@ -68,8 +68,8 @@
       "reason": "Drops keys, IME, pastes, mouse reports and replies like xterm.js (CoreService.triggerDataEvent/triggerBinaryEvent); the textarea turns read-only."
     },
     "options.altClickMovesCursor": {
-      "status": "todo",
-      "reason": "Alt+click sends arrow keys to the clicked cell (xterm.js 6.1 moveToCellSequence)."
+      "status": "supported",
+      "reason": "Alt+click sends the arrow keys that walk the cursor to the clicked cell (xterm.js 6.1 moveToCellSequence, ported in crates/oxtty-web/src/input/move_to_cell.rs), at the bottom of the scrollback and while the program takes no clicks."
     },
     "options.vtExtensions.kittyKeyboard": {
       "status": "supported",
@@ -128,16 +128,16 @@
       "reason": "RIS applied at once (scrollback, modes and the pending high surrogate cleared; output a synchronized update holds is applied first); queued writes are parsed afterwards, like xterm.js."
     },
     "Terminal.refresh": {
-      "status": "todo",
-      "reason": "Marks the rows for the next frame."
+      "status": "supported",
+      "reason": "Marks viewport rows for the next frame; onRender reports them, together with the rows the engine changed."
     },
     "Terminal.dispose": {
       "status": "supported",
       "reason": "Drops pending writes without their callbacks, removes the element; safe from any listener."
     },
     "Terminal.loadAddon": {
-      "status": "todo",
-      "reason": "Fit addons are activated; webgl and unicode11 are absorbed; anything else throws."
+      "status": "supported",
+      "reason": "Activates the built-in FitAddon (subclasses included) and SearchAddon; absorbs @xterm/addon-webgl, the built-in WebglAddon and @xterm/addon-unicode11; @xterm/addon-search and @xterm/addon-serialize objects throw naming what replaces them; anything else throws."
     },
     "Terminal.scrollToLine": {
       "status": "supported",
@@ -160,16 +160,16 @@
       "reason": "Engine cols; the last size after dispose."
     },
     "Terminal.dimensions": {
-      "status": "todo",
-      "reason": "Renderer dimensions; replaces the _core._renderService.dimensions workaround."
+      "status": "supported",
+      "reason": "IRenderDimensions from the WebGL renderer (CSS and device cell, canvas), undefined before open(); replaces the _core._renderService.dimensions workaround."
     },
     "Terminal.modes": {
       "status": "supported",
       "reason": "A new object per read from the engine mode bits (X10 mouse included) and syncPending; reverseWraparoundMode and win32InputMode are always false."
     },
     "Terminal.unicode.activeVersion": {
-      "status": "todo",
-      "reason": "Always \"11\" (engine tables); setting another version throws."
+      "status": "supported",
+      "reason": "Always \"11\" (the engine's width tables); setting another version throws."
     },
     "Terminal.focus": {
       "status": "supported",
@@ -216,24 +216,25 @@
       "reason": "Links step."
     },
     "Terminal.registerMarker": {
-      "status": "later",
-      "reason": "Markers need line tracking through scrollback trimming."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/markers.rs on the engine's markers (addMarker/markerLine/takeDisposedMarkers). Unlike xterm.js it returns undefined on the alternate screen and for a line outside the buffer, and ids count per terminal."
     },
     "Terminal.markers": {
-      "status": "later",
-      "reason": "With registerMarker."
+      "status": "supported",
+      "reason": "The live markers, oldest first, [] on the alternate screen; new IMarker objects per read (xterm.js hands out the same ones)."
     },
     "IMarker.id/line/dispose/onDispose": {
-      "status": "later",
-      "reason": "With registerMarker."
+      "status": "supported",
+      "reason": "line and isDisposed ask the engine; onDispose fires after the write that dropped the marker is parsed (before its callback), on dispose(), reset, an engine crash and terminal dispose, like xterm.js.",
+      "exercisedBy": "onDispose"
     },
     "Terminal.onData": {
       "status": "supported",
       "reason": "Engine replies after each parsed write (input arrives with the input module)."
     },
     "Terminal.onBinary": {
-      "status": "todo",
-      "reason": "Fired by default-encoding mouse reports, never by output."
+      "status": "supported",
+      "reason": "Fired by default-encoding mouse reports (bytes above 127 are not UTF-8), never by output; disableStdin drops them like xterm.js triggerBinaryEvent."
     },
     "Terminal.onResize": {
       "status": "supported",
@@ -244,8 +245,8 @@
       "reason": "Fired when the viewport top line changes after output or scrolling."
     },
     "Terminal.onRender": {
-      "status": "todo",
-      "reason": "Rows drawn by each frame."
+      "status": "supported",
+      "reason": "Fires after each frame with the rows drawn: rows the engine changed plus refreshed rows, every row after a full redraw."
     },
     "Terminal.onCursorMove": {
       "status": "supported",
@@ -264,8 +265,8 @@
       "reason": "BEL after each parsed write."
     },
     "Terminal.onDimensionsChange": {
-      "status": "todo",
-      "reason": "Font option changes and renderer-reported changes (late fonts, devicePixelRatio)."
+      "status": "supported",
+      "reason": "Fires when the cell size changes: font options, fonts that finish loading, a devicePixelRatio change."
     },
     "Terminal.onSelectionChange": {
       "status": "todo",
@@ -309,7 +310,7 @@
     },
     "IBufferLine.translateToString": {
       "status": "supported",
-      "reason": "Matches xterm.js except that trimRight also drops trailing typed spaces (the engine does not tell them from erased cells) and out-of-range columns are clamped (xterm.js pads them with spaces)."
+      "reason": "Matches xterm.js (typed spaces are text, erased cells are trimmed: the engine marks typed spaces with Attr.TYPED_SPACE) except that out-of-range columns are clamped (xterm.js pads them with spaces)."
     },
     "IBufferLine.isWrapped": {
       "status": "supported",
@@ -325,7 +326,7 @@
     },
     "IBufferCell.getChars": {
       "status": "supported",
-      "reason": "As xterm.js, combining marks included, except that an erased cell reads ' ' (xterm.js '')."
+      "reason": "As xterm.js, combining marks included; an erased cell reads '' and a typed space ' ' (Attr.TYPED_SPACE)."
     },
     "IBufferCell.getWidth": {
       "status": "supported",
@@ -336,44 +337,48 @@
       "reason": "Engine DIM attribute; isBold, isItalic, isUnderline, isBlink, isInverse, isInvisible and isStrikethrough too."
     },
     "FitAddon.fit": {
-      "status": "todo",
-      "reason": "Built-in FitAddon export, and @xterm/addon-fit 0.12 works as is (it reads only public members)."
+      "status": "supported",
+      "reason": "Built-in FitAddon export (crates/oxtty-web/src/fit.rs, ported from @xterm/addon-fit 0.12); a loaded one refits by itself when the cell size changes. @xterm/addon-fit itself is not accepted."
     },
     "FitAddon.proposeDimensions": {
-      "status": "todo",
-      "reason": "Same formula as @xterm/addon-fit 0.12."
+      "status": "supported",
+      "reason": "Same formula as @xterm/addon-fit 0.12 (parent size less the element padding and the scrollbar width); undefined before open()."
     },
     "FitAddon.dispose": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "Detaches the addon; proposeDimensions() is undefined afterwards."
     },
     "FitAddon subclass (FixedGeometryFitAddon)": {
-      "status": "todo",
-      "reason": "super.fit/proposeDimensions work; its _core._renderService.dimensions read moves to terminal.dimensions."
+      "status": "supported",
+      "reason": "Extends the built-in FitAddon: loadAddon calls its activate (with a handle on the terminal, not the same JS object), super.fit/proposeDimensions work, and the refit after a cell size change calls its own fit. Its _core._renderService.dimensions read moves to terminal.dimensions.",
+      "exercisedBy": "class FixedGeometryFitAddon extends T\\.FitAddon"
     },
     "WebglAddon (load)": {
-      "status": "todo",
-      "reason": "Absorbed: the WebGL renderer is built in, the addon is never activated."
+      "status": "supported",
+      "reason": "Absorbed: the WebGL2 renderer is built in (one context per page); @xterm/addon-webgl and the built-in WebglAddon are never activated.",
+      "exercisedBy": "loadAddon\\((?:webgl|new T\\.WebglAddon\\(\\))"
     },
     "WebglAddon.onContextLoss": {
-      "status": "todo",
-      "reason": "Absorbed; never fires because the renderer restores a lost context itself."
+      "status": "supported",
+      "reason": "Absorbed; never fires because the renderer restores or replaces a lost context itself."
     },
     "WebglAddon.dispose": {
-      "status": "todo",
+      "status": "supported",
       "reason": "Absorbed; no-op (there is no DOM renderer to fall back to)."
     },
     "WebglAddon.clearTextureAtlas": {
-      "status": "todo",
-      "reason": "Absorbed; full redraw."
+      "status": "supported",
+      "reason": "Absorbed; redraws the terminal in full."
     },
     "Unicode11Addon (load)": {
-      "status": "todo",
-      "reason": "Absorbed: activate() is run against a stand-in that only has unicode.register and must register version 11."
+      "status": "supported",
+      "reason": "Absorbed: activate() runs against a stand-in that has only unicode.register and must register version 11.",
+      "exercisedBy": "loadAddon\\(new Unicode11Addon\\(\\)\\)"
     },
     "SearchAddon.findNext/findPrevious/clearDecorations": {
-      "status": "later",
-      "reason": "Search moves into the engine; loadAddon throws until then."
+      "status": "supported",
+      "reason": "crates/oxtty-web/src/search.rs, a port of @xterm/addon-search 0.17.0-beta.330 over the engine's searchLine (JS string methods and RegExp, no matcher in the wasm): same matches, selection and scrolling, quirks included; decorations go to the renderer's \"search\" highlight layer (no overview ruler). Loaded with activate() until loadAddon accepts it; the selected match is kept by the addon until the selection module exists.",
+      "exercisedBy": "findPrevious"
     },
     "SerializeAddon.serialize": {
       "status": "unsupported",
@@ -388,12 +393,12 @@
       "reason": "PRD §10 open question; loadAddon throws."
     },
     "_core._renderService.dimensions": {
-      "status": "todo",
-      "reason": "Use terminal.dimensions."
+      "status": "unsupported",
+      "reason": "There is no _core; read terminal.dimensions."
     },
     "_core._charSizeService.measure/onCharSizeChange": {
-      "status": "todo",
-      "reason": "Use onDimensionsChange; a loaded fit addon refits by itself (charSizeRefit goes away)."
+      "status": "unsupported",
+      "reason": "There is no _core; use onDimensionsChange, and a loaded fit addon refits by itself (charSizeRefit goes away)."
     },
     "_core._renderService.setRenderer/handleResize, _core._createRenderer, _core._store": {
       "status": "unsupported",
@@ -426,24 +431,27 @@
       "reason": "With the image addon."
     },
     "DOM .xterm": {
-      "status": "todo",
-      "reason": "Root element classes terminal xterm."
+      "status": "supported",
+      "reason": "Built by open().",
+      "exercisedBy": "\\.terminal\\.xterm|\\.xterm-screen"
     },
     "DOM .xterm-screen": {
-      "status": "todo",
-      "reason": "Holds the canvas, sized to it."
+      "status": "supported",
+      "reason": "Built by open(); sized to the canvas.",
+      "exercisedBy": "\\.xterm-screen"
     },
     "DOM .xterm-helpers": {
       "status": "supported",
-      "reason": "Built by open() inside .xterm-screen; holds the textarea and the composition view."
+      "reason": "Built by open() inside .xterm-screen; holds the textarea and the composition view.",
+      "exercisedBy": "xterm-helpers"
     },
     "DOM .xterm-helper-textarea": {
       "status": "supported",
       "reason": "Built like xterm.js (class, aria and autocomplete attributes, tabindex 0, read-only with disableStdin); placed on the cursor cell after frames that move the cursor, once the renderer gives a cell size."
     },
     "DOM .composition-view": {
-      "status": "todo",
-      "reason": "The copied CompositionHelper fills it while composing and places it at the cursor (style.left/top)."
+      "status": "supported",
+      "reason": "The ported CompositionHelper fills it while composing (between LRM marks) and places it at the cursor (style.left/top) with the textarea under it, on every frame and once more a task later."
     },
     "DOM .xterm-scrollable-element .scrollbar": {
       "status": "later",
@@ -454,8 +462,9 @@
       "reason": "open() injects its own styles; drop the import."
     },
     "Element reparenting (park and re-append)": {
-      "status": "todo",
-      "reason": "The element can be moved; open() again also moves it."
+      "status": "supported",
+      "reason": "open() again with another parent moves the element; the renderer keeps drawing.",
+      "exercisedBy": "park and re-append"
     },
     "Synthetic mouse events on .xterm-screen": {
       "status": "todo",

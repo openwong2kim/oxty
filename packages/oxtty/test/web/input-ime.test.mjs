@@ -60,7 +60,7 @@ test('IME input matches xterm.js', async (t) => {
     await page.waitForFunction(() => window.ready);
     const session = await cdp(page);
 
-    await t.test('Chrome IME: only committed text is sent, the preedit shows at the cursor', { todo: 'Terminal.dimensions (renderer)' }, async () => {
+    await t.test('Chrome IME: only committed text is sent, the preedit shows at the cursor', { todo: TODO }, async () => {
       await page.evaluate(() => window.api.setup());
       await page.evaluate(() => window.api.write('ab'));
       const results = {};

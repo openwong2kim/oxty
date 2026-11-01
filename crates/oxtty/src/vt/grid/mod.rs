@@ -165,6 +165,22 @@ pub struct Grid<T> {
     /// oxtty: history rows held outside the grid, above its own, during a resize.
     #[cfg_attr(feature = "serde", serde(skip))]
     history_above: Option<Arc<Mutex<dyn HistoryAbove<T>>>>,
+
+    /// oxtty: how screen rows moved or were cleared since the last `take_row_moves`; `None` while not tracked.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    row_moves: Option<Vec<RowMove>>,
+}
+
+/// oxtty: one way the grid moved or cleared screen rows, for a host that follows lines (markers).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RowMove {
+    /// The rows of `region` moved up by `positions`; the top ones went into the history when `history` is set
+    /// (the rows below the region then stay where they are on screen), else they were dropped.
+    Up { region: Range<Line>, positions: usize, history: bool },
+    /// The rows of `region` moved down by `positions`; the bottom ones were dropped.
+    Down { region: Range<Line>, positions: usize },
+    /// The rows were cleared.
+    Reset { start: Line, end: Line },
 }
 
 /// oxtty: receives the rows a full history drops, oldest first, so they can
@@ -226,6 +242,25 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             scrolled_lines: 0,
             history_entered: 0,
             history_above: None,
+            row_moves: None,
+        }
+    }
+
+    /// oxtty: starts or stops logging how screen rows move (`take_row_moves`).
+    pub fn track_row_moves(&mut self, on: bool) {
+        if on != self.row_moves.is_some() {
+            self.row_moves = on.then(Vec::new);
+        }
+    }
+
+    /// oxtty: the row moves logged since the last call, oldest first.
+    pub fn take_row_moves(&mut self) -> Vec<RowMove> {
+        self.row_moves.as_mut().map(mem::take).unwrap_or_default()
+    }
+
+    fn log_row_move(&mut self, row_move: RowMove) {
+        if let Some(moves) = &mut self.row_moves {
+            moves.push(row_move);
         }
     }
 
@@ -343,6 +378,8 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.log_row_move(RowMove::Down { region: region.clone(), positions });
+
         // When rotating the entire region, just reset everything.
         if region.end - region.start <= positions {
             for i in (region.start.0..region.end.0).map(Line::from) {
@@ -404,6 +441,8 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.log_row_move(RowMove::Up { region: region.clone(), positions, history: region.start == 0 });
+
         // When rotating the entire region with fixed lines at the top, just reset everything.
         if region.end - region.start <= positions && region.start != 0 {
             for i in (region.start.0..region.end.0).map(Line::from) {
@@ -536,6 +575,10 @@ impl<T> Grid<T> {
 
         debug_assert!(start < self.screen_lines() as i32);
         debug_assert!(end <= self.screen_lines() as i32);
+
+        if let Some(moves) = &mut self.row_moves {
+            moves.push(RowMove::Reset { start, end });
+        }
 
         for line in (start.0..end.0).map(Line::from) {
             self.raw[line].reset(&self.cursor.template);

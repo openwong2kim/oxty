@@ -331,3 +331,71 @@ test('windowsPty: the conpty wrapping heuristic, and no setting is no heuristic'
   assert.equal(t.rowWrapped(2), false);
   t.dispose();
 });
+
+test('search: plain and regex over scrollback, wrapped rows and wide characters', () => {
+  const t = new Terminal({ cols: 10, rows: 3, scrollback: 50 });
+  // Rows -4 'foo one', -3/-2 '0123456789' 'abcdef' (wrapped), -1 '한글foo', 0/1 'Foo_x (foo' ')' (wrapped), 2 'last'
+  t.write('foo one\r\n0123456789abcdef\r\n한글foo\r\nFoo_x (foo)\r\nlast');
+  assert.equal(t.historyLength, 4);
+  const at = (m) => m && [m.startLine, m.startCol, m.endLine, m.endCol];
+  assert.deepEqual(at(t.searchNext('foo')), [-4, 0, -4, 3]);
+  assert.deepEqual(at(t.searchNext('foo', {}, -4, 3)), [-1, 4, -1, 7]);
+  assert.deepEqual(at(t.searchNext('89ab')), [-3, 8, -2, 2], 'a match across a soft wrap');
+  assert.deepEqual(at(t.searchNext('foo', { caseSensitive: true }, 0, 0)), [0, 7, 0, 10]);
+  assert.deepEqual(at(t.searchNext('foo', { wholeWord: true }, 0, 0)), [0, 7, 0, 10], '_ is a word character');
+  assert.deepEqual(at(t.searchPrevious('foo')), [0, 7, 0, 10]);
+  assert.deepEqual(at(t.searchPrevious('foo', {}, -1, 4)), [-4, 0, -4, 3]);
+  assert.equal(t.searchNext(''), null);
+  // Regex runs in JS over the same text, with the same cells
+  assert.deepEqual(at(t.searchNext('글f.o', { regex: true })), [-1, 2, -1, 7]);
+  assert.deepEqual(at(t.searchNext('[0-9]+[a-f]+', { regex: true })), [-3, 0, -2, 6]);
+  assert.deepEqual(at(t.searchPrevious('FOO', { regex: true }, 0, 0)), [-1, 4, -1, 7]);
+  assert.deepEqual(t.searchRows('foo', { regex: true }, 0, 1).map(at), [[0, 0, 0, 3], [0, 7, 0, 10]]);
+  assert.deepEqual(t.searchRows('foo', { regex: true }, 1, 1), [], 'only matches on the rows asked for');
+  assert.deepEqual(t.searchRows('foo', {}, -4, 2).map(at), t.searchRows('foo', { regex: true }, -4, 2).map(at));
+  const line = t.searchLine(-1);
+  assert.deepEqual([line.first, line.rows, line.text], [-1, 1, '한글foo']);
+  assert.deepEqual(Array.from(line.cells.slice(0, 3)), [0x80000000, 0x80000002, 4]);
+  assert.equal(t.searchLine(3), null);
+  t.dispose();
+});
+
+test('markers follow their line into the scrollback and are reported when dropped', () => {
+  const t = new Terminal({ cols: 10, rows: 2, scrollback: 3 });
+  t.write('a\r\nb');
+  const id = t.addMarker(1);
+  assert.ok(id > 0);
+  assert.equal(t.addMarker(5), 0, 'outside the buffer');
+  t.write('\r\nc\r\nd');
+  assert.equal(t.markerLine(id), 1);
+  assert.equal(t.rowText(t.markerLine(id) - t.historyLength), 'b');
+  assert.deepEqual(t.takeDisposedMarkers(), []);
+  t.write('\r\ne\r\nf\r\ng');
+  assert.equal(t.markerLine(id), -1);
+  assert.deepEqual(t.takeDisposedMarkers(), [id]);
+  const other = t.addMarker(0);
+  t.removeMarker(other);
+  t.write('\x1bc');
+  assert.deepEqual(t.takeDisposedMarkers(), [], 'removed by the host, not reported');
+  t.dispose();
+});
+
+test('ansi snapshot options: the newest history lines only, and the screen without modes', () => {
+  const t = new Terminal({ cols: 10, rows: 2, scrollback: 50 });
+  for (let i = 0; i < 6; i++) t.write(`line ${i}\r\n`);
+  t.write('\x1b[?1h\x1b[?1000h\x1b[?25l\x1b[31');
+  const replay = (s) => {
+    assert.equal(s.ok, true);
+    const copy = new Terminal({ cols: 10, rows: 2, scrollback: 50 });
+    copy.write(s.payload);
+    return copy;
+  };
+  const two = replay(t.ansiSnapshot({ scrollback: 2 }));
+  assert.deepEqual([two.historyLength, two.rowText(-2), two.modes()], [2, 'line 3', t.modes()]);
+  const cold = replay(t.ansiSnapshot({ scrollback: 0, excludeModes: true }));
+  assert.deepEqual([cold.historyLength, cold.rowText(0), cold.rowText(1)], [0, t.rowText(0), t.rowText(1)]);
+  assert.equal(cold.modes(), new Terminal({ cols: 10, rows: 2 }).modes());
+  assert.equal(new TextDecoder().decode(t.ansiSnapshot({ excludeModes: true }).payload).endsWith('\x1b[31'), false);
+  assert.equal(new TextDecoder().decode(t.ansiSnapshot().payload).endsWith('\x1b[31'), true);
+  t.dispose();
+});

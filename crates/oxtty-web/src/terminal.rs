@@ -81,6 +81,7 @@ pub(crate) struct Emitters {
     pub cursor_move: Rc<Emitter>,
     pub buffer_change: Rc<Emitter>,
     pub user_input: Rc<Emitter>,
+    pub dimensions_change: Rc<Emitter>,
 }
 
 /// What the engine looked like after the last change, to fire `onScroll`/`onCursorMove` on differences.
@@ -98,6 +99,7 @@ pub(crate) struct Shared {
     pub core: RefCell<Core>,
     pub events: Emitters,
     pub input: crate::input::Input,
+    pub markers: RefCell<crate::markers::Markers>,
     state: Cell<State>,
     /// Serialises OSC 52 reads so each answers the oldest pending read.
     clipboard_reads: RefCell<Promise>,
@@ -173,6 +175,7 @@ impl Terminal {
             }),
             events: Emitters::default(),
             input: Default::default(),
+            markers: RefCell::default(),
             state: Cell::new(State::default()),
             clipboard_reads: RefCell::new(Promise::resolve(&JsValue::UNDEFINED)),
             drain_timer: RefCell::new(None),
@@ -184,6 +187,7 @@ impl Terminal {
         shared.apply_clipboard();
         shared.apply_windows_pty();
         crate::input::init(&shared);
+        shared.apply_theme();
         shared.state.set(shared.read_state());
         Ok(Terminal { shared })
     }
@@ -278,6 +282,7 @@ impl Terminal {
         core.view.invalidate();
         core.dirty = Dirty::All;
         drop(core);
+        self.shared.create_renderer()?;
         self.shared.schedule_frame();
         Ok(())
     }
@@ -329,6 +334,7 @@ impl Terminal {
             // Hook: selection drops on row changes.
         }
         crate::input::after_resize(&self.shared);
+        self.shared.sync_screen_size();
         let size = Object::new();
         Reflect::set(&size, &"cols".into(), &self.cols().into())?;
         Reflect::set(&size, &"rows".into(), &self.rows().into())?;
@@ -375,6 +381,7 @@ impl Terminal {
         core.screen = None;
         core.view.engine().dispose();
         drop(core);
+        crate::markers::drop_all(&self.shared);
         self.shared.drain_timer.borrow_mut().take();
         self.shared.frame.borrow_mut().take();
         self.shared.options_proxy.borrow_mut().take();
@@ -391,6 +398,7 @@ impl Terminal {
             &e.cursor_move,
             &e.buffer_change,
             &e.user_input,
+            &e.dimensions_change,
         ] {
             emitter.clear();
         }
@@ -492,6 +500,7 @@ impl Shared {
         for selection in events.clipboard_reads {
             self.queue_clipboard_read(&clipboard, selection);
         }
+        crate::markers::sync(self);
     }
 
     /// Reads are answered in order, each with the oldest pending read of its selection; a failed read answers "".
@@ -550,6 +559,7 @@ impl Shared {
         }
         // Hook: theme (engine colours, renderer), renderer options, input, mouse and accessibility options.
         crate::input::set_option(self, key);
+        self.apply_renderer_option(key);
         Ok(())
     }
 
@@ -587,6 +597,7 @@ impl Shared {
         let (old, new) = (self.state.get(), self.read_state());
         self.state.set(new);
         // Hook: selection syncs.
+        crate::markers::sync(self);
         if new.alternate != old.alternate && self.events.buffer_change.has_listeners() {
             let buffer = crate::buffer::active(self);
             self.events.buffer_change.fire(&[&buffer.into()]);
@@ -619,6 +630,7 @@ impl Shared {
             core.dirty = Dirty::All;
             // Hook: selection drops.
         }
+        crate::markers::drop_all(self);
         self.after_change();
     }
 
@@ -637,6 +649,7 @@ impl Shared {
     }
 
     fn render_frame(self: &Rc<Self>) {
+        self.handle_renderer_requests();
         let rows = {
             let mut core = self.core.borrow_mut();
             if core.disposed || core.element.is_none() {
