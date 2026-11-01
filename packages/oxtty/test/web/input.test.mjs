@@ -191,16 +191,22 @@ test('input matches xterm.js', async (t) => {
       assert.deepEqual(typed, ['\x1b[1;1R', 'p', 'a']);
     });
 
-    await t.test('keys, pastes, mouse and focus reports right after the write that changed the modes use them, like xterm.js', async () => {
+    await t.test('keys, keypad mode, pastes, mouse and focus reports right after the write that changed the modes use them, like xterm.js', async () => {
       await setup(page, { vtExtensions: { kittyKeyboard: true } });
       // Each step writes to a terminal and acts in the same task the write callback resolves in: no frame between.
       const sent = await page.evaluate(async () => {
         const key = (t, init) => t.textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+        const keypad = [];
         const steps = [
           ['\x1b[>1u', (t) => key(t, { key: ' ', code: 'Space', keyCode: 32, which: 32 })],
           ['', (t) => key(t, { key: 'Escape', code: 'Escape', keyCode: 27, which: 27 })],
           ['\x1b[<u\x1b[?1h', (t) => key(t, { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38, which: 38 })],
-          ['\x1b[?1l\x1b[?2004h', (t) => t.paste('p')],
+          // DECKPAM: the mode reads set at once; like xterm.js it changes no key (NumpadEnter stays CR).
+          ['\x1b[?1l\x1b=', (t) => {
+            keypad.push(t.modes.applicationKeypadMode);
+            key(t, { key: 'Enter', code: 'NumpadEnter', keyCode: 13, which: 13, location: 3 });
+          }],
+          ['\x1b>\x1b[?2004h', (t) => (keypad.push(t.modes.applicationKeypadMode), t.paste('p'))],
           ['\x1b[?2004l\x1b[?1000h\x1b[?1006h', (t) => {
             const screen = t.element.querySelector('.xterm-screen');
             const { left, top } = screen.getBoundingClientRect();
@@ -217,10 +223,11 @@ test('input matches xterm.js', async (t) => {
           }
           out.push(window.api.take());
         }
-        return out;
+        return { out, keypad };
       });
-      for (const { ox, xt } of sent) assert.deepEqual(ox, xt);
-      assert.deepEqual(sent.map(({ ox }) => ox), [[' '], ['\x1b[27u'], ['\x1bOA'], ['\x1b[200~p\x1b[201~'], ['\x1b[<0;1;1M'], ['\x1b[O', '\x1b[I', '\x1b[O']]);
+      assert.deepEqual(sent.keypad, [true, true, false, false]);
+      for (const { ox, xt } of sent.out) assert.deepEqual(ox, xt);
+      assert.deepEqual(sent.out.map(({ ox }) => ox), [[' '], ['\x1b[27u'], ['\x1bOA'], ['\r'], ['\x1b[200~p\x1b[201~'], ['\x1b[<0;1;1M'], ['\x1b[O', '\x1b[I', '\x1b[O']]);
     });
 
     await t.test('input() sends its data as if typed, or as is with wasUserInput false, like xterm.js', async () => {
