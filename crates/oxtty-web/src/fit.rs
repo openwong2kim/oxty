@@ -6,12 +6,14 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use js_sys::{Function, Object, Proxy, Reflect};
+use js_sys::{Array, Function, Object, Proxy, Reflect, WeakRef};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CssStyleDeclaration, Element};
 
+use crate::emitter::Disposable;
 use crate::engine::get;
+use crate::render::Dirty;
 use crate::terminal::{Shared, Terminal};
 
 const MINIMUM_COLS: f64 = 2.0;
@@ -30,11 +32,20 @@ export interface ITerminalAddon {
 struct FitState {
     id: u32,
     terminal: RefCell<Weak<Shared>>,
+    /// The JS object `loadAddon` got, weakly (it owns this state): a refit calls its `fit`, which a subclass may
+    /// override.
+    addon: RefCell<Option<WeakRef>>,
 }
 
 thread_local! {
     static ADDONS: RefCell<Vec<Weak<FitState>>> = const { RefCell::new(Vec::new()) };
     static NEXT_ID: Cell<u32> = const { Cell::new(1) };
+    /// `activate`/`dispose` and `onContextLoss` of an absorbed WebGL addon. They live as long as the page; the GC owns
+    /// the closures (`into_js_value`).
+    static WEBGL_NOOP: JsValue = Closure::<dyn Fn()>::new(|| {}).into_js_value();
+    static WEBGL_ON_CONTEXT_LOSS: JsValue =
+        Closure::<dyn Fn(JsValue) -> JsValue>::new(|_listener: JsValue| Disposable::new(|| {}).into())
+            .into_js_value();
 }
 
 /// Sizes the terminal to its element's parent, like `@xterm/addon-fit`.
@@ -56,6 +67,7 @@ impl FitAddon {
         let state = Rc::new(FitState {
             id: NEXT_ID.with(|n| n.replace(n.get() + 1)),
             terminal: RefCell::new(Weak::new()),
+            addon: RefCell::new(None),
         });
         ADDONS.with(|a| a.borrow_mut().push(Rc::downgrade(&state)));
         FitAddon { state }
@@ -190,10 +202,112 @@ pub(crate) fn refit(shared: &Rc<Shared>) {
             .collect()
     });
     for state in loaded {
-        if let Err(error) = state.fit() {
+        let addon = state.addon.borrow().as_ref().and_then(|a| a.deref());
+        let result = match addon.map(|a| (get(&a, "fit").dyn_into::<Function>(), a)) {
+            Some((Ok(fit), addon)) => fit.call0(&addon).map(drop),
+            _ => state.fit(),
+        };
+        if let Err(error) = result {
             web_sys::console::error_1(&error);
         }
     }
+}
+
+/// `@xterm/addon-webgl`, built in: the terminal already draws with WebGL2 (one context per page) and restores a lost
+/// context by itself. Loading this addon, or `@xterm/addon-webgl` itself, only keeps code written for xterm.js working.
+#[wasm_bindgen]
+pub struct WebglAddon;
+
+#[wasm_bindgen]
+impl WebglAddon {
+    /// `preserveDrawingBuffer` is ignored: the renderer owns its context.
+    #[wasm_bindgen(constructor)]
+    pub fn new(_preserve_drawing_buffer: Option<bool>) -> WebglAddon {
+        WebglAddon
+    }
+
+    pub fn activate(&self, _terminal: &Terminal) {}
+
+    pub fn dispose(&self) {}
+
+    /// Never fires: the renderer restores or replaces a lost context by itself.
+    #[wasm_bindgen(js_name = onContextLoss)]
+    pub fn on_context_loss(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "() => void")] _listener: JsValue,
+    ) -> Disposable {
+        Disposable::new(|| {})
+    }
+
+    /// Redraws the terminal the addon was loaded into in full (`loadAddon` binds it).
+    #[wasm_bindgen(js_name = clearTextureAtlas)]
+    pub fn clear_texture_atlas(&self) {}
+}
+
+/// `terminal.unicode`: the engine measures widths with the Unicode 11 tables only.
+#[wasm_bindgen]
+pub struct UnicodeHandling;
+
+#[wasm_bindgen]
+impl UnicodeHandling {
+    #[wasm_bindgen(getter, unchecked_return_type = "ReadonlyArray<string>")]
+    pub fn versions(&self) -> Array {
+        Array::of1(&"11".into())
+    }
+
+    /// Always `"11"`; setting another version throws.
+    #[wasm_bindgen(getter, js_name = activeVersion)]
+    pub fn active_version(&self) -> String {
+        "11".into()
+    }
+
+    #[wasm_bindgen(setter, js_name = activeVersion)]
+    pub fn set_active_version(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "string")] version: JsValue,
+    ) -> Result<(), JsValue> {
+        if version.as_string().as_deref() == Some("11") {
+            return Ok(());
+        }
+        Err(js_sys::Error::new(&format!(
+            "oxtty/xterm: the engine uses Unicode 11 widths only, not \"{}\"",
+            version.as_string().unwrap_or_default()
+        ))
+        .into())
+    }
+}
+
+/// An addon with `onContextLoss` and `clearTextureAtlas` (the built-in `WebglAddon` or `@xterm/addon-webgl`) is
+/// never activated: its methods are replaced so that only `clearTextureAtlas` does something, a full redraw of
+/// `shared`. The replacements are GC-owned closures set on the addon object.
+fn absorb_webgl_addon(shared: &Rc<Shared>, addon: &JsValue) -> bool {
+    if !(get(addon, "onContextLoss").is_function() && get(addon, "clearTextureAtlas").is_function())
+    {
+        return false;
+    }
+    let weak = Rc::downgrade(shared);
+    let clear = Closure::<dyn Fn()>::new(move || {
+        let Some(shared) = weak.upgrade() else {
+            return;
+        };
+        {
+            let mut core = shared.core.borrow_mut();
+            if core.disposed {
+                return;
+            }
+            core.dirty = Dirty::All;
+        }
+        shared.schedule_frame();
+    });
+    WEBGL_NOOP.with(|noop| {
+        let _ = Reflect::set(addon, &"activate".into(), noop);
+        let _ = Reflect::set(addon, &"dispose".into(), noop);
+    });
+    WEBGL_ON_CONTEXT_LOSS.with(|f| {
+        let _ = Reflect::set(addon, &"onContextLoss".into(), f);
+    });
+    let _ = Reflect::set(addon, &"clearTextureAtlas".into(), &clear.into_js_value());
+    true
 }
 
 /// True for an addon whose `activate` only registers a Unicode 11 width provider (`@xterm/addon-unicode11`): the
@@ -226,8 +340,15 @@ fn is_unicode11_addon(addon: &JsValue) -> bool {
 
 #[wasm_bindgen]
 impl Terminal {
+    /// The engine measures widths with the Unicode 11 tables only.
+    #[wasm_bindgen(getter)]
+    pub fn unicode(&self) -> UnicodeHandling {
+        UnicodeHandling
+    }
+
     /// Accepts the built-in `FitAddon` (refitted by itself when the cell size changes) and `SearchAddon`, and
-    /// absorbs `@xterm/addon-unicode11`, whose widths the engine already uses. Any other addon throws.
+    /// absorbs `@xterm/addon-webgl` (and the built-in `WebglAddon`) and `@xterm/addon-unicode11`, whose work is
+    /// built in. Any other addon throws.
     #[wasm_bindgen(js_name = loadAddon)]
     pub fn load_addon(
         &self,
@@ -242,62 +363,42 @@ impl Terminal {
             });
             if let Some(state) = state {
                 *state.terminal.borrow_mut() = Rc::downgrade(&self.shared);
+                if let Ok(object) = addon.clone().dyn_into::<Object>() {
+                    *state.addon.borrow_mut() = Some(WeakRef::new(&object));
+                }
+                // A subclass may override `activate`; it gets a handle on this terminal (another JS object).
+                if let Ok(activate) = get(&addon, "activate").dyn_into::<Function>() {
+                    let handle = Terminal {
+                        shared: self.shared.clone(),
+                    };
+                    activate.call1(&addon, &handle.into())?;
+                }
                 return Ok(());
             }
         }
-        if crate::search::load(self, &addon) || is_unicode11_addon(&addon) {
+        if crate::search::load(self, &addon) || absorb_webgl_addon(&self.shared, &addon) {
             return Ok(());
         }
-        let has = |key: &str| get(&addon, key).is_function();
-        // @xterm/addon-webgl: the WebGL renderer is built in and restores a lost context itself, so the addon is
-        // never activated (its own onContextLoss and dispose still work).
-        if has("onContextLoss") && has("clearTextureAtlas") {
+        if get(&addon, "findNext").is_function() {
+            return Err(js_sys::Error::new(
+                "oxtty/xterm: @xterm/addon-search is built in; load this package's SearchAddon instead",
+            )
+            .into());
+        }
+        if get(&addon, "serialize").is_function() {
+            return Err(js_sys::Error::new(
+                "oxtty/xterm: @xterm/addon-serialize is not supported; use terminal.ansiSnapshot()",
+            )
+            .into());
+        }
+        if is_unicode11_addon(&addon) {
             return Ok(());
         }
-        let message = if has("findNext") {
-            "oxtty/xterm: @xterm/addon-search is not supported; load the built-in SearchAddon from oxtty/xterm".to_string()
-        } else if has("serialize") {
-            "oxtty/xterm: @xterm/addon-serialize is not supported; use terminal.ansiSnapshot()"
-                .to_string()
-        } else {
-            let name = get(&get(&addon, "constructor"), "name")
-                .as_string()
-                .unwrap_or_default();
-            format!("oxtty/xterm: unsupported addon {name}; only the built-in FitAddon and SearchAddon, @xterm/addon-webgl and @xterm/addon-unicode11 can be loaded")
-        };
-        Err(js_sys::Error::new(&message).into())
-    }
-
-    /// xterm.js `term.unicode`: the engine measures with Unicode 11 widths only.
-    #[wasm_bindgen(getter)]
-    pub fn unicode(&self) -> Unicode {
-        Unicode
-    }
-}
-
-/// `term.unicode`.
-#[wasm_bindgen]
-pub struct Unicode;
-
-#[wasm_bindgen]
-impl Unicode {
-    #[wasm_bindgen(getter)]
-    pub fn versions(&self) -> Vec<String> {
-        vec!["11".into()]
-    }
-
-    #[wasm_bindgen(getter, js_name = activeVersion)]
-    pub fn active_version(&self) -> String {
-        "11".into()
-    }
-
-    #[wasm_bindgen(setter, js_name = activeVersion)]
-    pub fn set_active_version(&self, version: String) -> Result<(), JsValue> {
-        if version == "11" {
-            return Ok(());
-        }
+        let name = get(&get(&addon, "constructor"), "name")
+            .as_string()
+            .unwrap_or_default();
         Err(js_sys::Error::new(&format!(
-            "oxtty/xterm: the engine uses Unicode 11 widths only, not \"{version}\""
+            "oxtty/xterm: unsupported addon {name}; only the built-in FitAddon, SearchAddon and WebglAddon, @xterm/addon-webgl and @xterm/addon-unicode11 can be loaded"
         ))
         .into())
     }

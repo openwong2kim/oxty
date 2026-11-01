@@ -72,7 +72,7 @@ test('titles and bells become events', async () => {
   t.dispose();
 });
 
-test('colour queries answer with the theme, also after it changes at runtime', { todo: 'options.theme' }, async () => {
+test('colour queries answer with the theme, also after it changes at runtime', async () => {
   const t = new m.Terminal({ theme: { foreground: '#123456' } });
   const data = collect(t, 'onData');
   await write(t, '\x1b]10;?\x07\x1b]11;?\x07');

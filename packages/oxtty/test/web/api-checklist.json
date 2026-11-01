@@ -29,31 +29,31 @@
     },
     "options.cursorBlink": {
       "status": "supported",
-      "reason": "Renderer cursor blink, timed by the renderer."
+      "reason": "Renderer option, get/set at runtime: the renderer times the blink itself while focused (xterm.js 6.0 CursorBlinkStateManager timings)."
     },
     "options.cursorStyle": {
       "status": "supported",
-      "reason": "Renderer cursor style (block, underline, bar) unless the program set one with DECSCUSR."
+      "reason": "Renderer option, get/set at runtime: block, underline or bar (unless the program set one with DECSCUSR), drawn like @xterm/addon-webgl 6.0; cursorInactiveStyle while unfocused."
     },
     "options.fontSize": {
       "status": "supported",
-      "reason": "Renderer re-measures and rebuilds the shared atlas for the new font key."
+      "reason": "Renderer option, get/set at runtime: re-measures the cell, resizes the screen and fires onDimensionsChange."
     },
     "options.fontFamily": {
       "status": "supported",
-      "reason": "Renderer re-measures; glyphs rasterised with Canvas2D fillText (browser font fallback like xterm.js)."
+      "reason": "Renderer option, get/set at runtime: re-measures the cell and rebuilds the glyph atlas; when fonts finish loading the cell is measured again and a loaded fit addon refits."
     },
     "options.theme": {
       "status": "supported",
-      "reason": "Renderer colours and the engine's OSC 4/10/11/12 answers (setColors)."
+      "reason": "Renderer option, get/set at runtime; also pushed to the engine so OSC 4/10/11/12 queries answer the theme colours, also after a change."
     },
     "options.minimumContrastRatio": {
       "status": "supported",
-      "reason": "Renderer contrast adjustment ported from xterm.js 6.0."
+      "reason": "Renderer option: foregrounds are adjusted like @xterm/addon-webgl 6.0 (contrast cache per atlas)."
     },
     "options.scrollbar": {
-      "status": "todo",
-      "reason": "Only the width the fit keeps free (xterm.js 14px default); no scrollbar is drawn yet."
+      "status": "supported",
+      "reason": "Only the width FitAddon keeps free (xterm.js 14px default; none without scrollback or with showScrollbar false); no scrollbar is drawn yet."
     },
     "options.allowProposedApi": {
       "status": "supported",
@@ -129,7 +129,7 @@
     },
     "Terminal.refresh": {
       "status": "supported",
-      "reason": "Redraws viewport rows start…end on the next frame."
+      "reason": "Marks viewport rows for the next frame; onRender reports them, together with the rows the engine changed."
     },
     "Terminal.dispose": {
       "status": "supported",
@@ -137,7 +137,7 @@
     },
     "Terminal.loadAddon": {
       "status": "supported",
-      "reason": "Built-in FitAddon and SearchAddon; @xterm/addon-webgl and @xterm/addon-unicode11 are absorbed (the renderer and the Unicode 11 widths are built in); other addons throw a clear error."
+      "reason": "Activates the built-in FitAddon (subclasses included) and SearchAddon; absorbs @xterm/addon-webgl, the built-in WebglAddon and @xterm/addon-unicode11; @xterm/addon-search and @xterm/addon-serialize objects throw naming what replaces them; anything else throws."
     },
     "Terminal.scrollToLine": {
       "status": "supported",
@@ -161,7 +161,7 @@
     },
     "Terminal.dimensions": {
       "status": "supported",
-      "reason": "CSS and device cell/canvas sizes from the WebGL2 renderer, undefined before open()."
+      "reason": "IRenderDimensions from the WebGL renderer (CSS and device cell, canvas), undefined before open(); replaces the _core._renderService.dimensions workaround."
     },
     "Terminal.modes": {
       "status": "supported",
@@ -169,7 +169,7 @@
     },
     "Terminal.unicode.activeVersion": {
       "status": "supported",
-      "reason": "Always '11' (engine widths); setting another version throws."
+      "reason": "Always \"11\" (the engine's width tables); setting another version throws."
     },
     "Terminal.focus": {
       "status": "todo",
@@ -246,7 +246,7 @@
     },
     "Terminal.onRender": {
       "status": "supported",
-      "reason": "Fired after each frame with the redrawn viewport rows."
+      "reason": "Fires after each frame with the rows drawn: rows the engine changed plus refreshed rows, every row after a full redraw."
     },
     "Terminal.onCursorMove": {
       "status": "supported",
@@ -266,7 +266,7 @@
     },
     "Terminal.onDimensionsChange": {
       "status": "supported",
-      "reason": "Fired when the cell size changes (fonts loaded, devicePixelRatio, font options)."
+      "reason": "Fires when the cell size changes: font options, fonts that finish loading, a devicePixelRatio change."
     },
     "Terminal.onSelectionChange": {
       "status": "todo",
@@ -338,43 +338,42 @@
     },
     "FitAddon.fit": {
       "status": "supported",
-      "reason": "Port of @xterm/addon-fit: resizes to the parent element."
+      "reason": "Built-in FitAddon export (crates/oxtty-web/src/fit.rs, ported from @xterm/addon-fit 0.12); a loaded one refits by itself when the cell size changes. @xterm/addon-fit itself is not accepted."
     },
     "FitAddon.proposeDimensions": {
       "status": "supported",
-      "reason": "Port of @xterm/addon-fit; undefined before open()."
+      "reason": "Same formula as @xterm/addon-fit 0.12 (parent size less the element padding and the scrollbar width); undefined before open()."
     },
     "FitAddon.dispose": {
       "status": "supported",
-      "reason": "Detaches the addon from its terminal."
+      "reason": "Detaches the addon; proposeDimensions() is undefined afterwards."
     },
     "FitAddon subclass (FixedGeometryFitAddon)": {
-      "status": "todo",
-      "reason": "super.fit/proposeDimensions work; its _core._renderService.dimensions read moves to terminal.dimensions."
+      "status": "supported",
+      "reason": "Extends the built-in FitAddon: loadAddon calls its activate (with a handle on the terminal, not the same JS object), super.fit/proposeDimensions work, and the refit after a cell size change calls its own fit. Its _core._renderService.dimensions read moves to terminal.dimensions.",
+      "exercisedBy": "class FixedGeometryFitAddon extends T\\.FitAddon"
     },
     "WebglAddon (load)": {
       "status": "supported",
-      "reason": "Absorbed: the WebGL2 renderer is built in (one shared context per page).",
-      "exercisedBy": "new WebglAddon\\(\\)"
+      "reason": "Absorbed: the WebGL2 renderer is built in (one context per page); @xterm/addon-webgl and the built-in WebglAddon are never activated.",
+      "exercisedBy": "loadAddon\\((?:webgl|new T\\.WebglAddon\\(\\))"
     },
     "WebglAddon.onContextLoss": {
-      "status": "todo",
-      "reason": "The real addon's own event; never fires because the addon is not activated (context loss is handled inside the renderer).",
-      "exercisedBy": "webgl\\.onContextLoss"
+      "status": "supported",
+      "reason": "Absorbed; never fires because the renderer restores or replaces a lost context itself."
     },
     "WebglAddon.dispose": {
-      "status": "todo",
-      "reason": "The real addon's own dispose; harmless because it was never activated.",
-      "exercisedBy": "webgl\\.dispose"
+      "status": "supported",
+      "reason": "Absorbed; no-op (there is no DOM renderer to fall back to)."
     },
     "WebglAddon.clearTextureAtlas": {
-      "status": "todo",
-      "reason": "No-op on the unactivated addon; the shared atlas is managed by the renderer."
+      "status": "supported",
+      "reason": "Absorbed; redraws the terminal in full."
     },
     "Unicode11Addon (load)": {
       "status": "supported",
-      "reason": "Absorbed: the engine measures with the Unicode 11 tables.",
-      "exercisedBy": "new Unicode11Addon\\(\\)"
+      "reason": "Absorbed: activate() runs against a stand-in that has only unicode.register and must register version 11.",
+      "exercisedBy": "loadAddon\\(new Unicode11Addon\\(\\)\\)"
     },
     "SearchAddon.findNext/findPrevious/clearDecorations": {
       "status": "supported",
@@ -394,12 +393,12 @@
       "reason": "PRD §10 open question; loadAddon throws."
     },
     "_core._renderService.dimensions": {
-      "status": "todo",
-      "reason": "Use terminal.dimensions."
+      "status": "unsupported",
+      "reason": "There is no _core; read terminal.dimensions."
     },
     "_core._charSizeService.measure/onCharSizeChange": {
-      "status": "todo",
-      "reason": "Use onDimensionsChange; a loaded fit addon refits by itself (charSizeRefit goes away)."
+      "status": "unsupported",
+      "reason": "There is no _core; use onDimensionsChange, and a loaded fit addon refits by itself (charSizeRefit goes away)."
     },
     "_core._renderService.setRenderer/handleResize, _core._createRenderer, _core._store": {
       "status": "unsupported",
