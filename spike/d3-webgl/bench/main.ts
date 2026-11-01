@@ -1,5 +1,5 @@
-// 렌더러 벤치: 같은 바이트를 xterm.js(+WebGL 애드온) 또는 oxtty(+차용 WebGL 렌더러) 패널 N개에 rAF마다 나눠 넣는다.
-// 끝나면 총 시간, 프레임 간격, 긴 작업, 화면 해시를 window.__bench에 남긴다. 메모리는 run.mjs가 잰다.
+// Renderer bench: splits the same bytes across rAF frames into N panels of xterm.js (+WebGL addon) or oxtty (+borrowed WebGL renderer).
+// When done, leaves total time, frame intervals, long tasks and screen hashes in window.__bench. run.mjs measures memory.
 import { init, Terminal as Oxtty } from '../../../packages/oxtty/dist/index.js';
 import { OxttyWebglRenderer } from '../src/OxttyWebglRenderer';
 import { WriteQueue } from '../src/WriteQueue';
@@ -15,7 +15,7 @@ const PANES = Number(q.get('panes') ?? 8), MIB = Number(q.get('mib') ?? 2), CHUN
 const COLS = 120, ROWS = 40, SCROLLBACK = 10000;
 const enc = new TextEncoder();
 
-// log: wmux 데몬 벤치 producer와 같은 줄. tui: 동기화 출력으로 화면 전체를 다시 그리는 에이전트형 TUI.
+// log: the same lines as the wmux daemon bench producer. tui: an agent-style TUI that redraws the whole screen with synchronized output.
 function makeStream(): Uint8Array {
   const target = MIB * 1048576, parts: string[] = [];
   let size = 0, n = 0;
@@ -50,7 +50,7 @@ function xtermPane(el: HTMLElement): Pane {
   t.open(el); t.loadAddon(new WebglAddon());
   return {
     write: d => new Promise<void>(r => t.write(d, r)),
-    draw: () => {},                       // xterm.js는 자체 rAF에서 그린다
+    draw: () => {},                       // xterm.js draws in its own rAF
     text: () => { const b = t.buffer.active; return Array.from({ length: ROWS }, (_, y) => b.getLine(b.baseY + y)!.translateToString(true)).join('\n'); },
   };
 }
@@ -58,7 +58,7 @@ function oxttyPane(el: HTMLElement): Pane {
   const o = new Oxtty({ cols: COLS, rows: ROWS, scrollback: SCROLLBACK });
   const r = new OxttyWebglRenderer(o as any, el);
   let dirty = false;
-  // xterm.js와 같이 쓰기를 12ms씩 나눠 넣는다
+  // Split writes into 12ms slices, like xterm.js
   const q = new WriteQueue(o as any, () => { dirty = true; });
   return {
     write: d => q.write(d),
@@ -92,7 +92,7 @@ async function main() {
     const tick = (now: number) => {
       frames.push(now - last); last = now;
       if (offset < stream.length) {
-        // align=1: TUI 프로그램처럼 프레임(?2026 블록) 단위로만 끊는다
+        // align=1: cut only at frame (?2026 block) boundaries, like a TUI program
         let end = Math.min(offset + CHUNK, stream.length);
         if (ALIGN && end < stream.length) { const at = lastEsu(stream, offset, end); if (at > offset) end = at; }
         const chunk = stream.subarray(offset, end); offset = end;
@@ -104,7 +104,7 @@ async function main() {
     requestAnimationFrame(tick);
   });
   await Promise.all(pending);
-  // 마지막 바이트까지 그려지도록 두 프레임 더 기다린다
+  // Wait two more frames so the last byte is drawn
   await new Promise<void>(r => requestAnimationFrame(() => { for (const p of panes) p.draw(); requestAnimationFrame(() => r()); }));
   const elapsedMs = performance.now() - start;
 

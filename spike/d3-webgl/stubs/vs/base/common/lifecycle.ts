@@ -1,5 +1,5 @@
-// [oxtty 스텁] xterm.js src/vs/base/common/lifecycle.ts(801줄, VS Code 유래)를 대체한다.
-// 복사한 렌더러 부품이 쓰는 Disposable·toDisposable·IDisposable만 둔다.
+// [oxtty stub] Replaces xterm.js src/vs/base/common/lifecycle.ts (801 lines, from VS Code).
+// Keeps only Disposable, toDisposable and IDisposable that the copied renderer parts use.
 
 export interface IDisposable {
   dispose(): void;

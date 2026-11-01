@@ -1,7 +1,7 @@
-// xterm.js WebglRenderer.ts 자리를 대신하는 얇은 렌더러.
-// 복사한 GlyphRenderer·RectangleRenderer·TextureAtlas·RenderModel·CellColorResolver를 묶고,
-// 버퍼(IBufferLine.loadCell) 대신 oxtty rowCells()로 렌더 모델을 채운다.
-// 범위 밖: 문자 결합(ligature)·링크 레이어·커서 깜빡임·컨텍스트 손실 복구·DPR 변화 감지.
+// A thin renderer that takes the place of xterm.js WebglRenderer.ts.
+// Ties together the copied GlyphRenderer, RectangleRenderer, TextureAtlas, RenderModel and CellColorResolver,
+// and fills the render model from oxtty rowCells() instead of the buffer (IBufferLine.loadCell).
+// Out of scope: character joining (ligatures), the link layer, cursor blinking, context loss recovery, DPR change detection.
 import type { CellExtra, Terminal as OxttyTerminal } from '../../../packages/oxtty/dist/index.js';
 import type { Terminal as XtermTerminalLike } from '@xterm/xterm';
 import { createRenderDimensions } from 'browser/renderer/shared/RendererUtils';
@@ -17,8 +17,8 @@ import { ICharAtlasConfig, IWebGL2RenderingContext } from '../vendor-xterm/addon
 import { OxttyCellData } from './convert';
 import { CoreBrowserServiceStub, createColorSet, DecorationServiceStub, OptionsServiceStub, terminalOptions, ThemeServiceStub, UnicodeServiceStub } from './services';
 
-// xterm.js CharAtlasCache처럼 설정(글꼴·색·DPR)이 같은 렌더러는 글리프 아틀라스를 하나 쓴다.
-// 넓은 글자 기록(UnicodeServiceStub)도 아틀라스에 딸려 함께 쓴다.
+// Like xterm.js CharAtlasCache, renderers with the same config (font, colors, DPR) share one glyph atlas.
+// The wide character record (UnicodeServiceStub) goes with the atlas and is shared too.
 const atlasCache: { config: ICharAtlasConfig; atlas: TextureAtlas; unicode: UnicodeServiceStub }[] = [];
 
 function sharedAtlas(config: ICharAtlasConfig): { atlas: TextureAtlas; unicode: UnicodeServiceStub } {
@@ -52,7 +52,7 @@ export class OxttyWebglRenderer {
   private readonly _glyphs: GlyphRenderer;
   private readonly _atlas: TextureAtlas;
 
-  /** `preserveDrawingBuffer`는 캔버스를 읽어야 할 때만 켠다(버퍼를 하나 더 잡는다). */
+  /** Turn on `preserveDrawingBuffer` only when the canvas needs to be read (it allocates one more buffer). */
   constructor(private readonly _term: OxttyTerminal, container: HTMLElement, preserveDrawingBuffer = false) {
     const dpr = window.devicePixelRatio || 1;
     this._coreBrowser = new CoreBrowserServiceStub(dpr);
@@ -62,7 +62,7 @@ export class OxttyWebglRenderer {
     this._gl = gl as unknown as IWebGL2RenderingContext;
     container.appendChild(this.canvas);
 
-    // 복사한 부품이 xterm.js 공개 Terminal에서 읽는 멤버는 cols·rows·element·buffer.active.viewportY뿐이다
+    // The only members the copied parts read from the xterm.js public Terminal are cols, rows, element and buffer.active.viewportY
     const term = this._term;
     this._view = {
       get cols() { return term.cols; },
@@ -92,7 +92,7 @@ export class OxttyWebglRenderer {
     this._glyphs.setAtlas(this._atlas);
   }
 
-  // xterm.js CharSizeService(TextMetricsMeasureStrategy)와 같은 방식으로 글자 크기를 잰다
+  // Measures the character size the same way as xterm.js CharSizeService (TextMetricsMeasureStrategy)
   private _updateDimensions(dpr: number): void {
     const ctx = new OffscreenCanvas(1, 1).getContext('2d')!;
     ctx.font = `${terminalOptions.fontSize}px ${terminalOptions.fontFamily}`;
@@ -100,7 +100,7 @@ export class OxttyWebglRenderer {
     const charWidth = metrics.width / 32;
     const charHeight = Math.ceil(metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent);
 
-    // 이하 WebglRenderer._updateDimensions와 같은 계산(letterSpacing 0, lineHeight 1)
+    // From here on, the same computation as WebglRenderer._updateDimensions (letterSpacing 0, lineHeight 1)
     const dim = this._dimensions;
     dim.device.char.width = Math.floor(charWidth * dpr);
     dim.device.char.height = Math.ceil(charHeight * dpr);
@@ -116,7 +116,7 @@ export class OxttyWebglRenderer {
     dim.css.cell.width = dim.device.cell.width / dpr;
   }
 
-  /** 엔진 damage를 읽어 바뀐 줄만 모델에 반영하고 그린다. */
+  /** Reads engine damage, applies only the changed lines to the model, and draws. */
   public render(): void {
     const damage = this._term.takeDamage();
     if (this._glyphs.beginFrame()) {
@@ -124,8 +124,8 @@ export class OxttyWebglRenderer {
       this._glyphs.clear();
       this._updateRows(this._allRows());
     } else if (damage.full || damage.scroll > 0) {
-      // 글리프 정점에 칸 위치가 들어 있어 줄을 옮길 수 없다. xterm.js처럼 모든 줄을 다시 보되
-      // 지우지 않으므로 렌더 모델과 같은 칸은 건너뛴다
+      // Glyph vertices contain the cell position, so lines cannot be moved. Revisit every line like xterm.js, but
+      // since nothing is cleared, skip cells equal to the render model
       this._updateRows(this._allRows());
     } else {
       this._updateRows(damage.lines);
@@ -139,7 +139,7 @@ export class OxttyWebglRenderer {
     return Array.from({ length: this._term.rows }, (_, i) => i);
   }
 
-  // WebglRenderer._updateModel에서 결합 문자(joiner)·선택·커서 깜빡임을 뺀 것
+  // WebglRenderer._updateModel minus character joiners, selection and cursor blinking
   private _updateRows(lines: number[]): void {
     const term = this._term;
     const cols = term.cols;
@@ -152,10 +152,10 @@ export class OxttyWebglRenderer {
     this._model.cursor = undefined;
 
     for (const y of lines) {
-      // 복사하지 않는 뷰라 다음 엔진 호출 전까지만 쓴다(프레임마다 줄 배열을 만들지 않게).
+      // A non-copying view, so it is valid only until the next engine call (avoids building a line array every frame).
       let cells = term.rowCellsView(y);
       if (!cells) continue;
-      // 결합 문자·밑줄 색이 있는 줄만 rowExtras()를 한 번 부른다. 그 호출이 뷰를 덮으므로 다시 받는다.
+      // Call rowExtras() once, only for lines with combining characters or underline colors. That call overwrites the view, so fetch it again.
       let extras: Map<number, CellExtra> | undefined;
       for (let x = 0; x < cols; x++) {
         if (cells[x * 4 + 3] & (ATTR_COMBINING | ATTR_UNDERLINE_COLOR)) {
@@ -166,7 +166,7 @@ export class OxttyWebglRenderer {
       }
       this._model.lineLengths[y] = 0;
       for (let x = 0; x < cols; x++) {
-        // 앞 칸의 해석된 배경색(GlyphRenderer가 글리프 왼쪽 잘림을 정할 때 쓴다)
+        // Resolved background color of the previous cell (GlyphRenderer uses it to decide left-side glyph clipping)
         const lastBg = result.bg;
         const o = x * 4;
         const attrs = cells[o + 3];
@@ -179,7 +179,7 @@ export class OxttyWebglRenderer {
         const i = ((y * cols) + x) * RENDER_MODEL_INDICIES_PER_CELL;
         this._colorResolver.resolve(cell, x, y, this._dimensions.device.cell.width);
 
-        // 커서 칸 색 덮어쓰기(블록 커서)
+        // Overwrite the cursor cell colors (block cursor)
         if (cursor.visible && y === cursor.line) {
           if (x === cursorX) {
             this._model.cursor = { x: cursorX, y, width: cell.getWidth(), style: cursor.shape, cursorWidth: 1, dpr: this._coreBrowser.dpr };

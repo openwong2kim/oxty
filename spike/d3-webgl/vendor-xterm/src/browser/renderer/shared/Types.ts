@@ -1,11 +1,11 @@
-// oxtty 차용: xterm.js src/browser/renderer/shared/Types.ts @ f447274f430fd22513f6adbf9862d19524471c04 (태그 6.0.0), MIT 라이선스 — vendor-xterm/LICENSE
-// 발췌(원문 줄만 잘라 옴, 아래 oxtty 주석 참고)
+// Borrowed by oxtty: xterm.js src/browser/renderer/shared/Types.ts @ f447274f430fd22513f6adbf9862d19524471c04 (tag 6.0.0), MIT license — vendor-xterm/LICENSE
+// Excerpt (original lines cut out as is, see the oxtty note below)
 /**
  * Copyright (c) 2017 The xterm.js authors. All rights reserved.
  * @license MIT
  */
 
-// oxtty 발췌: IDimensions·IOffset·IRenderDimensions·ISelectionRenderModel만 원문 그대로 잘라 왔다.
+// oxtty excerpt: only IDimensions, IOffset, IRenderDimensions and ISelectionRenderModel, cut out verbatim.
 import { Terminal } from '@xterm/xterm';
 import { ITerminal } from 'browser/Types';
 

@@ -1,5 +1,5 @@
-// oxtty 차용: xterm.js addons/addon-webgl/src/CustomGlyphs.ts @ f447274f430fd22513f6adbf9862d19524471c04 (태그 6.0.0), MIT 라이선스 — vendor-xterm/LICENSE
-// 원문 그대로(수정 없음)
+// Borrowed by oxtty: xterm.js addons/addon-webgl/src/CustomGlyphs.ts @ f447274f430fd22513f6adbf9862d19524471c04 (tag 6.0.0), MIT license — vendor-xterm/LICENSE
+// Verbatim (unmodified)
 /**
  * Copyright (c) 2021 The xterm.js authors. All rights reserved.
  * @license MIT

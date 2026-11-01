@@ -1,5 +1,5 @@
-// xterm.js 내부 서비스 스텁의 구현. 인터페이스는 stubs/**/Services.ts.
-// 실제 xterm.js 구현(OptionsService·ThemeService·UnicodeService·DecorationService·CoreBrowserService)은 가져오지 않는다.
+// Implementations of the xterm.js internal service stubs. The interfaces are in stubs/**/Services.ts.
+// The real xterm.js implementations (OptionsService, ThemeService, UnicodeService, DecorationService, CoreBrowserService) are not taken.
 import { ICoreBrowserService, IThemeService } from 'browser/services/Services';
 import { IColorSet, ReadonlyColorSet, DEFAULT_ANSI_COLORS } from 'browser/Types';
 import { ColorContrastCache } from 'browser/ColorContrastCache';
@@ -8,7 +8,7 @@ import { IDecorationService, IOptionsService, IUnicodeService } from 'common/ser
 import { Emitter } from 'vs/base/common/event';
 import type { ITerminalOptions } from '@xterm/xterm';
 
-// 렌더러 옵션. xterm.js 기본값을 따르고 글꼴만 바꿨다.
+// Renderer options. Follows the xterm.js defaults, with only the font changed.
 export const terminalOptions: Required<ITerminalOptions> & { rescaleOverlappingGlyphs: boolean } = {
   customGlyphs: true,
   letterSpacing: 0,
@@ -27,7 +27,7 @@ export class OptionsServiceStub implements IOptionsService {
   public readonly rawOptions = terminalOptions;
 }
 
-// 테마는 렌더러가 정한다(oxtty D2). 팔레트는 xterm.js DEFAULT_ANSI_COLORS를 그대로 쓴다.
+// The renderer decides the theme (oxtty D2). The palette is xterm.js DEFAULT_ANSI_COLORS as is.
 export function createColorSet(): IColorSet {
   const foreground = css.toColor('#d4d4d4');
   const background = css.toColor('#1e1e1e');
@@ -58,8 +58,8 @@ export class ThemeServiceStub implements IThemeService {
   constructor(public readonly colors: ReadonlyColorSet) {}
 }
 
-// 글자 폭은 oxtty 엔진이 이미 판정했다(WIDE 비트). 렌더러가 행을 읽으며 넓은 글자를 기록하고,
-// 아틀라스는 그 결과를 묻는다. xterm.js의 유니코드 폭 표(UnicodeV6/V11)는 가져오지 않는다.
+// The oxtty engine has already decided character widths (the WIDE bit). The renderer records wide characters as it reads rows,
+// and the atlas queries that result. The xterm.js Unicode width tables (UnicodeV6/V11) are not taken.
 export class UnicodeServiceStub implements IUnicodeService {
   private readonly _wide = new Set<number>();
 
@@ -76,7 +76,7 @@ export class UnicodeServiceStub implements IUnicodeService {
   }
 }
 
-// 데코레이션 API가 없으므로 아무것도 덮어쓰지 않는다.
+// There is no decoration API, so nothing is overridden.
 export class DecorationServiceStub implements IDecorationService {
   public forEachDecorationAtCell(): void {}
 }
