@@ -72,7 +72,7 @@ test('a loaded FitAddon refits by itself when fonts finish loading', async () =>
   assert.equal(r.proposed, r.after);
 });
 
-test('loadAddon absorbs @xterm/addon-unicode11 and throws for any other addon', async () => {
+test('loadAddon absorbs @xterm/addon-unicode11 and @xterm/addon-webgl and throws for any other addon', async () => {
   const r = await inPage(async () => {
     const { Unicode11Addon } = await import('/node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs');
     const { WebglAddon } = await import('@xterm/addon-webgl');
@@ -96,7 +96,7 @@ test('loadAddon absorbs @xterm/addon-unicode11 and throws for any other addon', 
     return out;
   });
   assert.equal(r.unicode11, null);
-  assert.match(r.search, /unsupported addon SearchAddon; only the built-in FitAddon and SearchAddon and @xterm\/addon-unicode11/);
-  assert.match(r.webgl, /unsupported addon/);
+  assert.match(r.search, /unsupported addon SearchAddon; only the built-in FitAddon and SearchAddon, @xterm\/addon-webgl and @xterm\/addon-unicode11/);
+  assert.equal(r.webgl, null);
   assert.match(r.plain, /unsupported addon/);
 });

@@ -28,28 +28,28 @@
       "reason": "Constructor only: the engine fixes it at creation, a runtime change throws (wmux only reads it)."
     },
     "options.cursorBlink": {
-      "status": "todo",
-      "reason": "Renderer option."
+      "status": "supported",
+      "reason": "Renderer cursor blink, timed by the renderer."
     },
     "options.cursorStyle": {
-      "status": "todo",
-      "reason": "Renderer option."
+      "status": "supported",
+      "reason": "Renderer cursor style (block, underline, bar) unless the program set one with DECSCUSR."
     },
     "options.fontSize": {
-      "status": "todo",
-      "reason": "Renderer option, get/set at runtime; fires onDimensionsChange when the cell changes."
+      "status": "supported",
+      "reason": "Renderer re-measures and rebuilds the shared atlas for the new font key."
     },
     "options.fontFamily": {
-      "status": "todo",
-      "reason": "Renderer option."
+      "status": "supported",
+      "reason": "Renderer re-measures; glyphs rasterised with Canvas2D fillText (browser font fallback like xterm.js)."
     },
     "options.theme": {
-      "status": "todo",
-      "reason": "Renderer option; also pushed to the engine (setColors) so OSC 4/10/11/12 queries answer the real colours."
+      "status": "supported",
+      "reason": "Renderer colours and the engine's OSC 4/10/11/12 answers (setColors)."
     },
     "options.minimumContrastRatio": {
-      "status": "todo",
-      "reason": "Renderer option."
+      "status": "supported",
+      "reason": "Renderer contrast adjustment ported from xterm.js 6.0."
     },
     "options.scrollbar": {
       "status": "todo",
@@ -128,16 +128,16 @@
       "reason": "RIS applied at once (scrollback, modes and the pending high surrogate cleared; output a synchronized update holds is applied first); queued writes are parsed afterwards, like xterm.js."
     },
     "Terminal.refresh": {
-      "status": "todo",
-      "reason": "Marks the rows for the next frame."
+      "status": "supported",
+      "reason": "Redraws viewport rows start…end on the next frame."
     },
     "Terminal.dispose": {
       "status": "supported",
       "reason": "Drops pending writes without their callbacks, removes the element; safe from any listener."
     },
     "Terminal.loadAddon": {
-      "status": "todo",
-      "reason": "Fit addons are activated; webgl and unicode11 are absorbed; anything else throws."
+      "status": "supported",
+      "reason": "Built-in FitAddon and SearchAddon; @xterm/addon-webgl and @xterm/addon-unicode11 are absorbed (the renderer and the Unicode 11 widths are built in); other addons throw a clear error."
     },
     "Terminal.scrollToLine": {
       "status": "supported",
@@ -160,16 +160,16 @@
       "reason": "Engine cols; the last size after dispose."
     },
     "Terminal.dimensions": {
-      "status": "todo",
-      "reason": "Renderer dimensions; replaces the _core._renderService.dimensions workaround."
+      "status": "supported",
+      "reason": "CSS and device cell/canvas sizes from the WebGL2 renderer, undefined before open()."
     },
     "Terminal.modes": {
       "status": "supported",
       "reason": "A new object per read from the engine mode bits (X10 mouse included) and syncPending; reverseWraparoundMode and win32InputMode are always false."
     },
     "Terminal.unicode.activeVersion": {
-      "status": "todo",
-      "reason": "Always \"11\" (engine tables); setting another version throws."
+      "status": "supported",
+      "reason": "Always '11' (engine widths); setting another version throws."
     },
     "Terminal.focus": {
       "status": "todo",
@@ -245,8 +245,8 @@
       "reason": "Fired when the viewport top line changes after output or scrolling."
     },
     "Terminal.onRender": {
-      "status": "todo",
-      "reason": "Rows drawn by each frame."
+      "status": "supported",
+      "reason": "Fired after each frame with the redrawn viewport rows."
     },
     "Terminal.onCursorMove": {
       "status": "supported",
@@ -265,8 +265,8 @@
       "reason": "BEL after each parsed write."
     },
     "Terminal.onDimensionsChange": {
-      "status": "todo",
-      "reason": "Font option changes and renderer-reported changes (late fonts, devicePixelRatio)."
+      "status": "supported",
+      "reason": "Fired when the cell size changes (fonts loaded, devicePixelRatio, font options)."
     },
     "Terminal.onSelectionChange": {
       "status": "todo",
@@ -337,40 +337,44 @@
       "reason": "Engine DIM attribute; isBold, isItalic, isUnderline, isBlink, isInverse, isInvisible and isStrikethrough too."
     },
     "FitAddon.fit": {
-      "status": "todo",
-      "reason": "Built-in FitAddon export, and @xterm/addon-fit 0.12 works as is (it reads only public members)."
+      "status": "supported",
+      "reason": "Port of @xterm/addon-fit: resizes to the parent element."
     },
     "FitAddon.proposeDimensions": {
-      "status": "todo",
-      "reason": "Same formula as @xterm/addon-fit 0.12."
+      "status": "supported",
+      "reason": "Port of @xterm/addon-fit; undefined before open()."
     },
     "FitAddon.dispose": {
-      "status": "todo",
-      "reason": "As xterm.js."
+      "status": "supported",
+      "reason": "Detaches the addon from its terminal."
     },
     "FitAddon subclass (FixedGeometryFitAddon)": {
       "status": "todo",
       "reason": "super.fit/proposeDimensions work; its _core._renderService.dimensions read moves to terminal.dimensions."
     },
     "WebglAddon (load)": {
-      "status": "todo",
-      "reason": "Absorbed: the WebGL renderer is built in, the addon is never activated."
+      "status": "supported",
+      "reason": "Absorbed: the WebGL2 renderer is built in (one shared context per page).",
+      "exercisedBy": "new WebglAddon\\(\\)"
     },
     "WebglAddon.onContextLoss": {
       "status": "todo",
-      "reason": "Absorbed; never fires because the renderer restores a lost context itself."
+      "reason": "The real addon's own event; never fires because the addon is not activated (context loss is handled inside the renderer).",
+      "exercisedBy": "webgl\\.onContextLoss"
     },
     "WebglAddon.dispose": {
       "status": "todo",
-      "reason": "Absorbed; no-op (there is no DOM renderer to fall back to)."
+      "reason": "The real addon's own dispose; harmless because it was never activated.",
+      "exercisedBy": "webgl\\.dispose"
     },
     "WebglAddon.clearTextureAtlas": {
       "status": "todo",
-      "reason": "Absorbed; full redraw."
+      "reason": "No-op on the unactivated addon; the shared atlas is managed by the renderer."
     },
     "Unicode11Addon (load)": {
-      "status": "todo",
-      "reason": "Absorbed: activate() is run against a stand-in that only has unicode.register and must register version 11."
+      "status": "supported",
+      "reason": "Absorbed: the engine measures with the Unicode 11 tables.",
+      "exercisedBy": "new Unicode11Addon\\(\\)"
     },
     "SearchAddon.findNext/findPrevious/clearDecorations": {
       "status": "supported",
@@ -426,16 +430,19 @@
       "reason": "With the image addon."
     },
     "DOM .xterm": {
-      "status": "todo",
-      "reason": "Root element classes terminal xterm."
+      "status": "supported",
+      "reason": "Built by open().",
+      "exercisedBy": "\\.terminal\\.xterm|\\.xterm-screen"
     },
     "DOM .xterm-screen": {
-      "status": "todo",
-      "reason": "Holds the canvas, sized to it."
+      "status": "supported",
+      "reason": "Built by open(); sized to the canvas.",
+      "exercisedBy": "\\.xterm-screen"
     },
     "DOM .xterm-helpers": {
-      "status": "todo",
-      "reason": "Holds the textarea and the composition view."
+      "status": "supported",
+      "reason": "Built by open().",
+      "exercisedBy": "xterm-helpers"
     },
     "DOM .xterm-helper-textarea": {
       "status": "todo",
@@ -454,8 +461,9 @@
       "reason": "open() injects its own styles; drop the import."
     },
     "Element reparenting (park and re-append)": {
-      "status": "todo",
-      "reason": "The element can be moved; open() again also moves it."
+      "status": "supported",
+      "reason": "open() again with another parent moves the element; the renderer keeps drawing.",
+      "exercisedBy": "park and re-append"
     },
     "Synthetic mouse events on .xterm-screen": {
       "status": "todo",

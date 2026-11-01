@@ -248,11 +248,56 @@ impl Terminal {
         if crate::search::load(self, &addon) || is_unicode11_addon(&addon) {
             return Ok(());
         }
-        let name = get(&get(&addon, "constructor"), "name")
-            .as_string()
-            .unwrap_or_default();
+        let has = |key: &str| get(&addon, key).is_function();
+        // @xterm/addon-webgl: the WebGL renderer is built in and restores a lost context itself, so the addon is
+        // never activated (its own onContextLoss and dispose still work).
+        if has("onContextLoss") && has("clearTextureAtlas") {
+            return Ok(());
+        }
+        let message = if has("findNext") {
+            "oxtty/xterm: @xterm/addon-search is not supported; load the built-in SearchAddon from oxtty/xterm".to_string()
+        } else if has("serialize") {
+            "oxtty/xterm: @xterm/addon-serialize is not supported; use terminal.ansiSnapshot()"
+                .to_string()
+        } else {
+            let name = get(&get(&addon, "constructor"), "name")
+                .as_string()
+                .unwrap_or_default();
+            format!("oxtty/xterm: unsupported addon {name}; only the built-in FitAddon and SearchAddon, @xterm/addon-webgl and @xterm/addon-unicode11 can be loaded")
+        };
+        Err(js_sys::Error::new(&message).into())
+    }
+
+    /// xterm.js `term.unicode`: the engine measures with Unicode 11 widths only.
+    #[wasm_bindgen(getter)]
+    pub fn unicode(&self) -> Unicode {
+        Unicode
+    }
+}
+
+/// `term.unicode`.
+#[wasm_bindgen]
+pub struct Unicode;
+
+#[wasm_bindgen]
+impl Unicode {
+    #[wasm_bindgen(getter)]
+    pub fn versions(&self) -> Vec<String> {
+        vec!["11".into()]
+    }
+
+    #[wasm_bindgen(getter, js_name = activeVersion)]
+    pub fn active_version(&self) -> String {
+        "11".into()
+    }
+
+    #[wasm_bindgen(setter, js_name = activeVersion)]
+    pub fn set_active_version(&self, version: String) -> Result<(), JsValue> {
+        if version == "11" {
+            return Ok(());
+        }
         Err(js_sys::Error::new(&format!(
-            "oxtty/xterm: unsupported addon {name}; only the built-in FitAddon and SearchAddon and @xterm/addon-unicode11 can be loaded"
+            "oxtty/xterm: the engine uses Unicode 11 widths only, not \"{version}\""
         ))
         .into())
     }

@@ -182,7 +182,7 @@ test('options read back the xterm.js defaults', () => {
   t.dispose();
 });
 
-test('loadAddon absorbs unicode11 and webgl addons and rejects the rest', { todo: 'Terminal.loadAddon, Unicode11Addon (load), WebglAddon (load), FitAddon' }, () => {
+test('loadAddon absorbs unicode11 and webgl addons and rejects the rest', () => {
   const t = new m.Terminal();
   t.loadAddon(new Unicode11Addon());
   t.unicode.activeVersion = '11';

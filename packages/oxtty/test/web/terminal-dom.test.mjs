@@ -53,7 +53,7 @@ test('the opened terminal next to xterm.js', async (t) => {
       assert.equal(moved, true);
     });
 
-    await t.test('the screen has xterm.js\'s size for the same font, and dimensions report the cell', { todo: 'Terminal.dimensions, renderer' }, async () => {
+    await t.test('the screen has xterm.js\'s size for the same font, and dimensions report the cell', async () => {
       await setup();
       await frames();
       const sizes = await page.evaluate(() => window.made.map((term) => {
@@ -80,7 +80,7 @@ test('the opened terminal next to xterm.js', async (t) => {
       assert.deepEqual(states[0], [false, true, false]);
     });
 
-    await t.test('onRender reports the rows a write changed, like xterm.js', { todo: 'Terminal.onRender (renderer)' }, async () => {
+    await t.test('onRender reports the rows a write changed, like xterm.js', async () => {
       await setup();
       await frames();
       const rendered = await page.evaluate(async () => {
@@ -97,7 +97,7 @@ test('the opened terminal next to xterm.js', async (t) => {
       assert.deepEqual(rendered[0], rendered[1]);
     });
 
-    await t.test('a font size change fires onDimensionsChange with the new cell and resizes the screen', { todo: 'options.fontSize, Terminal.onDimensionsChange (renderer)' }, async () => {
+    await t.test('a font size change fires onDimensionsChange with the new cell and resizes the screen', async () => {
       await setup();
       await frames();
       const facts = await page.evaluate(() => {
@@ -114,7 +114,7 @@ test('the opened terminal next to xterm.js', async (t) => {
       assert.deepEqual(facts.screen, [facts.after.width * 20, facts.after.height * 4]);
     });
 
-    await t.test('FitAddon proposes the cells that fit the parent, minus the 14px scrollbar xterm.js keeps', { todo: 'FitAddon.fit, FitAddon.proposeDimensions, Terminal.dimensions' }, async () => {
+    await t.test('FitAddon proposes the cells that fit the parent, minus the 14px scrollbar xterm.js keeps', async () => {
       await setup();
       await frames();
       const facts = await page.evaluate(() => {
@@ -130,7 +130,7 @@ test('the opened terminal next to xterm.js', async (t) => {
       assert.deepEqual(facts.size, [facts.expected.cols, facts.expected.rows]);
     });
 
-    await t.test('coloured Hangul is drawn on the canvas and a cursor position request is answered', { todo: 'renderer (WebGL)' }, async () => {
+    await t.test('coloured Hangul is drawn on the canvas and a cursor position request is answered', async () => {
       await setup({ ...OPTIONS, theme: { background: '#000000' } });
       const facts = await page.evaluate(async () => {
         const [ox] = window.made;
