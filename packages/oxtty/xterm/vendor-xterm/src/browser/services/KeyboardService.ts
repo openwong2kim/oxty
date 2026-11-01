@@ -1,17 +1,19 @@
 // Borrowed by oxtty: xterm.js src/browser/services/KeyboardService.ts @ 08829c7eb6279dda2a9e86df901353a1a89858ca (npm @xterm/xterm 6.1.0-beta.336), MIT license — vendor-xterm/LICENSE
-// Verbatim except three imports, which use this tree's path aliases (they resolve to xterm/stubs)
+// Excerpt (original lines cut out as is, see the oxtty note below)
 /**
  * Copyright (c) 2025 The xterm.js authors. All rights reserved.
  * @license MIT
  */
 
+// oxtty excerpt: the whole file (lines 1-67) verbatim except the import block (lines 6-12), rewritten to this tree's
+// path-mapped specifiers (the services and Win32InputMode resolve to xterm/stubs).
 import { IKeyboardService } from 'browser/services/Services';
-import { evaluateKeyboardEvent } from '../../common/input/Keyboard';
-import { KittyKeyboard, KittyKeyboardEventType, KittyKeyboardFlags } from '../../common/input/KittyKeyboard';
+import { evaluateKeyboardEvent } from 'common/input/Keyboard';
+import { KittyKeyboard, KittyKeyboardEventType, KittyKeyboardFlags } from 'common/input/KittyKeyboard';
 import { Win32InputMode } from 'common/input/Win32InputMode';
-import { isMac } from '../../common/Platform';
+import { isMac } from 'common/Platform';
 import { ICoreService, IOptionsService } from 'common/services/Services';
-import { IKeyboardResult } from '../../common/Types';
+import { IKeyboardResult } from 'common/Types.keyboard';
 
 export class KeyboardService implements IKeyboardService {
   public serviceBrand: undefined;

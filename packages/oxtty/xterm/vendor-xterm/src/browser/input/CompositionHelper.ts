@@ -1,13 +1,15 @@
 // Borrowed by oxtty: xterm.js src/browser/input/CompositionHelper.ts @ 08829c7eb6279dda2a9e86df901353a1a89858ca (npm @xterm/xterm 6.1.0-beta.336), MIT license — vendor-xterm/LICENSE
-// Verbatim except the two service imports, which use this tree's path aliases (they resolve to xterm/stubs)
+// Excerpt (original lines cut out as is, see the oxtty note below)
 /**
  * Copyright (c) 2016 The xterm.js authors. All rights reserved.
  * @license MIT
  */
 
+// oxtty excerpt: the whole file (lines 1-284) verbatim except the import block (lines 6-8), rewritten to this tree's
+// path-mapped specifiers (the services resolve to xterm/stubs).
 import { IRenderService } from 'browser/services/Services';
 import { IBufferService, ICoreService, IOptionsService } from 'common/services/Services';
-import { C0 } from '../../common/data/EscapeSequences';
+import { C0 } from 'common/data/EscapeSequences';
 
 interface IPosition {
   start: number;

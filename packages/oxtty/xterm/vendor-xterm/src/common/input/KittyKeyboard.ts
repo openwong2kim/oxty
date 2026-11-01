@@ -1,5 +1,5 @@
 // Borrowed by oxtty: xterm.js src/common/input/KittyKeyboard.ts @ 08829c7eb6279dda2a9e86df901353a1a89858ca (npm @xterm/xterm 6.1.0-beta.336), MIT license — vendor-xterm/LICENSE
-// Verbatim (unmodified)
+// Excerpt (original lines cut out as is, see the oxtty note below)
 /**
  * Copyright (c) 2025 The xterm.js authors. All rights reserved.
  * @license MIT
@@ -8,8 +8,10 @@
  * @see https://sw.kovidgoyal.net/kitty/keyboard-protocol/
  */
 
-import { IKeyboardEvent, IKeyboardResult, KeyboardResultType } from '../Types';
-import { C0 } from '../data/EscapeSequences';
+// oxtty excerpt: the whole file (lines 1-526) verbatim except the import block (lines 9-10), rewritten to this tree's
+// path-mapped specifiers.
+import { IKeyboardEvent, IKeyboardResult, KeyboardResultType } from 'common/Types.keyboard';
+import { C0 } from 'common/data/EscapeSequences';
 
 /**
  * Kitty keyboard protocol enhancement flags (bitfield).

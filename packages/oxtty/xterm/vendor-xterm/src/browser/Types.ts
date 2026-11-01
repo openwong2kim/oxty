@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-// oxtty excerpt: only CustomKeyEventHandler, ICompositionHelper, IBrowser, IColorSet, ReadonlyColorSet, IColorContrastCache and DEFAULT_ANSI_COLORS, cut out verbatim (lines 33, 38-56, 58-88, 180-226).
+// oxtty excerpt: only IColorSet, ReadonlyColorSet, IColorContrastCache and DEFAULT_ANSI_COLORS, cut out verbatim (lines 58-88, 180-226).
 // ITerminal is a stub holding only the members SelectionRenderModel and CharAtlasCache use, instead of the xterm.js internal terminal (dozens of members).
 import { IColor } from 'common/Types';
 import { channels, css } from 'common/Color';
@@ -16,28 +16,6 @@ export interface ITerminal {
   rows: number;
   buffers: { active: { ydisp: number } };
   unicodeService: IUnicodeService;
-}
-
-export type CustomKeyEventHandler = (event: KeyboardEvent) => boolean;
-
-export interface ICompositionHelper {
-  readonly isComposing: boolean;
-  compositionstart(): void;
-  compositionupdate(ev: CompositionEvent): void;
-  compositionend(): void;
-  updateCompositionElements(dontRecurse?: boolean): void;
-  keydown(ev: KeyboardEvent): boolean;
-}
-
-export interface IBrowser {
-  isNode: boolean;
-  userAgent: string;
-  platform: string;
-  isFirefox: boolean;
-  isMac: boolean;
-  isIpad: boolean;
-  isIphone: boolean;
-  isWindows: boolean;
 }
 
 export interface IColorSet {

@@ -2,7 +2,7 @@
 // Interfaces keeping only the members the copied renderer and input parts actually call. Implementations are in
 // src/renderer/services.ts and src/input/services.ts.
 import { ReadonlyColorSet } from 'browser/Types';
-import { IKeyboardResult } from 'common/Types';
+import { IKeyboardResult } from 'common/Types.keyboard';
 import type { Event } from 'vs/base/common/event';
 
 export interface IThemeService {
