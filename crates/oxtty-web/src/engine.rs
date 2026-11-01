@@ -86,8 +86,9 @@ extern "C" {
     /// `{ backend?: 'conpty' | 'winpty', buildNumber?: number }` or `null`: xterm.js 6.1's Windows PTY rules.
     #[wasm_bindgen(method, catch, js_name = setWindowsPty)]
     pub fn set_windows_pty(this: &Engine, pty: &JsValue) -> Result<(), JsValue>;
+    /// `options` is `{ scrollback?: number, excludeModes?: boolean }` or `undefined`.
     #[wasm_bindgen(method, catch, js_name = ansiSnapshot)]
-    pub fn ansi_snapshot(this: &Engine) -> Result<JsValue, JsValue>;
+    pub fn ansi_snapshot(this: &Engine, options: &JsValue) -> Result<JsValue, JsValue>;
     /// `{ first, rows, text, cells }`: the logical line row `line` is on, as search reads it; `null` outside the
     /// buffer. `cells` maps each UTF-16 unit of `text` to its cell (`row * cols + col` from `first`, bit 31 wide).
     #[wasm_bindgen(method, catch, js_name = searchLine)]

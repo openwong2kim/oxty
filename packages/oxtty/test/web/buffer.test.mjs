@@ -5,6 +5,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import xtermHeadless from '@xterm/headless';
+import serializeAddon from '@xterm/addon-serialize';
 import * as m from '../../dist/xterm.js';
 
 before(async () => {
@@ -137,6 +138,51 @@ test('scrollPages scrolls by screens less one row and ansiSnapshot rebuilds the 
   const x = new xtermHeadless.Terminal({ cols: 10, rows: 3, scrollback: 50, allowProposedApi: true });
   await new Promise((resolve) => x.write(snapshot.payload, resolve));
   assert.equal(x.buffer.active.getLine(11).translateToString(true).trimEnd(), 'line 11');
+  x.dispose();
+  t.dispose();
+});
+
+test('ansiSnapshot({ scrollback: 0, excludeModes: true }) replays like addon-serialize with the same options', async () => {
+  const output = [
+    Array.from({ length: 8 }, (_, i) => `old ${i}`).join('\r\n'),
+    '\r\n\x1b[1;31mred\x1b[0m \x1b[48;5;22m한글\x1b[0m \x1b[4;38;2;1;2;3mrgb\x1b[0m',
+    '\x1b[?1h\x1b[?2004h\x1b[?1000h\x1b[?25l\x1b[2;5Hmid\x1b[3;1H\x1b[7mlast\x1b[0m',
+  ].join('');
+  const options = { cols: 16, rows: 4, scrollback: 50, allowProposedApi: true };
+  const t = new m.Terminal(options);
+  const x = new xtermHeadless.Terminal(options);
+  const serialize = new serializeAddon.SerializeAddon();
+  x.loadAddon(serialize);
+  await write(t, output);
+  await new Promise((resolve) => x.write(output, resolve));
+  const snapshot = t.ansiSnapshot({ scrollback: 0, excludeModes: true });
+  assert.equal(snapshot.ok, true);
+  /** What a fresh xterm.js shows after `data`: rows with their cells' colours and styles, cursor and modes. */
+  const replay = async (data) => {
+    const r = new xtermHeadless.Terminal(options);
+    await new Promise((resolve) => r.write(data, resolve));
+    const b = r.buffer.active;
+    const rows = [];
+    for (let y = 0; y < b.length; y++) {
+      const line = b.getLine(y);
+      const cells = [];
+      for (let col = 0; col < line.length; col++) {
+        const c = line.getCell(col);
+        cells.push([c.getChars(), c.getWidth(), c.getFgColorMode(), c.getFgColor(), c.getBgColorMode(), c.getBgColor(), c.isBold(), c.isUnderline(), c.isInverse()]);
+      }
+      rows.push(cells);
+    }
+    const state = { length: b.length, cursor: [b.cursorX, b.cursorY], modes: r.modes, rows };
+    r.dispose();
+    return state;
+  };
+  const ox = await replay(snapshot.payload);
+  const xt = await replay(serialize.serialize({ scrollback: 0, excludeModes: true }));
+  assert.deepEqual(ox, xt);
+  assert.equal(ox.length, 4, 'the screen alone');
+  assert.equal(ox.modes.applicationCursorKeysMode, false, 'no modes');
+  // Without options, everything comes back as before.
+  assert.equal((await replay(t.ansiSnapshot().payload)).length, 9);
   x.dispose();
   t.dispose();
 });
