@@ -107,7 +107,7 @@ fn set_out(bytes: Vec<u8>) -> u32 {
 /// ABI version of these exports; bump on any incompatible change.
 #[no_mangle]
 pub extern "C" fn oxtty_abi() -> u32 {
-    7
+    8
 }
 
 #[no_mangle]
@@ -384,6 +384,11 @@ pub extern "C" fn oxtty_take_title(h: u32) -> i32 {
 #[no_mangle]
 pub extern "C" fn oxtty_take_bells(h: u32) -> u32 {
     with(h, 0, |t| t.take_bells())
+}
+
+#[no_mangle]
+pub extern "C" fn oxtty_take_resets(h: u32) -> u32 {
+    with(h, 0, |t| t.take_resets())
 }
 
 #[no_mangle]

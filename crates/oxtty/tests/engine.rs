@@ -779,3 +779,29 @@ fn trimmed_lines_count_what_leaves_the_top_of_the_scrollback() {
         );
     }
 }
+
+#[test]
+fn full_resets_are_reported_once() {
+    let mut t = term();
+    t.feed(b"a\x1bcb\x1bc");
+    assert_eq!(t.take_resets(), 2);
+    assert_eq!(t.take_resets(), 0);
+}
+
+#[test]
+fn a_wide_char_pushed_to_the_next_row_leaves_a_marked_blank() {
+    let mut t = Engine::new(5, 3, 10);
+    t.feed("abcd한".as_bytes());
+    let mut cells = Vec::new();
+    t.row_cells(0, &mut cells);
+    assert_eq!(cells[4].ch, ' ');
+    assert_ne!(cells[4].attrs & attr::LEADING_WIDE_SPACER, 0);
+    assert_eq!(cells[3].attrs & attr::LEADING_WIDE_SPACER, 0);
+    t.feed(b"\r\n    x");
+    t.row_cells(2, &mut cells);
+    assert_eq!(
+        cells[0].attrs & attr::LEADING_WIDE_SPACER,
+        0,
+        "written spaces are text"
+    );
+}

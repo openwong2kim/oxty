@@ -345,6 +345,9 @@ pub struct Term<T> {
     /// The stack for the keyboard modes.
     keyboard_mode_stack: Vec<KeyboardModes>,
 
+    /// oxtty: full resets (RIS) so far.
+    resets: u64,
+
     /// Currently inactive keyboard mode stack.
     inactive_keyboard_mode_stack: Vec<KeyboardModes>,
 
@@ -518,6 +521,7 @@ impl<T> Term<T> {
             tabs,
             inactive_keyboard_mode_stack: Default::default(),
             keyboard_mode_stack: Default::default(),
+            resets: 0,
             active_charset: Default::default(),
             vi_mode_cursor: Default::default(),
             cursor_style: Default::default(),
@@ -1181,6 +1185,11 @@ impl<T> Term<T> {
     /// oxtty: the modes a reset of SGR encoding `mode` clears (both SGR encodings with `xterm_mouse_modes`).
     fn mouse_encoding_reset_mask(&self, mode: TermMode) -> TermMode {
         if self.config.xterm_mouse_modes { TermMode::SGR_MOUSE | TermMode::SGR_PIXELS_MOUSE } else { mode }
+    }
+
+    /// oxtty: full resets (RIS, `ESC c`) so far, so a host can drop its own state (selection) with the screen.
+    pub fn resets(&self) -> u64 {
+        self.resets
     }
 
     /// oxtty: whether the kitty keyboard protocol is enabled (see `set_kitty_keyboard`).
@@ -2227,6 +2236,7 @@ impl<T: EventListener> Handler for Term<T> {
     /// Reset all important fields in the term struct.
     #[inline]
     fn reset_state(&mut self) {
+        self.resets += 1;
         if self.mode.contains(TermMode::ALT_SCREEN) {
             mem::swap(&mut self.grid, &mut self.inactive_grid);
         }

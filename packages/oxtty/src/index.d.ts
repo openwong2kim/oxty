@@ -119,6 +119,8 @@ export class Terminal {
   /** New window title, or null if unchanged ("" = reset). */
   takeTitle(): string | null;
   takeBells(): number;
+  /** Full resets (RIS, `ESC c`) the program sent since the last call, so the host can drop its own screen state (selection). */
+  takeResets(): number;
   /** Lets the program read and/or write the host clipboards with OSC 52 (both off by default). */
   setClipboardAccess(access?: { read?: boolean; write?: boolean }): void;
   /** Oldest text the program asked to copy, or null. */
@@ -143,6 +145,8 @@ export declare const Attr: Readonly<{
   DOUBLE_UNDERLINE: number; CURLY_UNDERLINE: number; DOTTED_UNDERLINE: number; DASHED_UNDERLINE: number;
   INVERSE: number; HIDDEN: number; STRIKEOUT: number; BLINK: number;
   WIDE: number; WIDE_SPACER: number; COMBINING: number; UNDERLINE_COLOR: number; HYPERLINK: number;
+  /** Blank end of a wrapped row whose wide character moved to the next row; not text. */
+  LEADING_WIDE_SPACER: number;
 }>;
 
 export declare const Mode: Readonly<{

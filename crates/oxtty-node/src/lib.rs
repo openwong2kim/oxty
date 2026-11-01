@@ -246,6 +246,12 @@ impl Terminal {
         self.inner.take_bells()
     }
 
+    /// Full resets (RIS) the program sent since the last call.
+    #[napi]
+    pub fn take_resets(&mut self) -> u32 {
+        self.inner.take_resets()
+    }
+
     /// Lets the program read and/or write the host clipboards with OSC 52 (both off by default).
     #[napi]
     pub fn set_clipboard_access(&mut self, read: bool, write: bool) {

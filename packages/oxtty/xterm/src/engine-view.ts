@@ -11,6 +11,8 @@ export interface Events {
   /** New title, or null if unchanged: `onTitleChange`. */
   title: string | null;
   bells: number;
+  /** Full resets (RIS) the program sent: drop host state such as the selection. */
+  resets: number;
   clipboardWrites: { selection: 'c' | 'p'; text: string }[];
   clipboardReads: ('c' | 'p')[];
 }
@@ -63,7 +65,7 @@ export class LocalEngineView implements EngineView {
 
   public takeEvents(): Events {
     const e = this._engine;
-    const events: Events = { replies: e.takeReplies(), title: e.takeTitle(), bells: e.takeBells(), clipboardWrites: [], clipboardReads: [] };
+    const events: Events = { replies: e.takeReplies(), title: e.takeTitle(), bells: e.takeBells(), resets: e.takeResets(), clipboardWrites: [], clipboardReads: [] };
     for (let w; (w = e.takeClipboardWrite());) events.clipboardWrites.push(w);
     for (let r; (r = e.takeClipboardRead());) events.clipboardReads.push(r);
     return events;
