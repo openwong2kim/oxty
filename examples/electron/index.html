@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'">
+<title>oxtty</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #1e1e1e; }
+  #terminal { position: absolute; inset: 8px; }
+</style>
+<div id="terminal"></div>
+<script type="module">
+  import { init, Terminal, FitAddon } from './node_modules/oxtty/dist/xterm.js';
+
+  await init(await window.pty.wasm());
+  const term = new Terminal({ fontFamily: 'Menlo, Consolas, monospace', fontSize: 14, theme: { background: '#1e1e1e' } });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('terminal'));
+  fit.fit();
+
+  window.pty.onData(data => term.write(data));
+  window.pty.resize(term.cols, term.rows);
+  term.onData(data => window.pty.write(data));
+  term.onResize(({ cols, rows }) => window.pty.resize(cols, rows));
+  new ResizeObserver(() => fit.fit()).observe(document.getElementById('terminal'));
+  term.focus();
+</script>

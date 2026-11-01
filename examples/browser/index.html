@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>oxtty</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { height: 100%; margin: 0; background: #1e1e1e; }
+  #terminal { position: absolute; inset: 8px; }
+</style>
+<div id="terminal"></div>
+<script type="module">
+  import { init, Terminal, FitAddon } from '/oxtty/xterm.js';
+
+  await init(); // loads oxtty.wasm next to xterm.js; the only step xterm.js does not have
+  const term = new Terminal({ fontFamily: 'Menlo, Consolas, monospace', fontSize: 14, theme: { background: '#1e1e1e' } });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('terminal'));
+  fit.fit();
+
+  const socket = new WebSocket(`ws://${location.host}`);
+  socket.binaryType = 'arraybuffer';
+  const send = message => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(message));
+  socket.onopen = () => send({ resize: { cols: term.cols, rows: term.rows } });
+  socket.onmessage = event => term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
+  term.onData(input => send({ input }));
+  term.onResize(resize => send({ resize }));
+  new ResizeObserver(() => fit.fit()).observe(document.getElementById('terminal'));
+  term.focus();
+</script>

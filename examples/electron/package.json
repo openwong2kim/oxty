@@ -1,0 +1,16 @@
+{
+  "name": "oxtty-example-electron",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "postinstall": "node ../fix-node-pty.cjs",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "oxtty": "file:../../packages/oxtty"
+  },
+  "devDependencies": {
+    "electron": "^42.0.0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "oxtty-example-browser",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node ../fix-node-pty.cjs",
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "oxtty": "file:../../packages/oxtty",
+    "ws": "^8.18.0"
+  }
+}

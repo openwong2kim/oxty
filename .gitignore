@@ -2,3 +2,4 @@ target/
 node_modules/
 packages/oxtty/dist/
 *.node
+examples/*/package-lock.json
