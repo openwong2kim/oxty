@@ -1,11 +1,48 @@
 # oxtty
 
-Terminal emulator engine in Rust, compiled to WebAssembly (~235 KB, ~83 KB gzipped, no
-dependencies). Feed it PTY output; it keeps the screen and tells your renderer
-which rows changed.
+A terminal engine in Rust, compiled to WebAssembly, plus `oxtty/xterm`: the
+xterm.js 6.x `Terminal` API over that engine, with a WebGL2 renderer, also in
+Rust. Built to keep memory low with many terminals open: all panes on a page
+share one engine module, one WebGL2 context and one glyph atlas.
+
+**Status: 0.0.1, experimental, not published to npm yet.**
+
+## Install
+
+Until it is published, build it from the repository (Rust, the `wasm-bindgen`
+CLI and Node ≥ 18):
+
+```sh
+git clone https://github.com/openwong2kim/oxtty && cd oxtty
+bash scripts/build-wasm.sh && bash scripts/build-web.sh
+npm install ./packages/oxtty    # from your app
+```
+
+## `oxtty/xterm`: the xterm.js API
 
 ```js
-import { init, Terminal, Attr, decodeColor } from 'oxtty';
+import { init, Terminal, FitAddon } from 'oxtty/xterm';
+
+await init();                    // once per page: loads oxtty.wasm and xterm_web_bg.wasm
+const term = new Terminal({ fontFamily: 'Menlo, monospace', fontSize: 14 });
+const fit = new FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('terminal'));
+fit.fit();
+pty.onData((data) => term.write(data));
+term.onData((data) => pty.write(data));
+```
+
+Coming from xterm.js: `await init()` once, import `FitAddon`, `SearchAddon`,
+`WebLinksAddon`, `ImageAddon` and `WebglAddon` from `oxtty/xterm` instead of
+`@xterm/addon-*`, and drop the `xterm.css` import. `loadAddon` absorbs
+`@xterm/addon-webgl`, `@xterm/addon-unicode11` and `@xterm/addon-image`, and
+throws for other addons. WebGL2 is required to draw. Browser only.
+
+## `oxtty`: the engine, your own renderer
+
+```js
+import { init, Terminal } from 'oxtty';
 
 await init();
 const term = new Terminal({ cols: 80, rows: 24, scrollback: 5000 });
@@ -17,15 +54,12 @@ term.takeDamage();     // { full: true, lines: [] } → then only changed rows
 term.takeReplies();    // bytes to write back to the PTY
 ```
 
-- Visible rows are `0..rows`; scrollback is `-1` (newest) to `-historyLength`.
-- Works in browsers, bundlers (Vite, webpack) and Node ≥ 18.
-- Synchronized output (`CSI ? 2026 h`) is applied at once, as in xterm.js;
-  `syncPending()` tells a renderer to hold its frames until the program ends
-  the update, or `syncTimeoutMs` (default 1000, as xterm.js) ends it with an `onSyncFlush`
-  callback.
+Visible rows are `0..rows`; scrollback is `-1` (newest) to `-historyLength`.
+Works in browsers, bundlers (Vite, webpack) and Node ≥ 18, with no
+dependencies.
 
-**Status: 0.0.1, experimental.** An xterm.js-compatible front end is the next
-milestone. Docs, Rust crate and roadmap: https://github.com/openwong2kim/oxtty
+The xterm.js API support table, known differences, measurements and the Rust
+crate: https://github.com/openwong2kim/oxtty
 
-License: Apache-2.0. Includes `alacritty_terminal` (Apache-2.0) and the
-xterm.js Unicode 11 width table (MIT).
+License: Apache-2.0. Includes `alacritty_terminal` (Apache-2.0) and code ported
+from xterm.js and node-sixel (MIT); see `THIRD_PARTY_NOTICES.md`.

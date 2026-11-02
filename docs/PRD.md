@@ -2,11 +2,15 @@
 
 | Item | Details |
 | --- | --- |
-| Document version | v0.4 |
-| Written | 2026-10-31 (v0.1·v0.2·v0.3), 2026-11-01 (v0.4) |
+| Document version | v0.5 |
+| Written | 2026-10-31 (v0.1·v0.2·v0.3), 2026-11-01 (v0.4), 2026-11-02 (v0.5) |
 | Repository | github.com/openwong2kim/oxtty (private) |
 | Current release | 0.0.1 — engine core, wasm, N-API, tests (not published to registries) |
 | First customer | wmux |
+
+### v0.5 change summary
+
+- **Status sync with the code (2026-11-02)**: M2 addons done (search with its matching in JS, serialize as `ansiSnapshot`, images in Rust) and the API checklist complete with the README support table; graphics non-goal narrowed to kitty graphics; snapshot, WebGL context and size rows brought up to date; the license row names the ported xterm.js input encoders.
 
 ### v0.4 change summary
 
@@ -93,7 +97,7 @@ xterm.js splits into an **engine layer** (`common`: bytes → screen state) and 
 - **Writing a VT parser from scratch** — use the Alacritty fork (§5 D1).
 - **Forking all of xterm.js** — the screen layer borrows only the parts it needs (§5 D3).
 - **Compatibility with the original xterm (X11, C)** — the reference is xterm.js behavior.
-- **Graphics protocols before 1.0** — sixel and kitty graphics come after 1.0.
+- **Kitty graphics before 1.0** — it comes after 1.0. Sixel and the iTerm2 inline image protocol are in M2 (v0.4 decision), because wmux uses `@xterm/addon-image`.
 - **PTY and process management inside the engine** — the engine only receives bytes. If a PTY becomes necessary, it goes in a separate crate, `oxtty-pty`.
 
 ---
@@ -216,9 +220,9 @@ xterm.js splits into an **engine layer** (`common`: bytes → screen state) and 
 | Requirement | Acceptance criteria |
 | --- | --- |
 | `oxtty/xterm`: the borrowed WebGL renderer draws oxtty rows (D3) | Updates only changed lines, recovers from WebGL context loss |
-| API checklist: `new Terminal(opts)`, `open`, `write`, `onData`, `onBinary`, `onResize`, `onTitleChange`, `onBell`, `resize`, `buffer.active.getLine().translateToString()`, `loadAddon`, `dispose` | 100% of the checklist + a support scope table published in the README |
+| ✅ API checklist: `new Terminal(opts)`, `open`, `write`, `onData`, `onBinary`, `onResize`, `onTitleChange`, `onBell`, `resize`, `buffer.active.getLine().translateToString()`, `loadAddon`, `dispose` | 100% of the checklist + a support scope table published in the README — [api-checklist.json](../packages/oxtty/test/web/api-checklist.json) (every xterm.js member wmux uses): 104 supported, 11 not planned with the reason, 0 left (2026-11-02); `api-checklist.test.mjs` fails if a supported member is missing from the `.d.ts` or untested. The README table is built from it |
 | Key input: `Keyboard.ts` and the keydown/keypress/input arbitration of xterm.js `CoreBrowserTerminal` (`_keyDown`, `_keyPress`, `_inputEvent`) borrowed verbatim, reading oxtty mode values; `attachCustomKeyEventHandler`, `paste()` (bracketed, CRLF→CR), focus events, wheel (scroll the view / arrow keys on the alternate screen with alternate scroll / mouse reports). The kitty keyboard protocol stays off | Bytes on `onData` match xterm.js for the same CDP key events (key × modifier × mode), at the DOM level |
-| Replacing wmux addons: fit and webgl built in, unicode11 is the engine table, search and serialize call oxtty directly, web-links is OSC 8 + regex detection | Every feature wmux uses works (image is a §10 open question) |
+| ✅ Replacing wmux addons: fit and webgl built in, unicode11 is the engine table, search and serialize call oxtty directly, web-links is OSC 8 + regex detection | Every feature wmux uses works — fit, webgl and unicode11 built in (`@xterm/addon-webgl` and `@xterm/addon-unicode11` objects absorbed by `loadAddon`); search is a Rust port of `@xterm/addon-search` over the engine's `searchLine`, with plain-text and regex matching in JS (string methods, `RegExp`), so no matcher is compiled into the wasm; serialize is `term.ansiSnapshot({ scrollback, excludeModes })`, compared with the addon in `buffer.test.mjs`; web links are the built-in `WebLinksAddon` and OSC 8 links. **Images in Rust** (v0.4 decision): sixel and the iTerm2 inline image protocol (OSC 1337) through the built-in `ImageAddon` or an absorbed `@xterm/addon-image`, sixel decoded in Rust, other formats by the browser, tiles in engine cells, page-wide storage; compared with the real addon in `image.test.mjs`. Not supported: kitty graphics, QOI, `getImageAtBufferCell` |
 | Hangul IME composition | Characters being composed appear at the cursor position, and only committed characters go to the PTY. wmux's existing IME and CJK regression tests pass |
 | Selection UI: drag selection and copy (computation moves to Rust in M4); the engine reports trimmed scrollback lines so a selection follows its text; selection clears on alternate-screen switch | Word and line selection cover the same ranges as xterm.js |
 | Engine output wiring: replies → `onData`, title → `onTitleChange`, bells → `onBell`, OSC 52 and colour queries through host options | `ESC[6n` gives the CPR bytes on `onData`; DA1 matches xterm.js |
@@ -256,7 +260,7 @@ M2 runs on key input code borrowed from xterm.js. M3 moves encoding to Rust.
 ### After 1.0
 
 - Native renderer (wgpu + cosmic-text) — when wmux moves off Electron
-- Graphics protocols (kitty graphics, sixel)
+- Kitty graphics (sixel and iTerm2 images are in M2)
 - Shell integration (OSC 133 prompt regions)
 
 ---
@@ -269,11 +273,11 @@ M2 runs on key input code borrowed from xterm.js. M3 moves encoding to Rust.
 | Unicode | Character widths use the same table as the xterm.js Unicode 11 provider |
 | Determinism | No clock, threads or randomness in the engine. Same input → same screen |
 | Stability | 0 panics in wasm (verified by fuzzing); invalid input is ignored and processing continues |
-| Size | Engine wasm 340KB or less (302KB on 2026-11-01, with search, markers and the vte fork; raised from 300KB because one instance serves every pane on a page, so the code is paid once, not per terminal); front-end wasm (`oxtty/xterm`) 800KB or less (557KB on 2026-11-01 with the renderer, input, search, parser hooks, accessibility and scrollbar; raised from 600KB for selection, links and images on the same one-instance-per-page reasoning — `opt-level = "z"` would save 13% but slows the per-frame renderer code), checked by `scripts/build-web.sh`; both also by `test/web/size.test.mjs` |
+| Size | Engine wasm 340KB or less (302KB on 2026-11-01, with search, markers and the vte fork; 307,707 bytes, 111,732 gzipped on 2026-11-02; raised from 300KB because one instance serves every pane on a page, so the code is paid once, not per terminal); front-end wasm (`oxtty/xterm`) 800KB or less, 300KB gzipped (557KB on 2026-11-01 with the renderer, input, search, parser hooks, accessibility and scrollbar; 727,245 bytes, 274,609 gzipped on 2026-11-02 with selection, links and images; raised from 600KB for selection, links and images on the same one-instance-per-page reasoning — `opt-level = "z"` would save 13% but slows the per-frame renderer code), checked by `scripts/build-web.sh`; both also by `test/web/size.test.mjs` |
 | Performance | `write`→frame end-to-end throughput at or above xterm.js on the same corpus. The target value is set after the M1 baseline measurement |
 | Memory | Publish the scrollback memory caused by the cell size (24B) in the README; consider compressed storage before 1.0 (D6) |
 | Platforms | Native on Windows, macOS and Linux, modern browsers, Node 18 or later |
-| License | oxtty code is Apache-2.0 (owner decision on 2026-10-31, dual MIT dropped). The embedded `vt` module (Alacritty fork) is also Apache-2.0, and the bundled Unicode 11 table is xterm.js MIT (`LICENSE-XTERM`) — the crate and npm declare `Apache-2.0 AND MIT`, reflected in NOTICE. Borrowed xterm.js modules have their origin and commit recorded in `THIRD_PARTY_NOTICES.md`. GPL code is only consulted, never copied |
+| License | oxtty code is Apache-2.0 (owner decision on 2026-10-31, dual MIT dropped). The embedded `vt` module (Alacritty fork) is also Apache-2.0, and the bundled Unicode 11 table and the input encoders (`crates/oxtty/src/input`: keyboard, kitty keyboard, mouse, paste and focus, ported from xterm.js 6.1.0-beta.336) are xterm.js MIT (`LICENSE-XTERM`) — the crate and npm declare `Apache-2.0 AND MIT`, reflected in NOTICE. The front end's ports of xterm.js and its addons (renderer, fit, input handling, selection, links, search, accessibility, scrollbar, image addon) and of the node-sixel decoder (MIT) have their origin and commit recorded in `NOTICE.md` and `packages/oxtty/THIRD_PARTY_NOTICES.md`, and each file names its source lines. GPL code is only consulted, never copied |
 
 ---
 
@@ -295,10 +299,10 @@ M2 runs on key input code borrowed from xterm.js. M3 moves encoding to Rust.
 | --- | --- | --- |
 | Too much scope in the in-house front end (implementing selection UI and accessibility ourselves) | M2 delay | Borrowing the rendering is confirmed by the spike (D3). Selection, IME, key input, links, accessibility, context loss recovery, DPR changes and ligatures are not yet validated |
 | Uneven widths in the Hangul fallback font | On the spike screen, "안 녕 하 세 요" spreads apart while "입니다" sticks together | Compare font fallback and glyph width handling against xterm.js in M2 |
-| One WebGL2 context per pane (M2 eng review) | Chrome keeps about 16 active contexts; past that the oldest panes lose theirs, and naive recovery can make panes evict each other in a loop | 0.2 keeps one context per pane: recovery waits for `webglcontextrestored`, then recreates the canvas under a throttle. The limit goes in the README support table. Sharing one context across panes is revisited after wmux dogfooding |
+| ✅ Resolved — one WebGL2 context per pane (M2 eng review) | Chrome keeps about 16 active contexts; past that the oldest panes lose theirs, and naive recovery can make panes evict each other in a loop | The Rust front end shares one WebGL2 context and one glyph atlas per page (v0.4, `crates/oxtty-web/src/render/gpu.rs`): a lost context waits for `webglcontextrestored`, then a new one is made under a back-off throttle, and every pane redraws |
 | npm versions cannot be reused (M2 eng review) | A broken 0.2.0 stays published | Publish `0.2.0-beta.N` under the `next` tag first and move to `latest` after wmux dogfooding |
 | ✅ Resolved — snapshots reflect the engine's synchronized updates (code review 2026-10-31) | Calling `ansiSnapshot()` on the engine a renderer draws from showed half-drawn frames, and when an ESU was split across a snapshot boundary, synchronization did not end until the timeout | A snapshot taken during sync carries `CSI ? 2026 h` before the raw tail, so the receiver holds its frames in the same update. (Since 2026-11-02 the engine applies synchronized output at once, as xterm.js does, instead of holding the bytes in its vte fork; only frames wait.) Snapshots do not change the engine (`&self`). Pinned by a round-trip test at every split point |
-| State snapshots do not carry (code review) | Character sets (ESC ( 0, SO/SI), the DECSC saved cursor, tab stops, cursor shape, OSC 8 links and the mark on a blank a wrapped wide char left (`LEADING_WIDE_SPACER`) disappear in the restored terminal, so later output differs | Stated in the README. Rejecting based on engine state or carrying it in the serialization is follow-up work. None of the 91 fixtures contain these sequences |
+| State snapshots do not carry (code review) | Character sets (ESC ( 0, SO/SI), the DECSC saved cursor, tab stops, cursor shape and the mark on a blank a wrapped wide char left (`LEADING_WIDE_SPACER`; it comes back as an erased cell, and xterm.js has no such mark) disappear in the restored terminal, so later output differs. OSC 8 links and typed spaces (`Attr.TYPED_SPACE`) are carried (2026-11-02) | Stated in the README. Rejecting based on engine state or carrying it in the serialization is follow-up work. None of the 91 fixtures contain these sequences |
 | Cases where the snapshot tail scanner differs from vte (code review, engine worker) | After ESC with C0/DEL, BEL inside DCS, or an incomplete multibyte sequence right after ESC, the tail is lost or cut incorrectly (same behavior as the wmux tracker) | Attach reproduction cases and fix as follow-up |
 | Snapshot performance (code review) | A new SGR string is built for every cell, so 10k history × 200 columns means 2 million allocations | Measure in the M1 performance baseline, then replace with a comparison against the previous cell's attributes |
 | Borrowed xterm.js modules miss upstream fixes | IME and rendering bugs linger | Record the list of borrowed modules and their source commits, and check upstream release notes every quarter |
@@ -328,7 +332,7 @@ M2 runs on key input code borrowed from xterm.js. M3 moves encoding to Rust.
 
 ### 10.2 Open questions
 
-1. **Where wmux uses `@xterm/addon-image`** — graphics protocols before 1.0 are a non-goal, but wmux uses the image addon. In M2, keep just that feature on the xterm.js path, or drop the feature?
+1. ~~**Where wmux uses `@xterm/addon-image`**~~ — answered in v0.4: sixel and iTerm2 images are implemented in Rust (M2).
 2. **Accessibility level** — how far the in-house front end goes with screen reader support (including whether to borrow xterm.js `AccessibilityManager`)
 3. **Environments without WebGL** — whether a DOM renderer fallback path is needed (wmux assumes WebGL)
 
